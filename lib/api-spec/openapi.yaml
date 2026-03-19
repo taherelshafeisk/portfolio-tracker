@@ -1,15 +1,24 @@
 openapi: 3.1.0
 info:
-  # Do not change the title, if the title changes, the import paths will be broken
   title: Api
   version: 0.1.0
-  description: API specification
+  description: Portfolio Tracker API specification
 servers:
   - url: /api
     description: Base API path
 tags:
   - name: health
     description: Health operations
+  - name: accounts
+    description: Trading account operations
+  - name: positions
+    description: Position/holding operations
+  - name: activities
+    description: Trade activity operations
+  - name: market
+    description: Market data operations
+  - name: anthropic
+    description: Anthropic AI chat operations
 paths:
   /healthz:
     get:
@@ -24,6 +33,467 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/HealthStatus"
+
+  /accounts:
+    get:
+      operationId: listAccounts
+      tags: [accounts]
+      summary: List all trading accounts
+      responses:
+        "200":
+          description: List of accounts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Account"
+    post:
+      operationId: createAccount
+      tags: [accounts]
+      summary: Create a new trading account
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAccountBody"
+      responses:
+        "201":
+          description: Created account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+
+  /accounts/{id}:
+    get:
+      operationId: getAccount
+      tags: [accounts]
+      summary: Get account details
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Account details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+    put:
+      operationId: updateAccount
+      tags: [accounts]
+      summary: Update account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAccountBody"
+      responses:
+        "200":
+          description: Updated account
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Account"
+    delete:
+      operationId: deleteAccount
+      tags: [accounts]
+      summary: Delete account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /accounts/{id}/positions:
+    get:
+      operationId: listAccountPositions
+      tags: [positions]
+      summary: List positions for an account
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of positions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Position"
+
+  /positions:
+    post:
+      operationId: createPosition
+      tags: [positions]
+      summary: Create a new position
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreatePositionBody"
+      responses:
+        "201":
+          description: Created position
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Position"
+
+  /positions/{id}:
+    put:
+      operationId: updatePosition
+      tags: [positions]
+      summary: Update position
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePositionBody"
+      responses:
+        "200":
+          description: Updated position
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Position"
+    delete:
+      operationId: deletePosition
+      tags: [positions]
+      summary: Delete position
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /activities:
+    get:
+      operationId: listActivities
+      tags: [activities]
+      summary: List all trade activities
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 50
+      responses:
+        "200":
+          description: List of activities
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TradeActivity"
+    post:
+      operationId: createActivity
+      tags: [activities]
+      summary: Log a trade activity
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateActivityBody"
+      responses:
+        "201":
+          description: Created activity
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TradeActivity"
+
+  /activities/{id}:
+    delete:
+      operationId: deleteActivity
+      tags: [activities]
+      summary: Delete activity
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+
+  /market/quote/{symbol}:
+    get:
+      operationId: getMarketQuote
+      tags: [market]
+      summary: Get stock quote
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Stock quote
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MarketQuote"
+        "404":
+          description: Symbol not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
+
+  /market/chart/{symbol}:
+    get:
+      operationId: getMarketChart
+      tags: [market]
+      summary: Get stock chart data
+      parameters:
+        - name: symbol
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: interval
+          in: query
+          schema:
+            type: string
+            default: "1d"
+        - name: range
+          in: query
+          schema:
+            type: string
+            default: "1mo"
+      responses:
+        "200":
+          description: Chart data
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ChartData"
+
+  /market/indices:
+    get:
+      operationId: getMarketIndices
+      tags: [market]
+      summary: Get major market indices
+      responses:
+        "200":
+          description: Market indices
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/MarketQuote"
+
+  /market/screener:
+    get:
+      operationId: screenStocks
+      tags: [market]
+      summary: Screen stocks for swing trading
+      parameters:
+        - name: minPrice
+          in: query
+          schema:
+            type: number
+        - name: maxPrice
+          in: query
+          schema:
+            type: number
+        - name: minVolume
+          in: query
+          schema:
+            type: number
+        - name: sector
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of screened stocks
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ScreenerResult"
+
+  /portfolio/summary:
+    get:
+      operationId: getPortfolioSummary
+      tags: [accounts]
+      summary: Get overall portfolio NAV and summary
+      responses:
+        "200":
+          description: Portfolio summary
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioSummary"
+
+  /anthropic/conversations:
+    get:
+      operationId: listAnthropicConversations
+      tags: [anthropic]
+      summary: List all conversations
+      responses:
+        "200":
+          description: List of conversations
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnthropicConversation"
+    post:
+      operationId: createAnthropicConversation
+      tags: [anthropic]
+      summary: Create a new conversation
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateAnthropicConversationBody"
+      responses:
+        "201":
+          description: Created conversation
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicConversation"
+
+  /anthropic/conversations/{id}:
+    get:
+      operationId: getAnthropicConversation
+      tags: [anthropic]
+      summary: Get conversation with messages
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Conversation with messages
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicConversationWithMessages"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicError"
+    delete:
+      operationId: deleteAnthropicConversation
+      tags: [anthropic]
+      summary: Delete a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "204":
+          description: Deleted
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AnthropicError"
+
+  /anthropic/conversations/{id}/messages:
+    get:
+      operationId: listAnthropicMessages
+      tags: [anthropic]
+      summary: List messages in a conversation
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of messages
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AnthropicMessage"
+    post:
+      operationId: sendAnthropicMessage
+      tags: [anthropic]
+      summary: Send a message and receive an AI response (SSE stream)
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/SendAnthropicMessageBody"
+      responses:
+        "200":
+          description: SSE stream of assistant response chunks
+          content:
+            text/event-stream: {}
+
 components:
   schemas:
     HealthStatus:
@@ -34,3 +504,466 @@ components:
       required:
         - status
 
+    ApiError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error
+
+    Account:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        broker:
+          type: string
+        accountType:
+          type: string
+          enum: [long_term, swing, day_trading, savings]
+        currency:
+          type: string
+        initialBalance:
+          type: number
+        currentBalance:
+          type: number
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - name
+        - broker
+        - accountType
+        - currency
+        - initialBalance
+        - currentBalance
+        - createdAt
+        - updatedAt
+
+    CreateAccountBody:
+      type: object
+      properties:
+        name:
+          type: string
+        broker:
+          type: string
+        accountType:
+          type: string
+          enum: [long_term, swing, day_trading, savings]
+        currency:
+          type: string
+        initialBalance:
+          type: number
+      required:
+        - name
+        - broker
+        - accountType
+        - currency
+        - initialBalance
+
+    UpdateAccountBody:
+      type: object
+      properties:
+        name:
+          type: string
+        broker:
+          type: string
+        accountType:
+          type: string
+          enum: [long_term, swing, day_trading, savings]
+        currentBalance:
+          type: number
+
+    Position:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        symbol:
+          type: string
+        name:
+          type: string
+        quantity:
+          type: number
+        avgCost:
+          type: number
+        currentPrice:
+          type: number
+        marketValue:
+          type: number
+        unrealizedPnl:
+          type: number
+        unrealizedPnlPct:
+          type: number
+        sector:
+          type: string
+        notes:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - accountId
+        - symbol
+        - name
+        - quantity
+        - avgCost
+        - currentPrice
+        - marketValue
+        - unrealizedPnl
+        - unrealizedPnlPct
+        - createdAt
+        - updatedAt
+
+    CreatePositionBody:
+      type: object
+      properties:
+        accountId:
+          type: integer
+        symbol:
+          type: string
+        name:
+          type: string
+        quantity:
+          type: number
+        avgCost:
+          type: number
+        sector:
+          type: string
+        notes:
+          type: string
+      required:
+        - accountId
+        - symbol
+        - name
+        - quantity
+        - avgCost
+
+    UpdatePositionBody:
+      type: object
+      properties:
+        quantity:
+          type: number
+        avgCost:
+          type: number
+        currentPrice:
+          type: number
+        notes:
+          type: string
+
+    TradeActivity:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        symbol:
+          type: string
+        activityType:
+          type: string
+          enum: [buy, sell, dividend, deposit, withdrawal, note]
+        quantity:
+          type: number
+        price:
+          type: number
+        totalAmount:
+          type: number
+        notes:
+          type: string
+        tradeDate:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - accountId
+        - activityType
+        - tradeDate
+        - createdAt
+
+    CreateActivityBody:
+      type: object
+      properties:
+        accountId:
+          type: integer
+        symbol:
+          type: string
+        activityType:
+          type: string
+          enum: [buy, sell, dividend, deposit, withdrawal, note]
+        quantity:
+          type: number
+        price:
+          type: number
+        totalAmount:
+          type: number
+        notes:
+          type: string
+        tradeDate:
+          type: string
+          format: date-time
+      required:
+        - accountId
+        - activityType
+        - tradeDate
+
+    MarketQuote:
+      type: object
+      properties:
+        symbol:
+          type: string
+        name:
+          type: string
+        price:
+          type: number
+        change:
+          type: number
+        changePercent:
+          type: number
+        volume:
+          type: number
+        marketCap:
+          type: number
+        high52w:
+          type: number
+        low52w:
+          type: number
+        peRatio:
+          type: number
+        previousClose:
+          type: number
+      required:
+        - symbol
+        - name
+        - price
+        - change
+        - changePercent
+
+    ChartData:
+      type: object
+      properties:
+        symbol:
+          type: string
+        interval:
+          type: string
+        range:
+          type: string
+        timestamps:
+          type: array
+          items:
+            type: integer
+        opens:
+          type: array
+          items:
+            type: number
+        highs:
+          type: array
+          items:
+            type: number
+        lows:
+          type: array
+          items:
+            type: number
+        closes:
+          type: array
+          items:
+            type: number
+        volumes:
+          type: array
+          items:
+            type: number
+      required:
+        - symbol
+        - interval
+        - range
+        - timestamps
+        - closes
+
+    ScreenerResult:
+      type: object
+      properties:
+        symbol:
+          type: string
+        name:
+          type: string
+        price:
+          type: number
+        changePercent:
+          type: number
+        volume:
+          type: number
+        avgVolume:
+          type: number
+        relativeVolume:
+          type: number
+        sector:
+          type: string
+        marketCap:
+          type: number
+        rsi:
+          type: number
+        swingScore:
+          type: number
+      required:
+        - symbol
+        - name
+        - price
+        - changePercent
+        - volume
+        - swingScore
+
+    PortfolioSummary:
+      type: object
+      properties:
+        totalNav:
+          type: number
+        totalCost:
+          type: number
+        totalUnrealizedPnl:
+          type: number
+        totalUnrealizedPnlPct:
+          type: number
+        dayChange:
+          type: number
+        dayChangePct:
+          type: number
+        accountCount:
+          type: integer
+        positionCount:
+          type: integer
+        accounts:
+          type: array
+          items:
+            $ref: "#/components/schemas/AccountSummary"
+      required:
+        - totalNav
+        - totalCost
+        - totalUnrealizedPnl
+        - totalUnrealizedPnlPct
+        - dayChange
+        - dayChangePct
+        - accountCount
+        - positionCount
+        - accounts
+
+    AccountSummary:
+      type: object
+      properties:
+        id:
+          type: integer
+        name:
+          type: string
+        accountType:
+          type: string
+        nav:
+          type: number
+        unrealizedPnl:
+          type: number
+        unrealizedPnlPct:
+          type: number
+        positionCount:
+          type: integer
+      required:
+        - id
+        - name
+        - accountType
+        - nav
+        - unrealizedPnl
+        - unrealizedPnlPct
+        - positionCount
+
+    AnthropicConversation:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - title
+        - createdAt
+
+    AnthropicMessage:
+      type: object
+      properties:
+        id:
+          type: integer
+        conversationId:
+          type: integer
+        role:
+          type: string
+        content:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - conversationId
+        - role
+        - content
+        - createdAt
+
+    CreateAnthropicConversationBody:
+      type: object
+      properties:
+        title:
+          type: string
+      required:
+        - title
+
+    SendAnthropicMessageBody:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+
+    AnthropicConversationWithMessages:
+      type: object
+      properties:
+        id:
+          type: integer
+        title:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        messages:
+          type: array
+          items:
+            $ref: "#/components/schemas/AnthropicMessage"
+      required:
+        - id
+        - title
+        - createdAt
+        - messages
+
+    AnthropicError:
+      type: object
+      properties:
+        error:
+          type: string
+      required:
+        - error

@@ -94,3 +94,37 @@ Generated React Query hooks and fetch client from the OpenAPI spec (e.g. `useHea
 ### `scripts` (`@workspace/scripts`)
 
 Utility scripts package. Each script is a `.ts` file in `src/` with a corresponding npm script in `package.json`. Run scripts via `pnpm --filter @workspace/scripts run <script>`. Scripts can import any workspace package (e.g., `@workspace/db`) by adding it as a dependency in `scripts/package.json`.
+
+### `artifacts/portfolio-tracker` (`@workspace/portfolio-tracker`)
+
+Expo React Native mobile app for portfolio tracking. Scans stocks via Yahoo Finance, tracks accounts/positions/activity, and offers Claude AI-powered insights.
+
+- **Color scheme**: Deep navy (#0A0E1A) + electric teal (#00D4FF)
+- **Tabs**: Portfolio (dashboard), Accounts (CRUD), Screener (Yahoo Finance), Activity (trade log), AI (Claude SSE)
+- **Stack screens**: `app/account/[id].tsx` (positions list), `app/position/[id].tsx`, `app/chart/[symbol].tsx`
+- **Context**: `context/PortfolioContext.tsx` — shared state, API helpers
+- **Components**: `components/ui/Card`, `PnlBadge`, `Skeleton`, `AccountTypeBadge`, `MiniChart`
+- **Account types**: long_term (purple), swing (orange), day_trading (red), savings (teal)
+- **API base URL**: `EXPO_PUBLIC_DOMAIN` env var
+
+### API Routes (`artifacts/api-server`)
+
+- `GET /api/accounts` — list accounts
+- `POST /api/accounts` — create account
+- `GET /api/accounts/:id/positions` — positions for account
+- `POST /api/positions` — add position (fetches live price from Yahoo)
+- `GET /api/activities` — trade activity log
+- `POST /api/activities` — log trade/deposit/etc.
+- `GET /api/market/indices` — major market indices (Yahoo Finance)
+- `GET /api/market/quote/:symbol` — live quote
+- `GET /api/market/chart/:symbol?interval=&range=` — OHLCV chart data
+- `GET /api/market/screener?minPrice=&maxPrice=` — swing screener with scoring
+- `GET /api/portfolio/summary` — NAV + P&L rollup
+- `POST /api/anthropic/conversations/:id/messages` — SSE streaming AI chat (claude-sonnet-4-6)
+
+### DB Schema (`lib/db`)
+
+- `accountsTable` — trading/savings accounts
+- `positionsTable` — holdings per account
+- `activitiesTable` — trade/deposit/withdrawal log
+- `conversations` + `messages` — AI chat history (note: no "Table" suffix on these two)

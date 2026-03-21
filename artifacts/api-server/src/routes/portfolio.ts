@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { accountsTable, positionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { fetchLivePrices } from "./positions";
 
 const router: IRouter = Router();
 
@@ -13,6 +14,21 @@ router.get("/summary", async (_req, res) => {
     let totalNav = 0;
     let totalCost = 0;
 
+    // Fetch live prices for all positions in one batch
+    const allSymbols = [...new Set(allPositions.map(p => p.symbol))];
+    const priceMap = allSymbols.length > 0 ? await fetchLivePrices(allSymbols) : {};
+
+    // Persist fresh prices to DB
+    await Promise.allSettled(
+      allPositions
+        .filter(p => priceMap[p.symbol] !== undefined)
+        .map(p =>
+          db.update(positionsTable)
+            .set({ currentPrice: priceMap[p.symbol].toString(), updatedAt: new Date() })
+            .where(eq(positionsTable.id, p.id))
+        )
+    );
+
     const accountSummaries = await Promise.all(accounts.map(async (account) => {
       const positions = allPositions.filter(p => p.accountId === account.id);
       let accountNav = parseFloat(account.currentBalance);
@@ -22,7 +38,7 @@ router.get("/summary", async (_req, res) => {
       positions.forEach(p => {
         const qty = parseFloat(p.quantity);
         const avg = parseFloat(p.avgCost);
-        const cur = parseFloat(p.currentPrice);
+        const cur = priceMap[p.symbol] ?? parseFloat(p.currentPrice);
         const marketValue = qty * cur;
         const cost = qty * avg;
         accountNav += marketValue;

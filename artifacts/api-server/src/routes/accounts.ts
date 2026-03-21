@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { accountsTable, positionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { fetchLivePrices } from "./positions";
 
 const router: IRouter = Router();
 
@@ -116,12 +117,30 @@ router.get("/:id/positions", async (req, res) => {
     const positions = await db.select().from(positionsTable)
       .where(eq(positionsTable.accountId, accountId))
       .orderBy(positionsTable.symbol);
+
+    if (positions.length === 0) return res.json([]);
+
+    // Fetch live prices from Yahoo Finance
+    const symbols = positions.map(p => p.symbol);
+    const priceMap = await fetchLivePrices(symbols);
+
+    // Persist updated prices to DB in the background
+    await Promise.allSettled(
+      positions
+        .filter(p => priceMap[p.symbol] !== undefined)
+        .map(p =>
+          db.update(positionsTable)
+            .set({ currentPrice: priceMap[p.symbol].toString(), updatedAt: new Date() })
+            .where(eq(positionsTable.id, p.id))
+        )
+    );
+
     const result = positions.map(p => {
       const qty = parseFloat(p.quantity);
       const avg = parseFloat(p.avgCost);
-      const cur = parseFloat(p.currentPrice);
+      const cur = priceMap[p.symbol] ?? parseFloat(p.currentPrice);
       const marketValue = qty * cur;
-      const unrealizedPnl = marketValue - (qty * avg);
+      const unrealizedPnl = marketValue - qty * avg;
       const unrealizedPnlPct = qty * avg > 0 ? (unrealizedPnl / (qty * avg)) * 100 : 0;
       return {
         id: p.id,
@@ -134,8 +153,8 @@ router.get("/:id/positions", async (req, res) => {
         marketValue,
         unrealizedPnl,
         unrealizedPnlPct,
-        sector: p.sector || undefined,
-        notes: p.notes || undefined,
+        sector: p.sector ?? undefined,
+        notes: p.notes ?? undefined,
         createdAt: p.createdAt.toISOString(),
         updatedAt: p.updatedAt.toISOString(),
       };

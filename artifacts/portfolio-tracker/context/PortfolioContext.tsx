@@ -119,21 +119,25 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const refreshAll = useCallback(async () => {
     setIsLoading(true);
     try {
-      const [accs, summ, acts] = await Promise.all([
+      // 1. Fetch accounts and activities in parallel
+      const [accs, acts] = await Promise.all([
         apiGet<Account[]>('/accounts'),
-        apiGet<PortfolioSummary>('/portfolio/summary'),
         apiGet<TradeActivity[]>('/activities'),
       ]);
       setAccounts(accs);
-      setSummary(summ);
       setActivities(acts);
-      // Fetch positions for all accounts
+
+      // 2. Fetch positions (this triggers live price updates in the DB)
       const allPositions: Position[] = [];
       await Promise.all(accs.map(async (acc) => {
         const pos = await apiGet<Position[]>(`/accounts/${acc.id}/positions`);
         allPositions.push(...pos);
       }));
       setPositions(allPositions);
+
+      // 3. Fetch summary AFTER positions so it reads fresh prices from DB
+      const summ = await apiGet<PortfolioSummary>('/portfolio/summary');
+      setSummary(summ);
     } catch (e) {
       console.error('Failed to refresh portfolio:', e);
     } finally {

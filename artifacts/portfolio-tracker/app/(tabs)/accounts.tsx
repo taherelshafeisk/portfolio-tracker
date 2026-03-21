@@ -26,6 +26,7 @@ export default function AccountsScreen() {
   const { accounts, positions, summary, isLoading, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const [showAdd, setShowAdd] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '',
     broker: '',
@@ -43,6 +44,8 @@ export default function AccountsScreen() {
       Alert.alert('Missing fields', 'Please fill all required fields');
       return;
     }
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost('/accounts', {
         name: form.name,
@@ -54,9 +57,11 @@ export default function AccountsScreen() {
       setShowAdd(false);
       setForm({ name: '', broker: '', accountType: 'long_term', currency: 'USD', initialBalance: '' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      refreshAll();
+      await refreshAll();
     } catch (e) {
       Alert.alert('Error', 'Failed to create account');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -214,8 +219,8 @@ export default function AccountsScreen() {
               <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.saveBtn} onPress={handleAdd}>
-                <Text style={styles.saveText}>Add Account</Text>
+              <Pressable style={[styles.saveBtn, isSubmitting && { opacity: 0.6 }]} onPress={handleAdd} disabled={isSubmitting}>
+                <Text style={styles.saveText}>{isSubmitting ? 'Adding…' : 'Add Account'}</Text>
               </Pressable>
             </View>
           </View>

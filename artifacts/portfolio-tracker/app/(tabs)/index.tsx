@@ -42,6 +42,9 @@ export default function PortfolioScreen() {
 
   useEffect(() => {
     refreshAll();
+    // Auto-refresh live prices every 60 seconds
+    const interval = setInterval(() => refreshAll(), 60_000);
+    return () => clearInterval(interval);
   }, []);
 
   const getGreeting = () => {

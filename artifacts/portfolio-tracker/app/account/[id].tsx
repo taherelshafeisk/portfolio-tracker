@@ -19,12 +19,13 @@ export default function AccountDetailScreen() {
   const accountId = parseInt(id);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { accounts, positions: allPositions, refreshAll, refreshPositions } = usePortfolio();
+  const { accounts, positions: allPositions, refreshAll } = usePortfolio();
 
   const account = accounts.find(a => a.id === accountId);
   const positions = allPositions.filter(p => p.accountId === accountId);
 
   const [isLoading, setIsLoading] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAddPos, setShowAddPos] = useState(false);
   const [form, setForm] = useState({ symbol: '', name: '', quantity: '', avgCost: '', sector: '', notes: '' });
 
@@ -42,6 +43,8 @@ export default function AccountDetailScreen() {
       Alert.alert('Missing fields', 'Fill in symbol, name, quantity and average cost');
       return;
     }
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost('/positions', {
         accountId,
@@ -55,9 +58,12 @@ export default function AccountDetailScreen() {
       setShowAddPos(false);
       setForm({ symbol: '', name: '', quantity: '', avgCost: '', sector: '', notes: '' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      await refreshPositions(accountId);
+      // Refresh all so portfolio dashboard also updates immediately
+      await refreshAll();
     } catch {
       Alert.alert('Error', 'Failed to add position');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -70,7 +76,7 @@ export default function AccountDetailScreen() {
           try {
             await apiDelete(`/positions/${posId}`);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            await refreshPositions(accountId);
+            await refreshAll();
           } catch {
             Alert.alert('Error', 'Failed to delete');
           }
@@ -200,8 +206,8 @@ export default function AccountDetailScreen() {
               <Pressable style={styles.cancelBtn} onPress={() => setShowAddPos(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.saveBtn} onPress={handleAddPosition}>
-                <Text style={styles.saveText}>Add Position</Text>
+              <Pressable style={[styles.saveBtn, isSubmitting && { opacity: 0.6 }]} onPress={handleAddPosition} disabled={isSubmitting}>
+                <Text style={styles.saveText}>{isSubmitting ? 'Adding…' : 'Add Position'}</Text>
               </Pressable>
             </View>
           </View>

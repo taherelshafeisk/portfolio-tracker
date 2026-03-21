@@ -24,9 +24,10 @@ const ACTIVITY_TYPES = ['buy', 'sell', 'dividend', 'deposit', 'withdrawal', 'not
 
 export default function ActivityScreen() {
   const insets = useSafeAreaInsets();
-  const { accounts, activities, isLoading, refreshActivities, refreshAll } = usePortfolio();
+  const { accounts, activities, isLoading, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const [showAdd, setShowAdd] = useState(false);
+  const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
     accountId: '',
     symbol: '',
@@ -38,8 +39,7 @@ export default function ActivityScreen() {
   });
 
   useEffect(() => {
-    if (accounts.length === 0) refreshAll();
-    else refreshActivities();
+    refreshAll();
   }, []);
 
   const handleAdd = async () => {
@@ -47,6 +47,8 @@ export default function ActivityScreen() {
       Alert.alert('Missing fields', 'Please select an account and activity type');
       return;
     }
+    if (isSubmitting) return;
+    setIsSubmitting(true);
     try {
       await apiPost('/activities', {
         accountId: parseInt(form.accountId),
@@ -60,9 +62,11 @@ export default function ActivityScreen() {
       setShowAdd(false);
       setForm({ accountId: '', symbol: '', activityType: 'buy', quantity: '', price: '', notes: '', tradeDate: new Date().toISOString().split('T')[0] });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-      refreshActivities();
+      await refreshAll();
     } catch {
       Alert.alert('Error', 'Failed to log activity');
+    } finally {
+      setIsSubmitting(false);
     }
   };
 
@@ -75,7 +79,7 @@ export default function ActivityScreen() {
           try {
             await apiDelete(`/activities/${id}`);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
-            refreshActivities();
+            await refreshAll();
           } catch {
             Alert.alert('Error', 'Failed to delete');
           }
@@ -202,8 +206,8 @@ export default function ActivityScreen() {
               <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={styles.saveBtn} onPress={handleAdd}>
-                <Text style={styles.saveText}>Log Activity</Text>
+              <Pressable style={[styles.saveBtn, isSubmitting && { opacity: 0.6 }]} onPress={handleAdd} disabled={isSubmitting}>
+                <Text style={styles.saveText}>{isSubmitting ? 'Logging…' : 'Log Activity'}</Text>
               </Pressable>
             </View>
           </View>

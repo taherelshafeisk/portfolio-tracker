@@ -140,4 +140,53 @@ Be direct but acknowledge risks. Format responses clearly with bullet points whe
   }
 });
 
+router.post("/parse-screenshot", async (req, res) => {
+  try {
+    const { imageBase64, mediaType } = req.body;
+    if (!imageBase64) return res.status(400).json({ error: "No image provided" });
+
+    const response = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      messages: [{
+        role: "user",
+        content: [
+          {
+            type: "image",
+            source: {
+              type: "base64",
+              media_type: (mediaType || "image/jpeg") as any,
+              data: imageBase64,
+            },
+          },
+          {
+            type: "text",
+            text: `Analyze this brokerage or trade confirmation screenshot and extract all trade details.
+Return a JSON array of trades. Each trade object must have:
+- activityType: one of "buy", "sell", "dividend", "deposit", "withdrawal" (required)
+- symbol: stock ticker symbol if present (e.g. "AAPL")
+- quantity: number of shares as a number if present
+- price: price per share as a number if present
+- totalAmount: total dollar value as a number if present
+- tradeDate: date as YYYY-MM-DD if present, otherwise today
+- notes: short description of what you see
+
+Return ONLY a valid JSON array with no markdown, no explanation, no code fences.
+Example: [{"activityType":"buy","symbol":"AAPL","quantity":10,"price":185.50,"totalAmount":1855.00,"tradeDate":"2024-03-21","notes":"Market order buy"}]
+If no trades found, return: []`,
+          },
+        ],
+      }],
+    });
+
+    const text = response.content[0].type === "text" ? response.content[0].text : "[]";
+    const match = text.match(/\[[\s\S]*\]/);
+    const trades = match ? JSON.parse(match[0]) : [];
+    res.json({ trades });
+  } catch (error) {
+    console.error("Parse screenshot error:", error);
+    res.status(500).json({ error: "Failed to parse screenshot" });
+  }
+});
+
 export default router;

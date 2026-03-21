@@ -4,6 +4,7 @@ import {
   Pressable, StatusBar, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useQuery } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
@@ -149,7 +150,7 @@ export default function PortfolioScreen() {
           (summary?.accounts ?? []).map(acc => {
             const pos = acc.unrealizedPnl >= 0;
             return (
-              <Card key={acc.id} style={styles.accountCard}>
+              <Card key={acc.id} style={styles.accountCard} onPress={() => router.push({ pathname: '/account/[id]', params: { id: acc.id.toString() } })}>
                 <View style={styles.accountRow}>
                   <View style={styles.accountLeft}>
                     <AccountTypeBadge type={acc.accountType as any} size="sm" />

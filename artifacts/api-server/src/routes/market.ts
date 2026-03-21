@@ -14,6 +14,26 @@ async function fetchYahoo(url: string) {
   return res.json();
 }
 
+router.get("/search", async (req, res) => {
+  try {
+    const q = (req.query.q as string) || "";
+    if (!q.trim()) return res.json([]);
+    const url = `${YAHOO_BASE}/v1/finance/search?q=${encodeURIComponent(q)}&lang=en-US&region=US&quotesCount=6&newsCount=0&listsCount=0`;
+    const data = await fetchYahoo(url);
+    const quotes = (data?.quotes || []).filter(
+      (item: any) => item.quoteType === "EQUITY" || item.quoteType === "ETF" || item.quoteType === "INDEX"
+    );
+    res.json(quotes.slice(0, 6).map((item: any) => ({
+      symbol: item.symbol,
+      name: item.shortname || item.longname || item.symbol,
+      type: item.quoteType,
+      exchange: item.exchDisp || item.exchange,
+    })));
+  } catch (error) {
+    res.status(500).json({ error: "Search failed" });
+  }
+});
+
 router.get("/quote/:symbol", async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();

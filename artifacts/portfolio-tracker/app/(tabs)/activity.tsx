@@ -1,15 +1,19 @@
 import React, { useEffect, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, RefreshControl,
-  Pressable, Modal, TextInput, Alert, Platform,
+  Pressable, Modal, TextInput, Alert, Platform, Image,
+  ActivityIndicator, ScrollView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiPost, apiDelete, TradeActivity } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+
+const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
 const ACTIVITY_ICONS: Record<string, { icon: any; color: string }> = {
   buy: { icon: 'arrow-down-circle', color: colors.positive },
@@ -28,7 +32,9 @@ export default function ActivityScreen() {
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const [showAdd, setShowAdd] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const [form, setForm] = useState({
+  const [isParsing, setIsParsing] = useState(false);
+  const [parsedImage, setParsedImage] = useState<string | null>(null);
+  const emptyForm = {
     accountId: '',
     symbol: '',
     activityType: 'buy',
@@ -36,7 +42,59 @@ export default function ActivityScreen() {
     price: '',
     notes: '',
     tradeDate: new Date().toISOString().split('T')[0],
-  });
+  };
+  const [form, setForm] = useState(emptyForm);
+
+  const handlePickImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo access to upload trade screenshots.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      base64: true,
+      quality: 0.8,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    if (!asset.base64) return;
+    setIsParsing(true);
+    setParsedImage(asset.uri);
+    try {
+      const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: asset.base64,
+          mediaType: asset.mimeType || 'image/jpeg',
+        }),
+      });
+      const data = await resp.json();
+      const trades: any[] = data.trades || [];
+      if (trades.length > 0) {
+        const t = trades[0];
+        setForm(f => ({
+          ...f,
+          symbol: t.symbol || f.symbol,
+          activityType: t.activityType || f.activityType,
+          quantity: t.quantity ? String(t.quantity) : f.quantity,
+          price: t.price ? String(t.price) : f.price,
+          notes: t.notes || f.notes,
+          tradeDate: t.tradeDate || f.tradeDate,
+        }));
+        if (trades.length > 1) {
+          Alert.alert('Multiple trades found', `Found ${trades.length} trades. Showing the first one. Add it and repeat for others.`);
+        }
+      } else {
+        Alert.alert('No trades found', 'Claude could not extract trade details from this image. Try a clearer screenshot.');
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to parse screenshot.');
+    } finally {
+      setIsParsing(false);
+    }
+  };
 
   useEffect(() => {
     refreshAll();
@@ -60,7 +118,8 @@ export default function ActivityScreen() {
         tradeDate: new Date(form.tradeDate).toISOString(),
       });
       setShowAdd(false);
-      setForm({ accountId: '', symbol: '', activityType: 'buy', quantity: '', price: '', notes: '', tradeDate: new Date().toISOString().split('T')[0] });
+      setForm(emptyForm);
+      setParsedImage(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await refreshAll();
     } catch {
@@ -146,7 +205,7 @@ export default function ActivityScreen() {
           data={activities}
           keyExtractor={item => item.id.toString()}
           renderItem={renderItem}
-          refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refreshActivities} tintColor={colors.primary} />}
+          refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refreshAll} tintColor={colors.primary} />}
           contentContainerStyle={[styles.list, { paddingBottom: Platform.OS === 'web' ? 100 : (insets.bottom + 90) }]}
           ListEmptyComponent={
             <View style={styles.emptyState}>
@@ -162,7 +221,29 @@ export default function ActivityScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Log Activity</Text>
+            <View style={styles.modalTitleRow}>
+              <Text style={styles.modalTitle}>Log Activity</Text>
+              <Pressable style={styles.scanBtn} onPress={handlePickImage} disabled={isParsing}>
+                {isParsing
+                  ? <ActivityIndicator size="small" color={colors.primary} />
+                  : <><Feather name="camera" size={15} color={colors.primary} /><Text style={styles.scanBtnText}>Scan</Text></>
+                }
+              </Pressable>
+            </View>
+
+            {parsedImage && (
+              <View style={styles.parsedImageRow}>
+                <Image source={{ uri: parsedImage }} style={styles.parsedThumb} />
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.parsedLabel}>
+                    {isParsing ? 'Parsing with AI…' : 'Form pre-filled from screenshot'}
+                  </Text>
+                  <Pressable onPress={() => { setParsedImage(null); }}>
+                    <Text style={styles.parsedClear}>Clear</Text>
+                  </Pressable>
+                </View>
+              </View>
+            )}
 
             <Text style={styles.fieldLabel}>Account</Text>
             <View style={styles.pickerRow}>
@@ -241,7 +322,14 @@ const styles = StyleSheet.create({
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
   modal: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
   modalHandle: { width: 36, height: 4, backgroundColor: colors.separator, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary, marginBottom: 16 },
+  modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
+  modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary },
+  scanBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.primary },
+  scanBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.primary },
+  parsedImageRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,212,255,0.06)', borderRadius: 10, padding: 10, marginBottom: 12 },
+  parsedThumb: { width: 52, height: 52, borderRadius: 6, backgroundColor: colors.surfaceElevated },
+  parsedLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
+  parsedClear: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: colors.primary, marginTop: 4 },
   fieldLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, marginBottom: 8 },
   pickerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.separator, backgroundColor: colors.surfaceElevated },

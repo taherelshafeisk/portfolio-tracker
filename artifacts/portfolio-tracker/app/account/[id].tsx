@@ -2,24 +2,37 @@ import React, { useEffect, useState, useRef } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
   Modal, TextInput, Alert, Platform, RefreshControl,
-  ActivityIndicator,
+  ActivityIndicator, Image,
 } from 'react-native';
 import { useLocalSearchParams, router, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiGet, apiPost, apiDelete, apiPut, Position, Account } from '@/context/PortfolioContext';
+import { usePortfolio, apiGet, apiPost, apiDelete, Position, Account } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
 import { AccountTypeBadge } from '@/components/ui/AccountTypeBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
+
+const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
 
 interface SymbolResult {
   symbol: string;
   name: string;
   type: string;
   exchange?: string;
+}
+
+interface ParsedPosition {
+  _key: string;
+  symbol: string;
+  name: string;
+  quantity: string;
+  avgCost: string;
+  sector: string;
+  notes: string;
 }
 
 export default function AccountDetailScreen() {
@@ -41,6 +54,14 @@ export default function AccountDetailScreen() {
   const [symbolResults, setSymbolResults] = useState<SymbolResult[]>([]);
   const [isSearching, setIsSearching] = useState(false);
   const searchTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Portfolio screenshot import
+  const [showImport, setShowImport] = useState(false);
+  const [importPositions, setImportPositions] = useState<ParsedPosition[]>([]);
+  const [isParsing, setIsParsing] = useState(false);
+  const [importImageUri, setImportImageUri] = useState<string | null>(null);
+  const [importAccountHint, setImportAccountHint] = useState<string | null>(null);
+  const [isImporting, setIsImporting] = useState(false);
 
   useEffect(() => {
     if (account) navigation.setOptions({ title: account.name });
@@ -121,22 +142,112 @@ export default function AccountDetailScreen() {
     ]);
   };
 
+  // ─── Portfolio Screenshot Import ─────────────────────────────────────────────
+  const handlePickPortfolioImage = async () => {
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo access to upload portfolio screenshots.');
+      return;
+    }
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      base64: true,
+      quality: 0.7,
+    });
+    if (result.canceled || !result.assets[0]) return;
+    const asset = result.assets[0];
+    if (!asset.base64) return;
+
+    setIsParsing(true);
+    setImportImageUri(asset.uri);
+    setImportPositions([]);
+    setShowImport(true);
+
+    try {
+      const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          imageBase64: asset.base64,
+          mediaType: asset.mimeType || 'image/jpeg',
+          parseType: 'positions',
+        }),
+      });
+      const data = await resp.json();
+      const parsed: any[] = data.positions || [];
+      setImportAccountHint(data.accountHint || null);
+
+      if (parsed.length === 0) {
+        Alert.alert('No positions found', 'Could not detect holdings. Try a clearer screenshot of your portfolio.');
+        setShowImport(false);
+        setImportImageUri(null);
+      } else {
+        setImportPositions(parsed.map((p: any, i: number) => ({
+          _key: `p${i}_${Date.now()}`,
+          symbol: p.symbol || '',
+          name: p.name || '',
+          quantity: p.quantity != null ? String(p.quantity) : '',
+          avgCost: p.avgCost != null ? String(p.avgCost) : '',
+          sector: p.sector || '',
+          notes: p.notes || '',
+        })));
+      }
+    } catch {
+      Alert.alert('Error', 'Failed to parse screenshot.');
+      setShowImport(false);
+      setImportImageUri(null);
+    } finally {
+      setIsParsing(false);
+    }
+  };
+
+  const updateImportPos = (key: string, field: keyof ParsedPosition, val: string) => {
+    setImportPositions(ps => ps.map(p => p._key === key ? { ...p, [field]: val } : p));
+  };
+
+  const removeImportPos = (key: string) => {
+    setImportPositions(ps => ps.filter(p => p._key !== key));
+  };
+
+  const handleImportAll = async () => {
+    const valid = importPositions.filter(p => p.symbol && p.quantity && p.avgCost);
+    if (valid.length === 0) {
+      Alert.alert('Missing data', 'Each position needs at least a symbol, quantity, and average cost.');
+      return;
+    }
+    if (isImporting) return;
+    setIsImporting(true);
+    try {
+      for (const p of valid) {
+        await apiPost('/positions', {
+          accountId,
+          symbol: p.symbol.toUpperCase(),
+          name: p.name || p.symbol,
+          quantity: parseFloat(p.quantity),
+          avgCost: parseFloat(p.avgCost),
+          sector: p.sector || undefined,
+          notes: p.notes || undefined,
+        });
+      }
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      setShowImport(false);
+      setImportImageUri(null);
+      setImportPositions([]);
+      await refreshAll();
+    } catch {
+      Alert.alert('Error', 'Failed to import some positions.');
+    } finally {
+      setIsImporting(false);
+    }
+  };
+
   return (
     <View style={styles.container}>
       <ScrollView
         showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={isLoading}
-            onRefresh={refreshAll}
-            tintColor={colors.primary}
-          />
-        }
-        contentContainerStyle={[styles.scroll, {
-          paddingBottom: Platform.OS === 'web' ? 40 : (insets.bottom + 24)
-        }]}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refreshAll} tintColor={colors.primary} />}
+        contentContainerStyle={[styles.scroll, { paddingBottom: Platform.OS === 'web' ? 40 : (insets.bottom + 24) }]}
       >
-        {/* Account Summary */}
         {account && (
           <Card style={styles.summaryCard}>
             <View style={styles.summaryTop}>
@@ -155,32 +266,31 @@ export default function AccountDetailScreen() {
           </Card>
         )}
 
-        {/* Positions */}
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Positions</Text>
-          <Pressable
-            style={styles.addBtn}
-            onPress={() => { Haptics.selectionAsync(); setShowAddPos(true); }}
-          >
-            <Feather name="plus" size={16} color={colors.background} />
-            <Text style={styles.addBtnText}>Add</Text>
-          </Pressable>
+          <View style={styles.sectionActions}>
+            <Pressable style={styles.importBtn} onPress={handlePickPortfolioImage}>
+              <Feather name="upload" size={14} color={colors.textSecondary} />
+              <Text style={styles.importBtnText}>Import</Text>
+            </Pressable>
+            <Pressable style={styles.addBtn} onPress={() => { Haptics.selectionAsync(); setShowAddPos(true); }}>
+              <Feather name="plus" size={16} color={colors.background} />
+              <Text style={styles.addBtnText}>Add</Text>
+            </Pressable>
+          </View>
         </View>
 
         {positions.length === 0 ? (
           <Card style={styles.emptyCard}>
             <Feather name="layers" size={32} color={colors.textMuted} />
-            <Text style={styles.emptyText}>No positions yet. Add a holding to get started.</Text>
+            <Text style={styles.emptyText}>No positions yet.</Text>
+            <Text style={styles.emptySubText}>Tap Import to scan your portfolio screenshot, or Add to enter manually.</Text>
           </Card>
         ) : (
           positions.map(pos => {
             const isPos = pos.unrealizedPnl >= 0;
             return (
-              <Card
-                key={pos.id}
-                style={styles.posCard}
-                onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: pos.symbol } })}
-              >
+              <Card key={pos.id} style={styles.posCard} onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: pos.symbol } })}>
                 <View style={styles.posHeader}>
                   <View>
                     <Text style={styles.posSymbol}>{pos.symbol}</Text>
@@ -194,18 +304,9 @@ export default function AccountDetailScreen() {
                   </View>
                 </View>
                 <View style={styles.posStats}>
-                  <View style={styles.posStat}>
-                    <Text style={styles.posStatLabel}>Qty</Text>
-                    <Text style={styles.posStatVal}>{pos.quantity}</Text>
-                  </View>
-                  <View style={styles.posStat}>
-                    <Text style={styles.posStatLabel}>Avg Cost</Text>
-                    <Text style={styles.posStatVal}>${pos.avgCost.toFixed(2)}</Text>
-                  </View>
-                  <View style={styles.posStat}>
-                    <Text style={styles.posStatLabel}>Last</Text>
-                    <Text style={styles.posStatVal}>${pos.currentPrice.toFixed(2)}</Text>
-                  </View>
+                  <View style={styles.posStat}><Text style={styles.posStatLabel}>Qty</Text><Text style={styles.posStatVal}>{pos.quantity}</Text></View>
+                  <View style={styles.posStat}><Text style={styles.posStatLabel}>Avg Cost</Text><Text style={styles.posStatVal}>${pos.avgCost.toFixed(2)}</Text></View>
+                  <View style={styles.posStat}><Text style={styles.posStatLabel}>Last</Text><Text style={styles.posStatVal}>${pos.currentPrice.toFixed(2)}</Text></View>
                   <View style={styles.posStat}>
                     <Text style={styles.posStatLabel}>P&L</Text>
                     <Text style={[styles.posStatVal, { color: isPos ? colors.positive : colors.negative }]}>
@@ -220,14 +321,13 @@ export default function AccountDetailScreen() {
         )}
       </ScrollView>
 
-      {/* Add Position Modal */}
+      {/* ── Add Position Modal ─────────────────────────────────────────────── */}
       <Modal visible={showAddPos} animationType="slide" transparent presentationStyle="pageSheet">
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>Add Position</Text>
 
-            {/* Symbol search */}
             <View style={styles.symbolWrapper}>
               <View style={styles.symbolInputRow}>
                 <TextInput
@@ -240,7 +340,6 @@ export default function AccountDetailScreen() {
                 />
                 {isSearching && <ActivityIndicator size="small" color={colors.primary} style={styles.searchSpinner} />}
               </View>
-
               {symbolResults.length > 0 && (
                 <View style={styles.dropdown}>
                   {symbolResults.map(r => (
@@ -254,18 +353,12 @@ export default function AccountDetailScreen() {
               )}
             </View>
 
-            <TextInput
-              style={styles.input}
-              placeholder="Company name"
-              placeholderTextColor={colors.textMuted}
-              value={form.name}
-              onChangeText={t => setForm(f => ({ ...f, name: t }))}
-            />
+            <TextInput style={styles.input} placeholder="Company name" placeholderTextColor={colors.textMuted} value={form.name} onChangeText={t => setForm(f => ({ ...f, name: t }))} />
             <View style={styles.inputRow}>
               <TextInput style={[styles.input, { flex: 1 }]} placeholder="Quantity" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.quantity} onChangeText={t => setForm(f => ({ ...f, quantity: t }))} />
               <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Avg cost ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.avgCost} onChangeText={t => setForm(f => ({ ...f, avgCost: t }))} />
             </View>
-            <TextInput style={styles.input} placeholder="Sector (auto-filled or optional)" placeholderTextColor={colors.textMuted} value={form.sector} onChangeText={t => setForm(f => ({ ...f, sector: t }))} />
+            <TextInput style={styles.input} placeholder="Sector (optional)" placeholderTextColor={colors.textMuted} value={form.sector} onChangeText={t => setForm(f => ({ ...f, sector: t }))} />
             <TextInput style={styles.input} placeholder="Notes (optional)" placeholderTextColor={colors.textMuted} value={form.notes} onChangeText={t => setForm(f => ({ ...f, notes: t }))} />
 
             <View style={styles.modalButtons}>
@@ -276,6 +369,82 @@ export default function AccountDetailScreen() {
                 <Text style={styles.saveText}>{isSubmitting ? 'Adding…' : 'Add Position'}</Text>
               </Pressable>
             </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Portfolio Import Modal ─────────────────────────────────────────── */}
+      <Modal visible={showImport} animationType="slide" transparent presentationStyle="pageSheet">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { paddingBottom: insets.bottom + 16, maxHeight: '90%' }]}>
+            <View style={styles.modalHandle} />
+            <View style={styles.importModalHeader}>
+              <Text style={styles.modalTitle}>
+                {isParsing ? 'Scanning Portfolio…' : `${importPositions.length} Position${importPositions.length !== 1 ? 's' : ''} Found`}
+              </Text>
+              <Pressable style={styles.closeBtn} onPress={() => { setShowImport(false); setImportImageUri(null); }}>
+                <Feather name="x" size={20} color={colors.textMuted} />
+              </Pressable>
+            </View>
+
+            {isParsing ? (
+              <View style={styles.parsingState}>
+                {importImageUri && <Image source={{ uri: importImageUri }} style={styles.parsingThumb} />}
+                <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />
+                <Text style={styles.parsingText}>Claude is reading your portfolio…</Text>
+              </View>
+            ) : (
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                {importImageUri && (
+                  <View style={styles.previewRow}>
+                    <Image source={{ uri: importImageUri }} style={styles.previewThumb} />
+                    <View style={{ flex: 1 }}>
+                      <Text style={styles.previewLabel}>Portfolio screenshot</Text>
+                      {importAccountHint && (
+                        <Text style={styles.detectedHint}>
+                          <Feather name="cpu" size={11} color={colors.primary} /> Detected: {importAccountHint}
+                        </Text>
+                      )}
+                    </View>
+                  </View>
+                )}
+
+                <Text style={styles.reviewLabel}>Review & edit before importing</Text>
+
+                {importPositions.map(p => (
+                  <View key={p._key} style={styles.importCard}>
+                    <View style={styles.importCardHeader}>
+                      <Text style={styles.importSymbol}>{p.symbol || 'No symbol'}</Text>
+                      <Pressable onPress={() => removeImportPos(p._key)} style={styles.removeBtn}>
+                        <Feather name="x" size={15} color={colors.negative} />
+                      </Pressable>
+                    </View>
+                    <TextInput style={styles.importInput} placeholder="Symbol" placeholderTextColor={colors.textMuted} autoCapitalize="characters" value={p.symbol} onChangeText={v => updateImportPos(p._key, 'symbol', v)} />
+                    <TextInput style={styles.importInput} placeholder="Company name" placeholderTextColor={colors.textMuted} value={p.name} onChangeText={v => updateImportPos(p._key, 'name', v)} />
+                    <View style={styles.importRow}>
+                      <TextInput style={[styles.importInput, { flex: 1 }]} placeholder="Quantity" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={p.quantity} onChangeText={v => updateImportPos(p._key, 'quantity', v)} />
+                      <TextInput style={[styles.importInput, { flex: 1, marginLeft: 8 }]} placeholder="Avg cost ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={p.avgCost} onChangeText={v => updateImportPos(p._key, 'avgCost', v)} />
+                    </View>
+                    <TextInput style={styles.importInput} placeholder="Sector (optional)" placeholderTextColor={colors.textMuted} value={p.sector} onChangeText={v => updateImportPos(p._key, 'sector', v)} />
+                  </View>
+                ))}
+
+                <View style={styles.modalButtons}>
+                  <Pressable style={styles.cancelBtn} onPress={() => { setShowImport(false); setImportImageUri(null); }}>
+                    <Text style={styles.cancelText}>Cancel</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.saveBtn, (isImporting || importPositions.length === 0) && { opacity: 0.6 }]}
+                    onPress={handleImportAll}
+                    disabled={isImporting || importPositions.length === 0}
+                  >
+                    <Text style={styles.saveText}>
+                      {isImporting ? 'Importing…' : `Import ${importPositions.length} Position${importPositions.length !== 1 ? 's' : ''}`}
+                    </Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            )}
           </View>
         </View>
       </Modal>
@@ -297,10 +466,14 @@ const styles = StyleSheet.create({
   cashValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: colors.textPrimary },
+  sectionActions: { flexDirection: 'row', gap: 8 },
+  importBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.separator },
+  importBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textSecondary },
   addBtn: { flexDirection: 'row', alignItems: 'center', gap: 4, backgroundColor: colors.primary, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   addBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.background },
-  emptyCard: { alignItems: 'center', padding: 32, gap: 12 },
-  emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textMuted, textAlign: 'center' },
+  emptyCard: { alignItems: 'center', padding: 32, gap: 8 },
+  emptyText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: colors.textSecondary },
+  emptySubText: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center' },
   posCard: { marginBottom: 10 },
   posHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
   posSymbol: { fontFamily: 'Inter_700Bold', fontSize: 17, color: colors.textPrimary },
@@ -313,11 +486,18 @@ const styles = StyleSheet.create({
   posStatLabel: { fontFamily: 'Inter_400Regular', fontSize: 10, color: colors.textMuted, marginBottom: 2 },
   posStatVal: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary },
   sector: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 8 },
+  // Modals
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
   modal: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
   modalHandle: { width: 36, height: 4, backgroundColor: colors.separator, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary, marginBottom: 16 },
-  symbolWrapper: { position: 'relative', zIndex: 10, marginBottom: 0 },
+  modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary, marginBottom: 16, flex: 1 },
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  cancelBtn: { flex: 1, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.separator, alignItems: 'center' },
+  cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary },
+  saveBtn: { flex: 2, padding: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center' },
+  saveText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.background },
+  // Add Position
+  symbolWrapper: { position: 'relative', zIndex: 10 },
   symbolInputRow: { flexDirection: 'row', alignItems: 'center' },
   symbolInput: { flex: 1 },
   searchSpinner: { position: 'absolute', right: 14 },
@@ -326,11 +506,23 @@ const styles = StyleSheet.create({
   dropdownSymbol: { fontFamily: 'Inter_700Bold', fontSize: 14, color: colors.primary, width: 64 },
   dropdownName: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textPrimary, flex: 1 },
   dropdownType: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginLeft: 8 },
-  inputRow: { flexDirection: 'row', marginBottom: 0 },
+  inputRow: { flexDirection: 'row' },
   input: { backgroundColor: colors.surfaceElevated, borderRadius: 12, padding: 14, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 15, marginBottom: 12, borderWidth: 1, borderColor: colors.separator },
-  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  cancelBtn: { flex: 1, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.separator, alignItems: 'center' },
-  cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary },
-  saveBtn: { flex: 2, padding: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center' },
-  saveText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.background },
+  // Import modal
+  importModalHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 4 },
+  closeBtn: { padding: 4 },
+  parsingState: { alignItems: 'center', paddingVertical: 40 },
+  parsingThumb: { width: 120, height: 120, borderRadius: 12, backgroundColor: colors.surfaceElevated },
+  parsingText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary, marginTop: 12 },
+  previewRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,212,255,0.06)', borderRadius: 10, padding: 10, marginBottom: 16 },
+  previewThumb: { width: 52, height: 52, borderRadius: 6, backgroundColor: colors.surfaceElevated },
+  previewLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
+  detectedHint: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.primary, marginTop: 2 },
+  reviewLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, marginBottom: 10 },
+  importCard: { backgroundColor: colors.surfaceElevated, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.separator },
+  importCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
+  importSymbol: { fontFamily: 'Inter_700Bold', fontSize: 15, color: colors.primary },
+  removeBtn: { padding: 4 },
+  importInput: { backgroundColor: colors.surface, borderRadius: 8, padding: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.separator, marginBottom: 8 },
+  importRow: { flexDirection: 'row' },
 });

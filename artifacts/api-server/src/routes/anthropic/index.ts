@@ -142,12 +142,56 @@ Be direct but acknowledge risks. Format responses clearly with bullet points whe
 
 router.post("/parse-screenshot", async (req, res) => {
   try {
-    const { imageBase64, mediaType } = req.body;
+    const { imageBase64, mediaType, parseType = "activities" } = req.body;
     if (!imageBase64) return res.status(400).json({ error: "No image provided" });
+
+    const today = new Date().toISOString().split("T")[0];
+
+    const activitiesPrompt = `Analyze this brokerage or trading app screenshot carefully.
+
+First, identify the brokerage or account name visible in the screenshot (e.g. "Interactive Brokers", "Robinhood", "WIO Bank", etc.). This is the accountHint.
+
+Then extract ALL trade/transaction records shown. For each trade return:
+- activityType: one of "buy", "sell", "dividend", "deposit", "withdrawal" (required)
+- symbol: stock ticker exactly as shown (e.g. "AAPL", "MSFT") — null if not a stock trade
+- quantity: number of shares/units as a number — null if not shown
+- price: price per share/unit as a number — null if not shown
+- totalAmount: total transaction value as a number — null if not shown
+- tradeDate: the exact date shown in YYYY-MM-DD format. Today is ${today}. Look carefully for dates — they may be written as "Mar 19, 2026" or "19/03/2026" etc. Convert all to YYYY-MM-DD. If no date visible use ${today}.
+- notes: 1-line description of this row
+
+Return a JSON object (not array) with exactly these two keys:
+{"accountHint": "broker name or null", "trades": [...array of trade objects...]}
+
+Return ONLY valid JSON, no markdown, no code fences, no explanation.
+Example: {"accountHint":"Interactive Brokers","trades":[{"activityType":"buy","symbol":"AAPL","quantity":10,"price":185.50,"totalAmount":1855.00,"tradeDate":"2026-03-19","notes":"Market buy"}]}
+If no trades found: {"accountHint":null,"trades":[]}`;
+
+    const positionsPrompt = `Analyze this brokerage portfolio or holdings screenshot carefully.
+
+First, identify the brokerage or account name visible (e.g. "Interactive Brokers", "WIO Bank"). This is the accountHint.
+
+Then extract ALL positions/holdings shown. For each position return:
+- symbol: stock ticker exactly as shown (e.g. "AAPL") — required
+- name: company or ETF full name as shown — required
+- quantity: number of shares/units as a number — required
+- avgCost: average cost / average price paid per share as a number — use cost basis, avg price, or book value
+- currentPrice: current market price per share if shown — null if not shown
+- sector: sector or asset class if shown — null if not shown
+- notes: any additional info visible
+
+Return a JSON object with exactly two keys:
+{"accountHint": "broker name or null", "positions": [...array of position objects...]}
+
+Return ONLY valid JSON, no markdown, no code fences, no explanation.
+Example: {"accountHint":"WIO Bank","positions":[{"symbol":"NVDA","name":"NVIDIA Corporation","quantity":5,"avgCost":450.00,"currentPrice":875.00,"sector":"Technology","notes":""}]}
+If no positions found: {"accountHint":null,"positions":[]}`;
+
+    const prompt = parseType === "positions" ? positionsPrompt : activitiesPrompt;
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-6",
-      max_tokens: 1024,
+      max_tokens: 2048,
       messages: [{
         role: "user",
         content: [
@@ -159,30 +203,19 @@ router.post("/parse-screenshot", async (req, res) => {
               data: imageBase64,
             },
           },
-          {
-            type: "text",
-            text: `Analyze this brokerage or trade confirmation screenshot and extract all trade details.
-Return a JSON array of trades. Each trade object must have:
-- activityType: one of "buy", "sell", "dividend", "deposit", "withdrawal" (required)
-- symbol: stock ticker symbol if present (e.g. "AAPL")
-- quantity: number of shares as a number if present
-- price: price per share as a number if present
-- totalAmount: total dollar value as a number if present
-- tradeDate: date as YYYY-MM-DD if present, otherwise today
-- notes: short description of what you see
-
-Return ONLY a valid JSON array with no markdown, no explanation, no code fences.
-Example: [{"activityType":"buy","symbol":"AAPL","quantity":10,"price":185.50,"totalAmount":1855.00,"tradeDate":"2024-03-21","notes":"Market order buy"}]
-If no trades found, return: []`,
-          },
+          { type: "text", text: prompt },
         ],
       }],
     });
 
-    const text = response.content[0].type === "text" ? response.content[0].text : "[]";
-    const match = text.match(/\[[\s\S]*\]/);
-    const trades = match ? JSON.parse(match[0]) : [];
-    res.json({ trades });
+    const text = response.content[0].type === "text" ? response.content[0].text : "{}";
+    // Extract JSON object from response
+    const match = text.match(/\{[\s\S]*\}/);
+    if (!match) {
+      return res.json(parseType === "positions" ? { accountHint: null, positions: [] } : { accountHint: null, trades: [] });
+    }
+    const parsed = JSON.parse(match[0]);
+    res.json(parsed);
   } catch (error) {
     console.error("Parse screenshot error:", error);
     res.status(500).json({ error: "Failed to parse screenshot" });

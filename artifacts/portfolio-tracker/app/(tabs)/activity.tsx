@@ -26,24 +26,81 @@ const ACTIVITY_ICONS: Record<string, { icon: any; color: string }> = {
 
 const ACTIVITY_TYPES = ['buy', 'sell', 'dividend', 'deposit', 'withdrawal', 'note'];
 
+interface ParsedTrade {
+  _key: string;
+  activityType: string;
+  symbol: string;
+  quantity: string;
+  price: string;
+  notes: string;
+  tradeDate: string;
+}
+
+// Safely parse date from AI response, avoiding UTC midnight day-shift
+const parseDateSafe = (d: string | undefined): string => {
+  const today = new Date();
+  const todayStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  if (!d) return todayStr;
+  const clean = d.split('T')[0].trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(clean)) return clean;
+  try {
+    const p = new Date(d);
+    if (!isNaN(p.getTime())) {
+      return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}-${String(p.getDate()).padStart(2, '0')}`;
+    }
+  } catch {}
+  return todayStr;
+};
+
+// Treat date as noon UTC so timezone can't shift the day
+const dateToAPI = (d: string): string =>
+  /^\d{4}-\d{2}-\d{2}$/.test(d) ? `${d}T12:00:00.000Z` : new Date(d).toISOString();
+
 export default function ActivityScreen() {
   const insets = useSafeAreaInsets();
   const { accounts, activities, isLoading, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+
+  // Modal step: 'account' → pick account first, then 'manual' or 'review'
+  type Step = 'account' | 'manual' | 'review';
   const [showAdd, setShowAdd] = useState(false);
-  const [isSubmitting, setIsSubmitting] = useState(false);
+  const [step, setStep] = useState<Step>('account');
+  const [selectedAccountId, setSelectedAccountId] = useState('');
   const [isParsing, setIsParsing] = useState(false);
-  const [parsedImage, setParsedImage] = useState<string | null>(null);
-  const emptyForm = {
-    accountId: '',
-    symbol: '',
+  const [previewUri, setPreviewUri] = useState<string | null>(null);
+  const [detectedAccount, setDetectedAccount] = useState<string | null>(null);
+
+  // Multi-trade review state
+  const [parsedTrades, setParsedTrades] = useState<ParsedTrade[]>([]);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Manual single-trade form
+  const emptyManual: ParsedTrade = {
+    _key: 'manual',
     activityType: 'buy',
+    symbol: '',
     quantity: '',
     price: '',
     notes: '',
-    tradeDate: new Date().toISOString().split('T')[0],
+    tradeDate: parseDateSafe(undefined),
   };
-  const [form, setForm] = useState(emptyForm);
+  const [manualForm, setManualForm] = useState<ParsedTrade>(emptyManual);
+
+  useEffect(() => { refreshAll(); }, []);
+
+  const openModal = () => {
+    setStep('account');
+    setSelectedAccountId('');
+    setParsedTrades([]);
+    setManualForm(emptyManual);
+    setPreviewUri(null);
+    setDetectedAccount(null);
+    setShowAdd(true);
+  };
+
+  const closeModal = () => {
+    setShowAdd(false);
+  };
 
   const handlePickImage = async () => {
     const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -54,13 +111,16 @@ export default function ActivityScreen() {
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       base64: true,
-      quality: 0.8,
+      quality: 0.7,
     });
     if (result.canceled || !result.assets[0]) return;
     const asset = result.assets[0];
     if (!asset.base64) return;
+
     setIsParsing(true);
-    setParsedImage(asset.uri);
+    setPreviewUri(asset.uri);
+    setStep('review');
+
     try {
       const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
         method: 'POST',
@@ -68,62 +128,84 @@ export default function ActivityScreen() {
         body: JSON.stringify({
           imageBase64: asset.base64,
           mediaType: asset.mimeType || 'image/jpeg',
+          parseType: 'activities',
         }),
       });
       const data = await resp.json();
       const trades: any[] = data.trades || [];
-      if (trades.length > 0) {
-        const t = trades[0];
-        setForm(f => ({
-          ...f,
-          symbol: t.symbol || f.symbol,
-          activityType: t.activityType || f.activityType,
-          quantity: t.quantity ? String(t.quantity) : f.quantity,
-          price: t.price ? String(t.price) : f.price,
-          notes: t.notes || f.notes,
-          tradeDate: t.tradeDate || f.tradeDate,
-        }));
-        if (trades.length > 1) {
-          Alert.alert('Multiple trades found', `Found ${trades.length} trades. Showing the first one. Add it and repeat for others.`);
-        }
+      const hint: string | null = data.accountHint || null;
+      setDetectedAccount(hint);
+
+      // If account hint matches one of the accounts, auto-select it
+      if (hint && !selectedAccountId) {
+        const match = accounts.find(a =>
+          a.name.toLowerCase().includes(hint.toLowerCase()) ||
+          hint.toLowerCase().includes(a.name.toLowerCase()) ||
+          (a.broker && a.broker.toLowerCase().includes(hint.toLowerCase()))
+        );
+        if (match) setSelectedAccountId(match.id.toString());
+      }
+
+      if (trades.length === 0) {
+        Alert.alert('No trades found', 'Claude could not detect trades in this image. Try a clearer screenshot or enter manually.');
+        setStep('account');
+        setPreviewUri(null);
       } else {
-        Alert.alert('No trades found', 'Claude could not extract trade details from this image. Try a clearer screenshot.');
+        setParsedTrades(trades.map((t: any, i: number) => ({
+          _key: `t${i}_${Date.now()}`,
+          activityType: t.activityType || 'buy',
+          symbol: t.symbol || '',
+          quantity: t.quantity != null ? String(t.quantity) : '',
+          price: t.price != null ? String(t.price) : '',
+          notes: t.notes || '',
+          tradeDate: parseDateSafe(t.tradeDate),
+        })));
       }
     } catch {
       Alert.alert('Error', 'Failed to parse screenshot.');
+      setStep('account');
+      setPreviewUri(null);
     } finally {
       setIsParsing(false);
     }
   };
 
-  useEffect(() => {
-    refreshAll();
-  }, []);
+  const updateParsedTrade = (key: string, field: keyof ParsedTrade, val: string) => {
+    setParsedTrades(ts => ts.map(t => t._key === key ? { ...t, [field]: val } : t));
+  };
 
-  const handleAdd = async () => {
-    if (!form.accountId || !form.activityType) {
-      Alert.alert('Missing fields', 'Please select an account and activity type');
+  const removeParsedTrade = (key: string) => {
+    setParsedTrades(ts => ts.filter(t => t._key !== key));
+  };
+
+  const submitTrades = async (trades: ParsedTrade[], accountId: string) => {
+    if (!accountId) {
+      Alert.alert('Select account', 'Please select which account these trades belong to.');
+      return;
+    }
+    if (trades.length === 0) {
+      Alert.alert('No trades', 'Add at least one trade to submit.');
       return;
     }
     if (isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await apiPost('/activities', {
-        accountId: parseInt(form.accountId),
-        symbol: form.symbol || undefined,
-        activityType: form.activityType,
-        quantity: form.quantity ? parseFloat(form.quantity) : undefined,
-        price: form.price ? parseFloat(form.price) : undefined,
-        notes: form.notes || undefined,
-        tradeDate: new Date(form.tradeDate).toISOString(),
-      });
-      setShowAdd(false);
-      setForm(emptyForm);
-      setParsedImage(null);
+      for (const t of trades) {
+        await apiPost('/activities', {
+          accountId: parseInt(accountId),
+          symbol: t.symbol.trim().toUpperCase() || undefined,
+          activityType: t.activityType,
+          quantity: t.quantity ? parseFloat(t.quantity) : undefined,
+          price: t.price ? parseFloat(t.price) : undefined,
+          notes: t.notes || undefined,
+          tradeDate: dateToAPI(t.tradeDate),
+        });
+      }
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      closeModal();
       await refreshAll();
     } catch {
-      Alert.alert('Error', 'Failed to log activity');
+      Alert.alert('Error', 'Failed to log some activities. Please try again.');
     } finally {
       setIsSubmitting(false);
     }
@@ -139,9 +221,7 @@ export default function ActivityScreen() {
             await apiDelete(`/activities/${id}`);
             Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Medium);
             await refreshAll();
-          } catch {
-            Alert.alert('Error', 'Failed to delete');
-          }
+          } catch { Alert.alert('Error', 'Failed to delete'); }
         }
       }
     ]);
@@ -187,11 +267,102 @@ export default function ActivityScreen() {
     );
   };
 
+  // ─── Render parsed trade card (editable) ────────────────────────────────────
+  const renderTradeCard = (t: ParsedTrade) => (
+    <View key={t._key} style={styles.tradeCard}>
+      <View style={styles.tradeCardHeader}>
+        <View style={styles.typeRow}>
+          {ACTIVITY_TYPES.map(type => (
+            <Pressable
+              key={type}
+              style={[styles.typeChip, t.activityType === type && styles.typeChipSelected]}
+              onPress={() => updateParsedTrade(t._key, 'activityType', type)}
+            >
+              <Text style={[styles.typeChipText, t.activityType === type && styles.typeChipTextSelected]}>
+                {type.charAt(0).toUpperCase() + type.slice(1)}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+        <Pressable onPress={() => removeParsedTrade(t._key)} style={styles.tradeDeleteBtn}>
+          <Feather name="x" size={16} color={colors.negative} />
+        </Pressable>
+      </View>
+      <View style={styles.tradeInputRow}>
+        <TextInput
+          style={[styles.tradeInput, { flex: 1 }]}
+          placeholder="Symbol"
+          placeholderTextColor={colors.textMuted}
+          autoCapitalize="characters"
+          value={t.symbol}
+          onChangeText={v => updateParsedTrade(t._key, 'symbol', v)}
+        />
+        <TextInput
+          style={[styles.tradeInput, { flex: 1, marginLeft: 8 }]}
+          placeholder="Date (YYYY-MM-DD)"
+          placeholderTextColor={colors.textMuted}
+          value={t.tradeDate}
+          onChangeText={v => updateParsedTrade(t._key, 'tradeDate', v)}
+        />
+      </View>
+      <View style={styles.tradeInputRow}>
+        <TextInput
+          style={[styles.tradeInput, { flex: 1 }]}
+          placeholder="Qty"
+          placeholderTextColor={colors.textMuted}
+          keyboardType="decimal-pad"
+          value={t.quantity}
+          onChangeText={v => updateParsedTrade(t._key, 'quantity', v)}
+        />
+        <TextInput
+          style={[styles.tradeInput, { flex: 1, marginLeft: 8 }]}
+          placeholder="Price $"
+          placeholderTextColor={colors.textMuted}
+          keyboardType="decimal-pad"
+          value={t.price}
+          onChangeText={v => updateParsedTrade(t._key, 'price', v)}
+        />
+      </View>
+      <TextInput
+        style={styles.tradeInput}
+        placeholder="Notes (optional)"
+        placeholderTextColor={colors.textMuted}
+        value={t.notes}
+        onChangeText={v => updateParsedTrade(t._key, 'notes', v)}
+      />
+    </View>
+  );
+
+  // ─── Shared account picker (used in both steps) ───────────────────────────
+  const AccountPicker = () => (
+    <View>
+      <Text style={styles.stepLabel}>Select Account</Text>
+      {detectedAccount && (
+        <Text style={styles.detectedHint}>
+          <Feather name="cpu" size={11} color={colors.primary} /> Detected: {detectedAccount}
+        </Text>
+      )}
+      <View style={styles.accountChips}>
+        {accounts.map(a => (
+          <Pressable
+            key={a.id}
+            style={[styles.accountChip, selectedAccountId === a.id.toString() && styles.accountChipSelected]}
+            onPress={() => setSelectedAccountId(a.id.toString())}
+          >
+            <Text style={[styles.accountChipText, selectedAccountId === a.id.toString() && styles.accountChipTextSelected]}>
+              {a.name}
+            </Text>
+          </Pressable>
+        ))}
+      </View>
+    </View>
+  );
+
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
       <View style={styles.header}>
         <Text style={styles.title}>Activity</Text>
-        <Pressable style={styles.addBtn} onPress={() => { Haptics.selectionAsync(); setShowAdd(true); }}>
+        <Pressable style={styles.addBtn} onPress={() => { Haptics.selectionAsync(); openModal(); }}>
           <Feather name="plus" size={20} color={colors.background} />
         </Pressable>
       </View>
@@ -221,76 +392,159 @@ export default function ActivityScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />
-            <View style={styles.modalTitleRow}>
-              <Text style={styles.modalTitle}>Log Activity</Text>
-              <Pressable style={styles.scanBtn} onPress={handlePickImage} disabled={isParsing}>
-                {isParsing
-                  ? <ActivityIndicator size="small" color={colors.primary} />
-                  : <><Feather name="camera" size={15} color={colors.primary} /><Text style={styles.scanBtnText}>Scan</Text></>
-                }
-              </Pressable>
-            </View>
 
-            {parsedImage && (
-              <View style={styles.parsedImageRow}>
-                <Image source={{ uri: parsedImage }} style={styles.parsedThumb} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.parsedLabel}>
-                    {isParsing ? 'Parsing with AI…' : 'Form pre-filled from screenshot'}
-                  </Text>
-                  <Pressable onPress={() => { setParsedImage(null); }}>
-                    <Text style={styles.parsedClear}>Clear</Text>
+            {/* ── Step: Account Selection ── */}
+            {step === 'account' && (
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <View style={styles.modalTitleRow}>
+                  <Text style={styles.modalTitle}>Log Activity</Text>
+                  <Pressable style={styles.closeBtn} onPress={closeModal}>
+                    <Feather name="x" size={20} color={colors.textMuted} />
                   </Pressable>
                 </View>
-              </View>
+
+                <AccountPicker />
+
+                <View style={styles.actionButtons}>
+                  <Pressable
+                    style={[styles.actionBtn, styles.actionBtnSecondary]}
+                    onPress={() => { setStep('manual'); setManualForm(emptyManual); }}
+                  >
+                    <Feather name="edit-3" size={18} color={colors.textSecondary} />
+                    <Text style={styles.actionBtnSecondaryText}>Manual Entry</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.actionBtn, styles.actionBtnPrimary]}
+                    onPress={handlePickImage}
+                  >
+                    <Feather name="camera" size={18} color={colors.background} />
+                    <Text style={styles.actionBtnPrimaryText}>Scan Screenshot</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
             )}
 
-            <Text style={styles.fieldLabel}>Account</Text>
-            <View style={styles.pickerRow}>
-              {accounts.map(a => (
-                <Pressable
-                  key={a.id}
-                  style={[styles.chip, form.accountId === a.id.toString() && styles.chipSelected]}
-                  onPress={() => setForm(f => ({ ...f, accountId: a.id.toString() }))}
-                >
-                  <Text style={[styles.chipText, form.accountId === a.id.toString() && styles.chipTextSelected]}>
-                    {a.name}
+            {/* ── Step: Manual Entry ── */}
+            {step === 'manual' && (
+              <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                <View style={styles.modalTitleRow}>
+                  <Pressable onPress={() => setStep('account')} style={styles.backBtn}>
+                    <Feather name="arrow-left" size={18} color={colors.textSecondary} />
+                  </Pressable>
+                  <Text style={styles.modalTitle}>Manual Entry</Text>
+                  <Pressable style={styles.closeBtn} onPress={closeModal}>
+                    <Feather name="x" size={20} color={colors.textMuted} />
+                  </Pressable>
+                </View>
+
+                <AccountPicker />
+
+                <Text style={styles.fieldLabel}>Type</Text>
+                <View style={styles.pickerRow}>
+                  {ACTIVITY_TYPES.map(t => (
+                    <Pressable
+                      key={t}
+                      style={[styles.chip, manualForm.activityType === t && styles.chipSelected]}
+                      onPress={() => setManualForm(f => ({ ...f, activityType: t }))}
+                    >
+                      <Text style={[styles.chipText, manualForm.activityType === t && styles.chipTextSelected]}>
+                        {t.charAt(0).toUpperCase() + t.slice(1)}
+                      </Text>
+                    </Pressable>
+                  ))}
+                </View>
+
+                <TextInput style={styles.input} placeholder="Symbol (e.g. AAPL)" placeholderTextColor={colors.textMuted} autoCapitalize="characters" value={manualForm.symbol} onChangeText={v => setManualForm(f => ({ ...f, symbol: v }))} />
+                <View style={styles.row}>
+                  <TextInput style={[styles.input, { flex: 1 }]} placeholder="Qty" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={manualForm.quantity} onChangeText={v => setManualForm(f => ({ ...f, quantity: v }))} />
+                  <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Price $" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={manualForm.price} onChangeText={v => setManualForm(f => ({ ...f, price: v }))} />
+                </View>
+                <TextInput style={styles.input} placeholder="Notes (optional)" placeholderTextColor={colors.textMuted} value={manualForm.notes} onChangeText={v => setManualForm(f => ({ ...f, notes: v }))} />
+                <TextInput style={styles.input} placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.textMuted} value={manualForm.tradeDate} onChangeText={v => setManualForm(f => ({ ...f, tradeDate: v }))} />
+
+                <View style={styles.modalButtons}>
+                  <Pressable style={styles.cancelBtn} onPress={() => setStep('account')}>
+                    <Text style={styles.cancelText}>Back</Text>
+                  </Pressable>
+                  <Pressable
+                    style={[styles.saveBtn, isSubmitting && { opacity: 0.6 }]}
+                    onPress={() => submitTrades([manualForm], selectedAccountId)}
+                    disabled={isSubmitting}
+                  >
+                    <Text style={styles.saveText}>{isSubmitting ? 'Logging…' : 'Log Activity'}</Text>
+                  </Pressable>
+                </View>
+              </ScrollView>
+            )}
+
+            {/* ── Step: Review Parsed Trades ── */}
+            {step === 'review' && (
+              <View style={{ flex: 1 }}>
+                <View style={styles.modalTitleRow}>
+                  <Pressable onPress={() => { setStep('account'); setPreviewUri(null); }} style={styles.backBtn}>
+                    <Feather name="arrow-left" size={18} color={colors.textSecondary} />
+                  </Pressable>
+                  <Text style={styles.modalTitle}>
+                    {isParsing ? 'Scanning…' : `${parsedTrades.length} Trade${parsedTrades.length !== 1 ? 's' : ''} Found`}
                   </Text>
-                </Pressable>
-              ))}
-            </View>
+                  <Pressable style={styles.closeBtn} onPress={closeModal}>
+                    <Feather name="x" size={20} color={colors.textMuted} />
+                  </Pressable>
+                </View>
 
-            <Text style={styles.fieldLabel}>Type</Text>
-            <View style={styles.pickerRow}>
-              {ACTIVITY_TYPES.map(t => (
-                <Pressable
-                  key={t}
-                  style={[styles.chip, form.activityType === t && styles.chipSelected]}
-                  onPress={() => setForm(f => ({ ...f, activityType: t }))}
-                >
-                  <Text style={[styles.chipText, form.activityType === t && styles.chipTextSelected]}>
-                    {t.charAt(0).toUpperCase() + t.slice(1)}
-                  </Text>
-                </Pressable>
-              ))}
-            </View>
+                {isParsing ? (
+                  <View style={styles.parsingState}>
+                    {previewUri && <Image source={{ uri: previewUri }} style={styles.parsingThumb} />}
+                    <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />
+                    <Text style={styles.parsingText}>Claude is reading your screenshot…</Text>
+                  </View>
+                ) : (
+                  <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
+                    {previewUri && (
+                      <View style={styles.previewRow}>
+                        <Image source={{ uri: previewUri }} style={styles.previewThumb} />
+                        <View style={{ flex: 1 }}>
+                          <Text style={styles.previewLabel}>Scanned screenshot</Text>
+                          {detectedAccount && (
+                            <Text style={styles.detectedHint}>
+                              <Feather name="cpu" size={11} color={colors.primary} /> Detected: {detectedAccount}
+                            </Text>
+                          )}
+                        </View>
+                      </View>
+                    )}
 
-            <TextInput style={styles.input} placeholder="Symbol (e.g. AAPL)" placeholderTextColor={colors.textMuted} autoCapitalize="characters" value={form.symbol} onChangeText={t => setForm(f => ({ ...f, symbol: t }))} />
-            <View style={styles.row}>
-              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Qty" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.quantity} onChangeText={t => setForm(f => ({ ...f, quantity: t }))} />
-              <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Price" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.price} onChangeText={t => setForm(f => ({ ...f, price: t }))} />
-            </View>
-            <TextInput style={styles.input} placeholder="Notes (optional)" placeholderTextColor={colors.textMuted} value={form.notes} onChangeText={t => setForm(f => ({ ...f, notes: t }))} />
-            <TextInput style={styles.input} placeholder="Date (YYYY-MM-DD)" placeholderTextColor={colors.textMuted} value={form.tradeDate} onChangeText={t => setForm(f => ({ ...f, tradeDate: t }))} />
+                    <AccountPicker />
 
-            <View style={styles.modalButtons}>
-              <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
-                <Text style={styles.cancelText}>Cancel</Text>
-              </Pressable>
-              <Pressable style={[styles.saveBtn, isSubmitting && { opacity: 0.6 }]} onPress={handleAdd} disabled={isSubmitting}>
-                <Text style={styles.saveText}>{isSubmitting ? 'Logging…' : 'Log Activity'}</Text>
-              </Pressable>
-            </View>
+                    <Text style={styles.fieldLabel}>Review & Edit Trades</Text>
+                    {parsedTrades.map(t => renderTradeCard(t))}
+
+                    <Pressable
+                      style={styles.addTradeBtn}
+                      onPress={() => setParsedTrades(ts => [...ts, { ...emptyManual, _key: `new_${Date.now()}` }])}
+                    >
+                      <Feather name="plus" size={14} color={colors.primary} />
+                      <Text style={styles.addTradeBtnText}>Add another trade</Text>
+                    </Pressable>
+
+                    <View style={styles.modalButtons}>
+                      <Pressable style={styles.cancelBtn} onPress={() => { setStep('account'); setPreviewUri(null); }}>
+                        <Text style={styles.cancelText}>Back</Text>
+                      </Pressable>
+                      <Pressable
+                        style={[styles.saveBtn, (isSubmitting || parsedTrades.length === 0) && { opacity: 0.6 }]}
+                        onPress={() => submitTrades(parsedTrades, selectedAccountId)}
+                        disabled={isSubmitting || parsedTrades.length === 0}
+                      >
+                        <Text style={styles.saveText}>
+                          {isSubmitting ? 'Importing…' : `Import ${parsedTrades.length} Trade${parsedTrades.length !== 1 ? 's' : ''}`}
+                        </Text>
+                      </Pressable>
+                    </View>
+                  </ScrollView>
+                )}
+              </View>
+            )}
           </View>
         </View>
       </Modal>
@@ -320,17 +574,50 @@ const styles = StyleSheet.create({
   emptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 18, color: colors.textSecondary },
   emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textMuted, textAlign: 'center', paddingHorizontal: 40 },
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
-  modal: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
+  modal: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20, maxHeight: '90%' },
   modalHandle: { width: 36, height: 4, backgroundColor: colors.separator, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  modalTitleRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
-  modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary },
-  scanBtn: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.primary },
-  scanBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.primary },
-  parsedImageRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,212,255,0.06)', borderRadius: 10, padding: 10, marginBottom: 12 },
-  parsedThumb: { width: 52, height: 52, borderRadius: 6, backgroundColor: colors.surfaceElevated },
-  parsedLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
-  parsedClear: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: colors.primary, marginTop: 4 },
-  fieldLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, marginBottom: 8 },
+  modalTitleRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary, flex: 1, textAlign: 'center' },
+  backBtn: { padding: 4, marginRight: 4 },
+  closeBtn: { padding: 4 },
+  // Account picker
+  stepLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.textSecondary, marginBottom: 10 },
+  accountChips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 8 },
+  accountChip: { paddingHorizontal: 14, paddingVertical: 10, borderRadius: 12, borderWidth: 1.5, borderColor: colors.separator, backgroundColor: colors.surfaceElevated },
+  accountChipSelected: { borderColor: colors.primary, backgroundColor: 'rgba(0,212,255,0.12)' },
+  accountChipText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.textSecondary },
+  accountChipTextSelected: { color: colors.primary },
+  detectedHint: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.primary, marginBottom: 12 },
+  // Action buttons
+  actionButtons: { flexDirection: 'row', gap: 10, marginTop: 20 },
+  actionBtn: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8, paddingVertical: 16, borderRadius: 14 },
+  actionBtnSecondary: { borderWidth: 1, borderColor: colors.separator, backgroundColor: colors.surfaceElevated },
+  actionBtnPrimary: { backgroundColor: colors.primary },
+  actionBtnSecondaryText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.textSecondary },
+  actionBtnPrimaryText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.background },
+  // Parsing state
+  parsingState: { alignItems: 'center', paddingVertical: 40 },
+  parsingThumb: { width: 120, height: 120, borderRadius: 12, backgroundColor: colors.surfaceElevated },
+  parsingText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary, marginTop: 12 },
+  // Preview row
+  previewRow: { flexDirection: 'row', alignItems: 'center', gap: 10, backgroundColor: 'rgba(0,212,255,0.06)', borderRadius: 10, padding: 10, marginBottom: 16 },
+  previewThumb: { width: 52, height: 52, borderRadius: 6, backgroundColor: colors.surfaceElevated },
+  previewLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
+  // Trade review cards
+  tradeCard: { backgroundColor: colors.surfaceElevated, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.separator },
+  tradeCardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
+  typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, flex: 1 },
+  typeChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 16, borderWidth: 1, borderColor: colors.separator },
+  typeChipSelected: { borderColor: colors.primary, backgroundColor: 'rgba(0,212,255,0.12)' },
+  typeChipText: { fontFamily: 'Inter_500Medium', fontSize: 11, color: colors.textMuted },
+  typeChipTextSelected: { color: colors.primary },
+  tradeDeleteBtn: { padding: 4, marginLeft: 4 },
+  tradeInputRow: { flexDirection: 'row', marginBottom: 8 },
+  tradeInput: { backgroundColor: colors.surface, borderRadius: 8, padding: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.separator, marginBottom: 8 },
+  addTradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', paddingVertical: 10, marginBottom: 12 },
+  addTradeBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.primary },
+  // Manual form
+  fieldLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, marginBottom: 8, marginTop: 4 },
   pickerRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
   chip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.separator, backgroundColor: colors.surfaceElevated },
   chipSelected: { borderColor: colors.primary, backgroundColor: 'rgba(0,212,255,0.1)' },
@@ -338,7 +625,7 @@ const styles = StyleSheet.create({
   chipTextSelected: { color: colors.primary },
   input: { backgroundColor: colors.surfaceElevated, borderRadius: 12, padding: 14, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 15, marginBottom: 12, borderWidth: 1, borderColor: colors.separator },
   row: { flexDirection: 'row' },
-  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8, marginBottom: 8 },
   cancelBtn: { flex: 1, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.separator, alignItems: 'center' },
   cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary },
   saveBtn: { flex: 2, padding: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center' },

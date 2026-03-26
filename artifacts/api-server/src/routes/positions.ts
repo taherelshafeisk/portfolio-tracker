@@ -1,39 +1,122 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { positionsTable } from "@workspace/db";
-import { eq, inArray } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 
 const YAHOO_BASE = "https://query1.finance.yahoo.com";
 
-async function fetchLivePrice(symbol: string): Promise<number | null> {
+// Crypto base symbols that collide with stock tickers on Yahoo Finance.
+// Must be fetched as {symbol}-USD to get crypto prices.
+const CRYPTO_SYMBOLS = new Set([
+  "BTC", "ETH", "SOL", "ADA", "XRP", "DOGE", "AVAX", "DOT", "MATIC",
+  "LINK", "UNI", "ATOM", "LTC", "BCH", "XLM", "ALGO", "VET", "FIL",
+  "TRX", "SHIB", "BNB", "NEAR", "FTM", "SAND", "MANA", "THETA", "HBAR",
+  "ICP", "ETC", "FLOW", "CHZ", "APE", "CRO", "GRT", "ENJ", "BAT",
+  "ZEC", "DASH", "NEO", "EOS", "PEPE", "WIF", "BONK", "ARB", "OP",
+  "SUI", "APT", "INJ", "TIA", "SEI", "RUNE", "CRV", "AAVE", "COMP",
+  "MKR", "SNX", "YFI", "SUSHI", "ZRX",
+]);
+
+// Explicit overrides for symbols that don't match Yahoo Finance tickers directly.
+const SYMBOL_OVERRIDES: Record<string, string> = {
+  "GOLD": "XAUUSD=X",
+  "XAU":  "XAUUSD=X",
+  "SILVER": "XAGUSD=X",
+  "XAG":  "XAGUSD=X",
+};
+
+/** Map a user-facing symbol to the Yahoo Finance ticker (e.g. BTC → BTC-USD, GOLD → XAUUSD=X). */
+function toYahooSymbol(symbol: string): string {
+  const upper = symbol.toUpperCase();
+  if (SYMBOL_OVERRIDES[upper]) return SYMBOL_OVERRIDES[upper];
+  if (!upper.includes("-") && !upper.includes(".") && CRYPTO_SYMBOLS.has(upper)) {
+    return `${upper}-USD`;
+  }
+  return symbol;
+}
+
+export interface LivePriceData {
+  price: number;
+  previousClose: number | null;
+  changePercent: number | null; // Yahoo's pre-computed daily % change (handles open & closed market)
+}
+
+// In-memory price cache with 60-second TTL
+const _priceCache = new Map<string, { data: LivePriceData; ts: number }>();
+const CACHE_TTL_MS = 60_000;
+
+async function fetchLivePrice(symbol: string): Promise<LivePriceData | null> {
   try {
+    const yahooSymbol = toYahooSymbol(symbol);
     const res = await fetch(
-      `${YAHOO_BASE}/v8/finance/chart/${symbol}?interval=1d&range=5d`,
+      `${YAHOO_BASE}/v8/finance/chart/${yahooSymbol}?interval=1d&range=5d`,
       { headers: { "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64)" } }
     );
     if (!res.ok) return null;
-    const data = await res.json();
-    const price = data?.chart?.result?.[0]?.meta?.regularMarketPrice;
-    return typeof price === "number" ? price : null;
+    const json = await res.json();
+    const meta = json?.chart?.result?.[0]?.meta;
+    const price = meta?.regularMarketPrice;
+    if (typeof price !== "number") return null;
+
+    // Use OHLCV close array for reliable day-change in both open & closed market
+    const closes: (number | null)[] = json?.chart?.result?.[0]?.indicators?.quote?.[0]?.close ?? [];
+    const validCloses = closes.filter((c): c is number => typeof c === "number" && c > 0);
+    const marketState: string = meta?.marketState ?? "CLOSED";
+
+    // Yahoo duplicates the last close when market is closed — strip trailing dupes
+    let tail = validCloses.length;
+    while (tail > 1 && validCloses[tail - 1] === validCloses[tail - 2]) tail--;
+    const dedupedCloses = validCloses.slice(0, tail);
+
+    let changePercent: number | null = null;
+    let previousClose: number | null = null;
+
+    if (marketState === "REGULAR" && dedupedCloses.length >= 1) {
+      // Market open: live price vs last session's close
+      previousClose = dedupedCloses[dedupedCloses.length - 1];
+      changePercent = previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : null;
+    } else if (dedupedCloses.length >= 2) {
+      // Market closed/pre/post: last session close vs session before it
+      previousClose = dedupedCloses[dedupedCloses.length - 2];
+      const lastClose = dedupedCloses[dedupedCloses.length - 1];
+      changePercent = previousClose > 0 ? ((lastClose - previousClose) / previousClose) * 100 : null;
+    }
+
+    return { price, previousClose, changePercent };
   } catch {
     return null;
   }
 }
 
-async function fetchLivePrices(symbols: string[]): Promise<Record<string, number>> {
-  const unique = [...new Set(symbols)];
-  const results = await Promise.allSettled(
-    unique.map(async (sym) => ({ sym, price: await fetchLivePrice(sym) }))
-  );
-  const priceMap: Record<string, number> = {};
-  for (const r of results) {
-    if (r.status === "fulfilled" && r.value.price !== null) {
-      priceMap[r.value.sym] = r.value.price;
+async function fetchLivePrices(symbols: string[]): Promise<Record<string, LivePriceData>> {
+  const now = Date.now();
+  const result: Record<string, LivePriceData> = {};
+  const toFetch: string[] = [];
+
+  for (const sym of [...new Set(symbols)]) {
+    const cached = _priceCache.get(sym);
+    if (cached && now - cached.ts < CACHE_TTL_MS) {
+      result[sym] = cached.data;
+    } else {
+      toFetch.push(sym);
     }
   }
-  return priceMap;
+
+  if (toFetch.length > 0) {
+    const results = await Promise.allSettled(
+      toFetch.map(async (sym) => ({ sym, data: await fetchLivePrice(sym) }))
+    );
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.data !== null) {
+        _priceCache.set(r.value.sym, { data: r.value.data, ts: now });
+        result[r.value.sym] = r.value.data;
+      }
+    }
+  }
+
+  return result;
 }
 
 function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: number) {
@@ -66,8 +149,8 @@ router.post("/", async (req, res) => {
     const { accountId, symbol, name, quantity, avgCost, sector, notes } = req.body;
     const upperSymbol = symbol.toUpperCase();
 
-    // Fetch live price at insert time
-    const livePrice = await fetchLivePrice(upperSymbol);
+    const livePriceData = await fetchLivePrice(upperSymbol);
+    const livePrice = livePriceData?.price ?? null;
     const priceToStore = livePrice ?? parseFloat(avgCost);
 
     const [position] = await db.insert(positionsTable).values({
@@ -115,7 +198,6 @@ router.delete("/:id", async (req, res) => {
   }
 });
 
-// Refresh live prices for a list of position IDs and persist to DB
 router.post("/refresh-prices", async (req, res) => {
   try {
     const { accountId } = req.body as { accountId?: number };
@@ -130,13 +212,12 @@ router.post("/refresh-prices", async (req, res) => {
     const symbols = positions.map(p => p.symbol);
     const priceMap = await fetchLivePrices(symbols);
 
-    // Update DB for each position that has a live price
     const updates = await Promise.allSettled(
       positions
         .filter(p => priceMap[p.symbol] !== undefined)
         .map(p =>
           db.update(positionsTable)
-            .set({ currentPrice: priceMap[p.symbol].toString(), updatedAt: new Date() })
+            .set({ currentPrice: priceMap[p.symbol].price.toString(), updatedAt: new Date() })
             .where(eq(positionsTable.id, p.id))
         )
     );

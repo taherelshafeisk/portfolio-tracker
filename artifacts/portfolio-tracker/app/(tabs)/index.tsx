@@ -13,6 +13,7 @@ import { Card } from '@/components/ui/Card';
 import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
 import { AccountTypeBadge } from '@/components/ui/AccountTypeBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { BrokerLogo } from '@/components/ui/BrokerLogo';
 
 interface MarketIndex {
   symbol: string;
@@ -105,6 +106,27 @@ export default function PortfolioScreen() {
                 {summary?.positionCount ?? 0} positions · {summary?.accountCount ?? 0} accounts
               </Text>
             </View>
+            {(summary?.dayChange !== undefined && summary.dayChange !== 0) && (
+              <View style={styles.dailyRow}>
+                <Text style={styles.dailyLabel}>Today</Text>
+                <Text style={[styles.dailyVal, { color: summary.dayChange >= 0 ? colors.positive : colors.negative }]}>
+                  {summary.dayChange >= 0 ? '+' : ''}{formatCurrency(summary.dayChange)}
+                  {' '}({summary.dayChangePct >= 0 ? '+' : ''}{summary.dayChangePct.toFixed(2)}%)
+                </Text>
+              </View>
+            )}
+            {(summary?.topMovers?.length ?? 0) > 0 && (
+              <View style={styles.moversRow}>
+                {summary!.topMovers.map(m => (
+                  <View key={m.symbol} style={[styles.moverChip, { backgroundColor: m.dayChangePct >= 0 ? 'rgba(0,230,118,0.1)' : 'rgba(255,71,87,0.1)' }]}>
+                    <Text style={styles.moverSymbol}>{m.symbol}</Text>
+                    <Text style={[styles.moverPct, { color: m.dayChangePct >= 0 ? colors.positive : colors.negative }]}>
+                      {m.dayChangePct >= 0 ? '+' : ''}{m.dayChangePct.toFixed(2)}%
+                    </Text>
+                  </View>
+                ))}
+              </View>
+            )}
           </Card>
         )}
 
@@ -138,6 +160,31 @@ export default function PortfolioScreen() {
           }
         </ScrollView>
 
+        {/* Top Positions */}
+        {(summary?.topPositions?.length ?? 0) > 0 && (
+          <>
+            <Text style={styles.sectionTitle}>Top Positions</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.indicesScroll}>
+              {summary!.topPositions.map(pos => {
+                const isUp = pos.dayChangePct >= 0;
+                return (
+                  <Card key={pos.symbol} style={styles.indexCard}>
+                    <Text style={styles.indexName}>{pos.symbol}</Text>
+                    <Text style={styles.indexPrice}>
+                      {pos.currentPrice >= 1000
+                        ? pos.currentPrice.toLocaleString('en-US', { maximumFractionDigits: 0 })
+                        : pos.currentPrice.toFixed(2)}
+                    </Text>
+                    <Text style={[styles.indexChange, { color: isUp ? colors.positive : colors.negative }]}>
+                      {isUp ? '+' : ''}{pos.dayChangePct.toFixed(2)}%
+                    </Text>
+                  </Card>
+                );
+              })}
+            </ScrollView>
+          </>
+        )}
+
         {/* Account Breakdown */}
         <Text style={styles.sectionTitle}>Accounts</Text>
         {accounts.length === 0 && !isLoading ? (
@@ -153,7 +200,10 @@ export default function PortfolioScreen() {
               <Card key={acc.id} style={styles.accountCard} onPress={() => router.push({ pathname: '/account/[id]', params: { id: acc.id.toString() } })}>
                 <View style={styles.accountRow}>
                   <View style={styles.accountLeft}>
-                    <AccountTypeBadge type={acc.accountType as any} size="sm" />
+                    <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                      <BrokerLogo broker={accounts.find(a => a.id === acc.id)?.broker ?? ''} size={32} />
+                      <AccountTypeBadge type={acc.accountType as any} size="sm" />
+                    </View>
                     <Text style={styles.accountName}>{acc.name}</Text>
                   </View>
                   <View style={styles.accountRight}>
@@ -163,18 +213,26 @@ export default function PortfolioScreen() {
                     </Text>
                   </View>
                 </View>
-                <View style={styles.progressBar}>
-                  <View
-                    style={[
-                      styles.progressFill,
-                      {
-                        width: `${Math.min(100, Math.abs((acc.nav / (summary?.totalNav || 1)) * 100))}%`,
-                        backgroundColor: pos ? colors.positive : colors.negative,
-                      }
-                    ]}
-                  />
+                <View style={styles.accountFooter}>
+                  {(acc.dayChange != null && acc.dayChange !== 0) ? (
+                    <Text style={[styles.accountDayPnl, { color: acc.dayChange >= 0 ? colors.positive : colors.negative }]}>
+                      {acc.dayChange >= 0 ? '+' : ''}{formatCurrency(acc.dayChange)} ({(acc.dayChangePct ?? 0) >= 0 ? '+' : ''}{(acc.dayChangePct ?? 0).toFixed(2)}%) today
+                    </Text>
+                  ) : null}
+                  <Text style={styles.positionCount}>{acc.positionCount} positions</Text>
                 </View>
-                <Text style={styles.positionCount}>{acc.positionCount} positions</Text>
+                {(acc.topMovers?.length ?? 0) > 0 && (
+                  <View style={styles.moversRow}>
+                    {acc.topMovers.map(m => (
+                      <View key={m.symbol} style={[styles.moverChip, { backgroundColor: m.dayChangePct >= 0 ? 'rgba(0,230,118,0.1)' : 'rgba(255,71,87,0.1)' }]}>
+                        <Text style={styles.moverSymbol}>{m.symbol}</Text>
+                        <Text style={[styles.moverPct, { color: m.dayChangePct >= 0 ? colors.positive : colors.negative }]}>
+                          {m.dayChangePct >= 0 ? '+' : ''}{m.dayChangePct.toFixed(2)}%
+                        </Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
               </Card>
             );
           })
@@ -319,23 +377,64 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 2,
   },
-  progressBar: {
-    height: 3,
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 2,
-    marginTop: 12,
-    overflow: 'hidden',
+  accountFooter: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginTop: 10,
   },
-  progressFill: {
-    height: 3,
-    borderRadius: 2,
-    opacity: 0.7,
+  accountDayPnl: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
   },
   positionCount: {
     fontFamily: 'Inter_400Regular',
     fontSize: 11,
     color: colors.textMuted,
-    marginTop: 6,
+  },
+  dailyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: colors.separator,
+  },
+  dailyLabel: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  dailyVal: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+  },
+  moversRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 6,
+    marginTop: 10,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.separator,
+  },
+  moverChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  moverSymbol: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 11,
+    color: colors.textPrimary,
+  },
+  moverPct: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 11,
   },
   emptyCard: {
     alignItems: 'center',

@@ -1,7 +1,11 @@
 import React, { createContext, useContext, useState, useMemo, ReactNode, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : '';
+const BASE_URL = process.env.EXPO_PUBLIC_DOMAIN
+  ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
+    ? `http://${process.env.EXPO_PUBLIC_DOMAIN}`
+    : `https://${process.env.EXPO_PUBLIC_DOMAIN}`
+  : '';
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`);
@@ -76,6 +80,20 @@ export interface TradeActivity {
   createdAt: string;
 }
 
+export interface TopMover {
+  symbol: string;
+  dayChange: number;
+  dayChangePct: number;
+}
+
+export interface TopPosition {
+  symbol: string;
+  name: string;
+  currentPrice: number;
+  marketValue: number;
+  dayChangePct: number;
+}
+
 export interface PortfolioSummary {
   totalNav: number;
   totalCost: number;
@@ -85,6 +103,8 @@ export interface PortfolioSummary {
   dayChangePct: number;
   accountCount: number;
   positionCount: number;
+  topMovers: TopMover[];
+  topPositions: TopPosition[];
   accounts: {
     id: number;
     name: string;
@@ -92,7 +112,10 @@ export interface PortfolioSummary {
     nav: number;
     unrealizedPnl: number;
     unrealizedPnlPct: number;
+    dayChange: number;
+    dayChangePct: number;
     positionCount: number;
+    topMovers: TopMover[];
   }[];
 }
 

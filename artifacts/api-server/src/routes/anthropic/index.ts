@@ -5,6 +5,27 @@ import { anthropic } from "@workspace/integrations-anthropic-ai";
 
 const router: IRouter = Router();
 
+async function fetchForexRateToUSD(fromCurrency: string): Promise<number> {
+  try {
+    // Fetch USD/{currency} — always available on Yahoo (e.g. USDAED=X ≈ 3.6725)
+    // Then invert to get how many USD per 1 unit of fromCurrency
+    const ticker = `USD${fromCurrency.toUpperCase()}=X`;
+    const res = await fetch(
+      `https://query1.finance.yahoo.com/v8/finance/chart/${ticker}?interval=1d&range=1d`,
+      { headers: { "User-Agent": "Mozilla/5.0" } }
+    );
+    if (!res.ok) return 1;
+    const json = await res.json();
+    const usdPerForeignInverse = json?.chart?.result?.[0]?.meta?.regularMarketPrice; // e.g. 3.6725 for AED
+    if (typeof usdPerForeignInverse !== "number" || usdPerForeignInverse <= 0) return 1;
+    const rate = 1 / usdPerForeignInverse; // e.g. 0.272 USD per 1 AED
+    console.log(`[forex] USD${fromCurrency.toUpperCase()}=X = ${usdPerForeignInverse} → 1 ${fromCurrency} = ${rate.toFixed(6)} USD`);
+    return rate;
+  } catch {
+    return 1;
+  }
+}
+
 const toConversation = (c: typeof conversationsTable.$inferSelect) => ({
   id: c.id,
   title: c.title,
@@ -142,83 +163,122 @@ Be direct but acknowledge risks. Format responses clearly with bullet points whe
 
 router.post("/parse-screenshot", async (req, res) => {
   try {
-    const { imageBase64, mediaType, parseType = "activities" } = req.body;
+    const { imageBase64, mediaType, parseType = "positions" } = req.body;
     if (!imageBase64) return res.status(400).json({ error: "No image provided" });
 
-    const today = new Date().toISOString().split("T")[0];
+    const mimeType = (mediaType || "image/png") as "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
-    const activitiesPrompt = `Analyze this brokerage or trading app screenshot carefully.
+    const prompt = parseType === "positions"
+      ? `Analyze this screenshot of a brokerage account positions/portfolio page. Extract all stock/ETF/crypto/commodity positions and return them as a JSON object with this exact structure:
+{
+  "accountHint": "extract the account name or broker from the screenshot",
+  "currency": "ISO 4217 currency code of the amounts shown. Detection rules (in order): $ = USD, £ = GBP, € = EUR, ¥ = JPY, ₹ = INR, ₩ = KRW, Fr = CHF, A$ = AUD, C$ = CAD. For UAE/Gulf brokers (WIO, Emirates NBD, ADIB, FAB, Mashreq, Liv, etc.) always return AED — WIO Bank specifically uses ฿ as their AED currency display symbol (not Thai Baht), so if you see ฿ alongside a UAE broker name like WIO, return AED. If the accountHint suggests a UAE or Gulf-based institution, default to AED rather than USD.",
+  "cashBalance": cash or money-market balance as a number in the screenshot's currency (null if not present),
+  "positions": [
+    {
+      "symbol": "stock ticker symbol",
+      "name": "company name",
+      "quantity": number of shares/units as a number,
+      "avgCost": average cost per share as a number (see derivation rules below),
+      "currentPrice": current price per share as a number (if available),
+      "sector": "industry sector if visible",
+      "notes": "any additional notes from the screenshot"
+    }
+  ]
+}
 
-First, identify the brokerage or account name visible in the screenshot (e.g. "Interactive Brokers", "Robinhood", "WIO Bank", etc.). This is the accountHint.
+IMPORTANT - avgCost derivation rules (apply in order):
+1. If avgCost or average cost per share is shown directly, use it.
+2. If not shown directly, derive from totalCurrentValue + gainOrLossAmount + quantity:
+   - GAIN position (↑ arrow, green, + sign): costBasis = totalCurrentValue - gainAmount. avgCost = costBasis / quantity.
+   - LOSS position (↓ arrow, red, - sign): costBasis = totalCurrentValue + lossAmount (add because you paid MORE than current value). avgCost = costBasis / quantity.
+   - Using percent: avgCost = (totalCurrentValue / (1 + gainPct/100)) / quantity  where gainPct is negative for losses.
+3. If none of the above work, set avgCost to null. Never set avgCost = totalCurrentValue / quantity without accounting for gain/loss.
 
-Then extract ALL trade/transaction records shown. For each trade return:
-- activityType: one of "buy", "sell", "dividend", "deposit", "withdrawal" (required)
-- symbol: stock ticker exactly as shown (e.g. "AAPL", "MSFT") — null if not a stock trade
-- quantity: number of shares/units as a number — null if not shown
-- price: price per share/unit as a number — null if not shown
-- totalAmount: total transaction value as a number — null if not shown
-- tradeDate: the exact date shown in YYYY-MM-DD format. Today is ${today}. Look carefully for dates — they may be written as "Mar 19, 2026" or "19/03/2026" etc. Convert all to YYYY-MM-DD. If no date visible use ${today}.
-- notes: 1-line description of this row
+Examples:
+- GAIN: "17.41 GOOGL, $5,066.47 total, ↑$848.37 (20.11%)" → costBasis = 5066.47 - 848.37 = 4218.10 → avgCost = 4218.10 / 17.41 = 242.28
+- LOSS: "0.03387 BTC, ฿10,354.11 total, ↓฿3,926.98 (27.5%)" → costBasis = 10354.11 + 3926.98 = 14281.09 → avgCost = 14281.09 / 0.03387 = 421672 (in portfolio currency, will be converted to USD)
 
-Return a JSON object (not array) with exactly these two keys:
-{"accountHint": "broker name or null", "trades": [...array of trade objects...]}
-
-Return ONLY valid JSON, no markdown, no code fences, no explanation.
-Example: {"accountHint":"Interactive Brokers","trades":[{"activityType":"buy","symbol":"AAPL","quantity":10,"price":185.50,"totalAmount":1855.00,"tradeDate":"2026-03-19","notes":"Market buy"}]}
-If no trades found: {"accountHint":null,"trades":[]}`;
-
-    const positionsPrompt = `Analyze this brokerage portfolio or holdings screenshot carefully.
-
-First, identify the brokerage or account name visible (e.g. "Interactive Brokers", "WIO Bank"). This is the accountHint.
-
-Then extract ALL positions/holdings shown. For each position return:
-- symbol: stock ticker exactly as shown (e.g. "AAPL") — required
-- name: company or ETF full name as shown — required
-- quantity: number of shares/units as a number — required
-- avgCost: average cost / average price paid per share as a number — use cost basis, avg price, or book value
-- currentPrice: current market price per share if shown — null if not shown
-- sector: sector or asset class if shown — null if not shown
-- notes: any additional info visible
-
-Return a JSON object with exactly two keys:
-{"accountHint": "broker name or null", "positions": [...array of position objects...]}
-
-Return ONLY valid JSON, no markdown, no code fences, no explanation.
-Example: {"accountHint":"WIO Bank","positions":[{"symbol":"NVDA","name":"NVIDIA Corporation","quantity":5,"avgCost":450.00,"currentPrice":875.00,"sector":"Technology","notes":""}]}
-If no positions found: {"accountHint":null,"positions":[]}`;
-
-    const prompt = parseType === "positions" ? positionsPrompt : activitiesPrompt;
+If there is a cash, USD, or money market row, extract its value as cashBalance and do NOT include it in the positions array. Only return the JSON object, no additional text. If no positions are visible, return an empty positions array.`
+      : `Analyze this screenshot of a brokerage account transaction/trade history page. Extract all recent trades and return them as a JSON object with this exact structure:
+{
+  "accountHint": "extract the account name or broker from the screenshot",
+  "trades": [
+    {
+      "activityType": "buy" or "sell" or "dividend" or "deposit" or "withdrawal",
+      "symbol": "stock ticker symbol (null for cash transactions)",
+      "quantity": number of shares (null for cash transactions),
+      "price": price per share as a number (null for cash transactions),
+      "totalAmount": total transaction amount as a number,
+      "tradeDate": "date in YYYY-MM-DD format",
+      "notes": "any additional transaction notes"
+    }
+  ]
+}
+Only return the JSON object, no additional text. If no trades are visible, return an empty trades array.`;
 
     const response = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 2048,
-      messages: [{
-        role: "user",
-        content: [
-          {
-            type: "image",
-            source: {
-              type: "base64",
-              media_type: (mediaType || "image/jpeg") as any,
-              data: imageBase64,
+      model: "claude-haiku-4-5-20251001",
+      max_tokens: 4096,
+      messages: [
+        {
+          role: "user",
+          content: [
+            {
+              type: "image",
+              source: { type: "base64", media_type: mimeType, data: imageBase64 },
             },
-          },
-          { type: "text", text: prompt },
-        ],
-      }],
+            { type: "text", text: prompt },
+          ],
+        },
+      ],
     });
 
-    const text = response.content[0].type === "text" ? response.content[0].text : "{}";
-    // Extract JSON object from response
-    const match = text.match(/\{[\s\S]*\}/);
-    if (!match) {
-      return res.json(parseType === "positions" ? { accountHint: null, positions: [] } : { accountHint: null, trades: [] });
+    const content = response.content
+      .filter((block) => block.type === "text")
+      .map((block) => (block as { type: "text"; text: string }).text)
+      .join("");
+
+    if (!content) {
+      return res.status(500).json({ error: "Failed to parse image" });
     }
-    const parsed = JSON.parse(match[0]);
-    res.json(parsed);
-  } catch (error) {
+
+    // Strip markdown code fences if present
+    const jsonText = content.replace(/^```(?:json)?\s*/im, "").replace(/\s*```\s*$/m, "").trim();
+
+    try {
+      const parsedData = JSON.parse(jsonText);
+
+      // Convert non-USD amounts to USD
+      if (parseType === "positions") {
+        const currency: string = (parsedData.currency || "USD").toUpperCase();
+        console.log(`[parse-screenshot] accountHint="${parsedData.accountHint}" detectedCurrency=${currency} positions=${parsedData.positions?.length ?? 0}`);
+        if (currency !== "USD") {
+          const rate = await fetchForexRateToUSD(currency);
+          console.log(`[forex] Converting ${currency} → USD at rate ${rate}`);
+          for (const pos of parsedData.positions || []) {
+            if (pos.avgCost != null) pos.avgCost = parseFloat((pos.avgCost * rate).toFixed(4));
+            if (pos.currentPrice != null) pos.currentPrice = parseFloat((pos.currentPrice * rate).toFixed(4));
+          }
+          if (parsedData.cashBalance != null) {
+            parsedData.cashBalance = parseFloat((parsedData.cashBalance * rate).toFixed(2));
+          }
+          parsedData.originalCurrency = currency;
+          parsedData.fxRate = rate;
+          parsedData.currency = "USD";
+        }
+      }
+
+      res.json(parsedData);
+    } catch (parseError) {
+      console.error("Failed to parse Claude response as JSON:", content);
+      res.status(500).json({ error: "Failed to parse response from AI" });
+    }
+  } catch (error: any) {
     console.error("Parse screenshot error:", error);
-    res.status(500).json({ error: "Failed to parse screenshot" });
+    const status = Number(error?.status) || 500;
+    const message = error?.error?.message || error?.message || "Failed to parse screenshot";
+    return res.status(status).json({ error: message });
   }
 });
 

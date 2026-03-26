@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
-  Pressable, Modal, TextInput, Alert, Platform, TouchableOpacity,
+  Pressable, Modal, TextInput, Alert, Platform,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -26,6 +26,8 @@ export default function AccountsScreen() {
   const { accounts, positions, summary, isLoading, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const [showAdd, setShowAdd] = useState(false);
+  const [menuAccount, setMenuAccount] = useState<{ id: number; name: string } | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
     name: '',
@@ -39,20 +41,18 @@ export default function AccountsScreen() {
     refreshAll();
   }, []);
 
+  const canSubmit = !!(form.name.trim() && form.broker.trim());
+
   const handleAdd = async () => {
-    if (!form.name || !form.broker || !form.initialBalance) {
-      Alert.alert('Missing fields', 'Please fill all required fields');
-      return;
-    }
-    if (isSubmitting) return;
+    if (!canSubmit || isSubmitting) return;
     setIsSubmitting(true);
     try {
       await apiPost('/accounts', {
-        name: form.name,
-        broker: form.broker,
+        name: form.name.trim(),
+        broker: form.broker.trim(),
         accountType: form.accountType,
         currency: form.currency,
-        initialBalance: parseFloat(form.initialBalance),
+        initialBalance: parseFloat(form.initialBalance) || 0,
       });
       setShowAdd(false);
       setForm({ name: '', broker: '', accountType: 'long_term', currency: 'USD', initialBalance: '' });
@@ -66,26 +66,21 @@ export default function AccountsScreen() {
   };
 
   const handleDelete = useCallback((id: number, name: string) => {
-    Alert.alert(
-      'Delete Account',
-      `Delete "${name}" and all its positions?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Delete', style: 'destructive',
-          onPress: async () => {
-            try {
-              await apiDelete(`/accounts/${id}`);
-              Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
-              refreshAll();
-            } catch {
-              Alert.alert('Error', 'Failed to delete account');
-            }
-          }
-        }
-      ]
-    );
-  }, [refreshAll]);
+    setConfirmDelete({ id, name });
+  }, []);
+
+  const doDelete = async () => {
+    if (!confirmDelete) return;
+    const { id } = confirmDelete;
+    setConfirmDelete(null);
+    try {
+      await apiDelete(`/accounts/${id}`);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await refreshAll();
+    } catch {
+      Alert.alert('Error', 'Failed to delete account');
+    }
+  };
 
   return (
     <View style={[styles.container, { paddingTop: topPad }]}>
@@ -137,12 +132,15 @@ export default function AccountsScreen() {
               >
                 <View style={styles.accountHeader}>
                   <AccountTypeBadge type={account.accountType as any} size="sm" />
-                  <TouchableOpacity
-                    onLongPress={() => handleDelete(account.id, account.name)}
-                    delayLongPress={500}
+                  <Pressable
+                    onPress={(e) => {
+                      if ('stopPropagation' in e) (e as any).stopPropagation();
+                      setMenuAccount({ id: account.id, name: account.name });
+                    }}
+                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                   >
                     <Feather name="more-horizontal" size={18} color={colors.textMuted} />
-                  </TouchableOpacity>
+                  </Pressable>
                 </View>
                 <Text style={styles.accountName}>{account.name}</Text>
                 <Text style={styles.brokerName}>{account.broker}</Text>
@@ -219,12 +217,51 @@ export default function AccountsScreen() {
               <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={[styles.saveBtn, isSubmitting && { opacity: 0.6 }]} onPress={handleAdd} disabled={isSubmitting}>
+              <Pressable style={[styles.saveBtn, (!canSubmit || isSubmitting) && { opacity: 0.4 }]} onPress={handleAdd} disabled={!canSubmit || isSubmitting}>
                 <Text style={styles.saveText}>{isSubmitting ? 'Adding…' : 'Add Account'}</Text>
               </Pressable>
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* Confirm delete modal */}
+      <Modal visible={!!confirmDelete} animationType="fade" transparent>
+        <View style={styles.menuOverlay}>
+          <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.menuHandle} />
+            <Text style={styles.menuTitle}>Delete Account</Text>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary, marginBottom: 20 }}>
+              Delete "{confirmDelete?.name}" and all its positions and activities? This cannot be undone.
+            </Text>
+            <View style={{ flexDirection: 'row', gap: 12 }}>
+              <Pressable style={[styles.confirmBtn, { flex: 1, backgroundColor: colors.surfaceElevated }]} onPress={() => setConfirmDelete(null)}>
+                <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary }}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.confirmBtn, { flex: 1, backgroundColor: colors.negative }]} onPress={doDelete}>
+                <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#fff' }}>Delete</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Account context menu */}
+      <Modal visible={!!menuAccount} animationType="fade" transparent>
+        <Pressable style={styles.menuOverlay} onPress={() => setMenuAccount(null)}>
+          <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.menuHandle} />
+            <Text style={styles.menuTitle}>{menuAccount?.name}</Text>
+            <Pressable style={styles.menuItem} onPress={() => { setMenuAccount(null); router.push({ pathname: '/account/[id]', params: { id: menuAccount!.id } }); }}>
+              <Feather name="eye" size={18} color={colors.textPrimary} />
+              <Text style={styles.menuItemText}>View Details</Text>
+            </Pressable>
+            <Pressable style={[styles.menuItem, { borderTopWidth: 1, borderTopColor: colors.separator }]} onPress={() => { const a = menuAccount!; setMenuAccount(null); setConfirmDelete({ id: a.id, name: a.name }); }}>
+              <Feather name="trash-2" size={18} color={colors.negative} />
+              <Text style={[styles.menuItemText, { color: colors.negative }]}>Delete Account</Text>
+            </Pressable>
+          </View>
+        </Pressable>
       </Modal>
     </View>
   );
@@ -292,4 +329,11 @@ const styles = StyleSheet.create({
   cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary },
   saveBtn: { flex: 2, padding: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center' },
   saveText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.background },
+  menuOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  menuSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
+  menuHandle: { width: 36, height: 4, backgroundColor: colors.separator, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  menuTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, color: colors.textPrimary, marginBottom: 12 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
+  menuItemText: { fontFamily: 'Inter_500Medium', fontSize: 16, color: colors.textPrimary },
+  confirmBtn: { padding: 14, borderRadius: 12, alignItems: 'center' },
 });

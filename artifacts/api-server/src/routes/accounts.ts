@@ -1,6 +1,6 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { accountsTable, positionsTable } from "@workspace/db";
+import { accountsTable, positionsTable, activitiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { fetchLivePrices } from "./positions";
 
@@ -104,6 +104,9 @@ router.put("/:id", async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    // Cascade: delete positions and activities before account
+    await db.delete(positionsTable).where(eq(positionsTable.accountId, id));
+    await db.delete(activitiesTable).where(eq(activitiesTable.accountId, id));
     await db.delete(accountsTable).where(eq(accountsTable.id, id));
     res.status(204).send();
   } catch (error) {
@@ -130,7 +133,7 @@ router.get("/:id/positions", async (req, res) => {
         .filter(p => priceMap[p.symbol] !== undefined)
         .map(p =>
           db.update(positionsTable)
-            .set({ currentPrice: priceMap[p.symbol].toString(), updatedAt: new Date() })
+            .set({ currentPrice: priceMap[p.symbol].price.toString(), updatedAt: new Date() })
             .where(eq(positionsTable.id, p.id))
         )
     );
@@ -138,7 +141,7 @@ router.get("/:id/positions", async (req, res) => {
     const result = positions.map(p => {
       const qty = parseFloat(p.quantity);
       const avg = parseFloat(p.avgCost);
-      const cur = priceMap[p.symbol] ?? parseFloat(p.currentPrice);
+      const cur = priceMap[p.symbol]?.price ?? parseFloat(p.currentPrice);
       const marketValue = qty * cur;
       const unrealizedPnl = marketValue - qty * avg;
       const unrealizedPnlPct = qty * avg > 0 ? (unrealizedPnl / (qty * avg)) * 100 : 0;

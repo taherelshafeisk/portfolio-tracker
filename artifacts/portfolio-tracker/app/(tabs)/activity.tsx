@@ -13,7 +13,11 @@ import { usePortfolio, apiPost, apiDelete, TradeActivity } from '@/context/Portf
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 
-const API_BASE = `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`;
+const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
+  ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
+    ? `http://${process.env.EXPO_PUBLIC_DOMAIN}/api`
+    : `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
+  : '/api';
 
 const ACTIVITY_ICONS: Record<string, { icon: any; color: string }> = {
   buy: { icon: 'arrow-down-circle', color: colors.positive },
@@ -48,7 +52,7 @@ const parseDateSafe = (d: string | undefined): string => {
     if (!isNaN(p.getTime())) {
       return `${p.getFullYear()}-${String(p.getMonth() + 1).padStart(2, '0')}-${String(p.getDate()).padStart(2, '0')}`;
     }
-  } catch {}
+  } catch { }
   return todayStr;
 };
 
@@ -103,13 +107,15 @@ export default function ActivityScreen() {
   };
 
   const handlePickImage = async () => {
-    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (status !== 'granted') {
-      Alert.alert('Permission needed', 'Allow photo access to upload trade screenshots.');
-      return;
+    if (Platform.OS !== 'web') {
+      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (status !== 'granted') {
+        Alert.alert('Permission needed', 'Allow photo access to upload trade screenshots.');
+        return;
+      }
     }
     const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
+      mediaTypes: ['images'],
       base64: true,
       quality: 0.7,
     });
@@ -132,6 +138,14 @@ export default function ActivityScreen() {
         }),
       });
       const data = await resp.json();
+
+      if (!resp.ok) {
+        Alert.alert('Error', data.error || 'Failed to parse screenshot.');
+        setStep('account');
+        setPreviewUri(null);
+        return;
+      }
+
       const trades: any[] = data.trades || [];
       const hint: string | null = data.accountHint || null;
       setDetectedAccount(hint);

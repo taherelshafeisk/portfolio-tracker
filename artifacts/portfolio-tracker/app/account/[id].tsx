@@ -1,8 +1,8 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useEffect, useState, useRef, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
   Modal, TextInput, Alert, Platform, RefreshControl,
-  ActivityIndicator, Image,
+  ActivityIndicator, Image, Share,
 } from 'react-native';
 import { useLocalSearchParams, router, useNavigation } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -10,6 +10,7 @@ import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
+import { ASSET_TYPES, getAssetType } from '@/constants/assetTypes';
 import { usePortfolio, apiGet, apiPost, apiPut, apiDelete, Position, Account } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
@@ -22,6 +23,39 @@ const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
     ? `http://${process.env.EXPO_PUBLIC_DOMAIN}/api`
     : `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
   : '/api';
+
+// Must match the server-side sets in routes/positions.ts
+const CRYPTO_SYMBOLS = new Set([
+  'BTC', 'ETH', 'SOL', 'ADA', 'XRP', 'DOGE', 'AVAX', 'DOT', 'MATIC',
+  'LINK', 'UNI', 'ATOM', 'LTC', 'BCH', 'XLM', 'ALGO', 'VET', 'FIL',
+  'TRX', 'SHIB', 'BNB', 'NEAR', 'FTM', 'SAND', 'MANA', 'THETA', 'HBAR',
+  'ICP', 'ETC', 'FLOW', 'CHZ', 'APE', 'CRO', 'GRT', 'ENJ', 'BAT',
+  'ZEC', 'DASH', 'NEO', 'EOS', 'PEPE', 'WIF', 'BONK', 'ARB', 'OP',
+  'SUI', 'APT', 'INJ', 'TIA', 'SEI', 'RUNE', 'CRV', 'AAVE', 'COMP',
+  'MKR', 'SNX', 'YFI', 'SUSHI', 'ZRX',
+]);
+const SYMBOL_OVERRIDES: Record<string, string> = {
+  'GC=F': 'GOLD', 'XAUUSD=X': 'GOLD',
+  'SI=F': 'SILVER', 'XAGUSD=X': 'SILVER',
+};
+
+/** Normalise a raw symbol from an external CSV to our canonical form. */
+function normalizeSymbol(raw: string): string {
+  const upper = raw.toUpperCase().trim();
+  // Reverse-map Yahoo Finance tickers (e.g. GC=F → GOLD)
+  if (SYMBOL_OVERRIDES[upper]) return SYMBOL_OVERRIDES[upper];
+  // Strip -USD suffix from known crypto symbols (e.g. BTC-USD → BTC)
+  if (upper.endsWith('-USD')) {
+    const base = upper.slice(0, -4);
+    if (CRYPTO_SYMBOLS.has(base)) return base;
+  }
+  // Strip USDT suffix (e.g. BTCUSDT → BTC)
+  if (upper.endsWith('USDT')) {
+    const base = upper.slice(0, -4);
+    if (CRYPTO_SYMBOLS.has(base)) return base;
+  }
+  return upper;
+}
 
 interface SymbolResult {
   symbol: string;
@@ -52,10 +86,50 @@ export default function AccountDetailScreen() {
     .filter(p => p.accountId === accountId)
     .sort((a, b) => b.marketValue - a.marketValue);
 
+  // ─── Filter / Sort / Search ───────────────────────────────────────────────
+  type FilterType = 'all' | 'risers' | 'losers';
+  type SortField = 'value' | 'pct' | 'pnl' | 'name' | 'symbol';
+  const [filter, setFilter] = useState<FilterType>('all');
+  const [sortBy, setSortBy] = useState<SortField>('value');
+  const [sortAsc, setSortAsc] = useState(false);
+  const [search, setSearch] = useState('');
+  const [showSortMenu, setShowSortMenu] = useState(false);
+
+  const displayPositions = useMemo(() => {
+    let list = [...positions];
+    if (search.trim()) {
+      const q = search.trim().toLowerCase();
+      list = list.filter(p => p.symbol.toLowerCase().includes(q) || p.name.toLowerCase().includes(q));
+    }
+    if (filter === 'risers') list = list.filter(p => (p.dayChangePct ?? 0) > 0);
+    if (filter === 'losers') list = list.filter(p => (p.dayChangePct ?? 0) < 0);
+    list.sort((a, b) => {
+      let diff = 0;
+      if (sortBy === 'value') diff = a.marketValue - b.marketValue;
+      else if (sortBy === 'pct') diff = a.unrealizedPnlPct - b.unrealizedPnlPct;
+      else if (sortBy === 'pnl') diff = a.unrealizedPnl - b.unrealizedPnl;
+      else if (sortBy === 'name') diff = a.name.localeCompare(b.name);
+      else if (sortBy === 'symbol') diff = a.symbol.localeCompare(b.symbol);
+      return sortAsc ? diff : -diff;
+    });
+    return list;
+  }, [positions, filter, sortBy, sortAsc, search]);
+
+  const SORT_LABELS: Record<SortField, string> = {
+    value: 'Market Value', pct: 'P&L %', pnl: 'P&L $', name: 'Name', symbol: 'Symbol',
+  };
+
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAddPos, setShowAddPos] = useState(false);
-  const [form, setForm] = useState({ symbol: '', name: '', quantity: '', avgCost: '', sector: '', notes: '' });
+  const [form, setForm] = useState({ symbol: '', name: '', quantity: '', avgCost: '', assetType: '', sector: '', notes: '' });
+
+  // 3-dot context menu
+  const [menuPos, setMenuPos] = useState<Position | null>(null);
+  // Edit position modal
+  const [editPos, setEditPos] = useState<Position | null>(null);
+  const [editForm, setEditForm] = useState({ quantity: '', avgCost: '', assetType: '', notes: '' });
+  const [isEditSubmitting, setIsEditSubmitting] = useState(false);
 
   // Symbol search autocomplete
   const [symbolResults, setSymbolResults] = useState<SymbolResult[]>([]);
@@ -108,6 +182,30 @@ export default function AccountDetailScreen() {
   const totalCost = positions.reduce((s, p) => s + p.quantity * p.avgCost, 0);
   const totalPnlPct = totalCost > 0 ? (totalPnl / totalCost) * 100 : 0;
 
+  // Leverage: only meaningful when cash is negative (margin/borrowed funds)
+  const positionsValue = positions.reduce((s, p) => s + p.marketValue, 0);
+  const cashBalance = account?.currentBalance ?? 0;
+  const equity = positionsValue + cashBalance;
+  const leverageRatio = cashBalance < 0 && equity > 0 ? positionsValue / equity : null;
+
+  const exportCSV = () => {
+    const header = 'Symbol,Name,Qty,Avg Cost,Current Price,Market Value,Unrealized P&L,P&L %';
+    const rows = positions.map(p =>
+      `${p.symbol},"${p.name}",${p.quantity},${p.avgCost.toFixed(4)},${p.currentPrice.toFixed(4)},${p.marketValue.toFixed(2)},${p.unrealizedPnl.toFixed(2)},${p.unrealizedPnlPct.toFixed(2)}`
+    );
+    const csv = [header, ...rows].join('\n');
+    const filename = `${account?.name ?? 'positions'}_${new Date().toISOString().slice(0, 10)}.csv`;
+    if (Platform.OS === 'web') {
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      Share.share({ message: csv, title: filename });
+    }
+  };
+
   const handleAddPosition = async () => {
     if (!form.symbol || !form.name || !form.quantity || !form.avgCost) {
       Alert.alert('Missing fields', 'Fill in symbol, name, quantity and average cost');
@@ -122,11 +220,12 @@ export default function AccountDetailScreen() {
         name: form.name,
         quantity: parseFloat(form.quantity),
         avgCost: parseFloat(form.avgCost),
+        assetType: form.assetType || undefined,
         sector: form.sector || undefined,
         notes: form.notes || undefined,
       });
       setShowAddPos(false);
-      setForm({ symbol: '', name: '', quantity: '', avgCost: '', sector: '', notes: '' });
+      setForm({ symbol: '', name: '', quantity: '', avgCost: '', assetType: '', sector: '', notes: '' });
       setSymbolResults([]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await refreshAll();
@@ -134,6 +233,36 @@ export default function AccountDetailScreen() {
       Alert.alert('Error', 'Failed to add position');
     } finally {
       setIsSubmitting(false);
+    }
+  };
+
+  const openEditPos = (pos: Position) => {
+    setMenuPos(null);
+    setEditForm({ quantity: String(pos.quantity), avgCost: String(pos.avgCost), assetType: pos.assetType ?? '', notes: pos.notes ?? '' });
+    setEditPos(pos);
+  };
+
+  const handleEditPosition = async () => {
+    if (!editPos || isEditSubmitting) return;
+    if (!editForm.quantity || !editForm.avgCost) {
+      Alert.alert('Missing fields', 'Quantity and average cost are required');
+      return;
+    }
+    setIsEditSubmitting(true);
+    try {
+      await apiPut(`/positions/${editPos.id}`, {
+        quantity: parseFloat(editForm.quantity),
+        avgCost: parseFloat(editForm.avgCost),
+        assetType: editForm.assetType || undefined,
+        notes: editForm.notes || undefined,
+      });
+      setEditPos(null);
+      Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
+      await refreshAll();
+    } catch {
+      Alert.alert('Error', 'Failed to update position');
+    } finally {
+      setIsEditSubmitting(false);
     }
   };
 
@@ -226,13 +355,72 @@ export default function AccountDetailScreen() {
     }
   };
 
-  const handlePickPortfolioImage = async () => {
-    if (Platform.OS !== 'web') {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') {
-        Alert.alert('Permission needed', 'Allow photo access to upload portfolio screenshots.');
-        return;
+  const parseCSVIntoPositions = (text: string): ParsedPosition[] => {
+    const lines = text.trim().split('\n');
+    if (lines.length < 2) return [];
+    return lines.slice(1).map((line, idx) => {
+      const fields: string[] = [];
+      let current = '';
+      let inQuote = false;
+      for (const char of line) {
+        if (char === '"') { inQuote = !inQuote; }
+        else if (char === ',' && !inQuote) { fields.push(current.trim()); current = ''; }
+        else { current += char; }
       }
+      fields.push(current.trim());
+      const rawSymbol = fields[0]?.replace(/^"|"$/g, '');
+      const name = fields[1]?.replace(/^"|"$/g, '');
+      const qty = parseFloat(fields[2]);
+      const avgCost = parseFloat(fields[3]);
+      if (!rawSymbol || isNaN(qty) || isNaN(avgCost)) return null;
+      const symbol = normalizeSymbol(rawSymbol);
+      return { _key: `csv_${idx}_${Date.now()}`, symbol, name: name || symbol, quantity: String(qty), avgCost: String(avgCost), sector: '', notes: '' };
+    }).filter(Boolean) as ParsedPosition[];
+  };
+
+  const handlePickPortfolioImage = async () => {
+    if (Platform.OS === 'web') {
+      const input = (document as any).createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*,.csv,text/csv';
+      input.onchange = async (e: any) => {
+        const file = e.target?.files?.[0];
+        if (!file) return;
+        const isCSV = file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv' || file.type === 'application/vnd.ms-excel';
+        if (isCSV) {
+          const reader = new FileReader();
+          reader.onload = (ev: any) => {
+            const parsed = parseCSVIntoPositions(ev.target?.result ?? '');
+            if (parsed.length === 0) {
+              Alert.alert('No positions found', 'Could not parse CSV. Expected columns: Symbol, Name, Qty, Avg Cost');
+              return;
+            }
+            setImportPositions(parsed);
+            setImportImageUri(null);
+            setShowImport(true);
+          };
+          reader.readAsText(file);
+        } else {
+          const reader = new FileReader();
+          reader.onload = async (ev: any) => {
+            const dataUrl = ev.target?.result as string;
+            const base64 = dataUrl.split(',')[1];
+            setImportImageUri(dataUrl);
+            setImportPositions([]);
+            setShowImport(true);
+            await parseAssets([{ base64, mimeType: file.type || 'image/jpeg', uri: dataUrl } as any], false);
+          };
+          reader.readAsDataURL(file);
+        }
+      };
+      input.click();
+      return;
+    }
+
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') {
+      Alert.alert('Permission needed', 'Allow photo access to upload portfolio screenshots.');
+      return;
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
@@ -399,14 +587,30 @@ export default function AccountDetailScreen() {
             </View>
             <View style={styles.cashRow}>
               <Text style={styles.cashLabel}>Cash</Text>
-              <Text style={styles.cashValue}>{formatCurrency(account.currentBalance)}</Text>
+              <Text style={[styles.cashValue, cashBalance < 0 && { color: colors.negative }]}>
+                {formatCurrency(cashBalance)}
+              </Text>
             </View>
+            {leverageRatio !== null && (
+              <View style={[styles.cashRow, { borderTopWidth: 0, marginTop: 4 }]}>
+                <Text style={styles.cashLabel}>Leverage</Text>
+                <Text style={[styles.cashValue, { color: leverageRatio > 2 ? colors.negative : '#F5A623' }]}>
+                  {leverageRatio.toFixed(2)}x
+                </Text>
+              </View>
+            )}
           </Card>
         )}
 
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Positions</Text>
           <View style={styles.sectionActions}>
+            {positions.length > 0 && (
+              <Pressable style={styles.importBtn} onPress={exportCSV}>
+                <Feather name="download" size={14} color={colors.textSecondary} />
+                <Text style={styles.importBtnText}>Export</Text>
+              </Pressable>
+            )}
             <Pressable style={styles.importBtn} onPress={handlePickPortfolioImage}>
               <Feather name="upload" size={14} color={colors.textSecondary} />
               <Text style={styles.importBtnText}>Import</Text>
@@ -418,36 +622,91 @@ export default function AccountDetailScreen() {
           </View>
         </View>
 
+        {positions.length > 0 && (
+          <>
+            {/* Search */}
+            <View style={styles.searchRow}>
+              <Feather name="search" size={14} color={colors.textMuted} style={{ marginRight: 6 }} />
+              <TextInput
+                style={styles.searchInput}
+                placeholder="Search symbol or name…"
+                placeholderTextColor={colors.textMuted}
+                value={search}
+                onChangeText={setSearch}
+                autoCapitalize="none"
+              />
+              {search.length > 0 && (
+                <Pressable onPress={() => setSearch('')} hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}>
+                  <Feather name="x" size={14} color={colors.textMuted} />
+                </Pressable>
+              )}
+            </View>
+
+            {/* Filter chips + Sort */}
+            <View style={styles.filterRow}>
+              {(['all', 'risers', 'losers'] as FilterType[]).map(f => (
+                <Pressable
+                  key={f}
+                  style={[styles.filterChip, filter === f && styles.filterChipActive]}
+                  onPress={() => setFilter(f)}
+                >
+                  <Text style={[styles.filterChipText, filter === f && styles.filterChipTextActive]}>
+                    {f === 'all' ? 'All' : f === 'risers' ? '↑ Risers' : '↓ Losers'}
+                  </Text>
+                </Pressable>
+              ))}
+              <Pressable style={[styles.filterChip, { marginLeft: 'auto', flexDirection: 'row', gap: 4 }]} onPress={() => setShowSortMenu(true)}>
+                <Feather name="sliders" size={12} color={colors.textSecondary} />
+                <Text style={styles.filterChipText}>{SORT_LABELS[sortBy]}</Text>
+                <Feather name={sortAsc ? 'arrow-up' : 'arrow-down'} size={11} color={colors.textMuted} />
+              </Pressable>
+            </View>
+          </>
+        )}
+
         {positions.length === 0 ? (
           <Card style={styles.emptyCard}>
             <Feather name="layers" size={32} color={colors.textMuted} />
             <Text style={styles.emptyText}>No positions yet.</Text>
             <Text style={styles.emptySubText}>Tap Import to scan your portfolio screenshot, or Add to enter manually.</Text>
           </Card>
+        ) : displayPositions.length === 0 ? (
+          <Card style={styles.emptyCard}>
+            <Feather name="filter" size={28} color={colors.textMuted} />
+            <Text style={styles.emptyText}>No matches</Text>
+          </Card>
         ) : (
-          positions.map(pos => {
-            const isPos = pos.unrealizedPnl >= 0;
+          displayPositions.map(pos => {
+            const isOverallPos = pos.unrealizedPnl >= 0;
+            const isDayPos = (pos.dayChangePct ?? 0) >= 0;
+            const assetCfg = getAssetType(pos.assetType);
             return (
               <Card key={pos.id} style={styles.posCard}>
                 <View style={styles.posHeader}>
                   <Pressable
-                    onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: pos.symbol } })}
+                    onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: pos.symbol, avgCost: String(pos.avgCost), accountId: String(accountId) } })}
                     style={styles.posLeft}
                   >
-                    <StockLogo symbol={pos.symbol} size={38} />
-                    <View>
-                      <Text style={styles.posSymbol}>{pos.symbol}</Text>
+                    <StockLogo symbol={pos.symbol} size={36} />
+                    <View style={{ flex: 1 }}>
+                      <View style={styles.posSymbolRow}>
+                        <Text style={styles.posSymbol}>{pos.symbol}</Text>
+                        <View style={[styles.assetTypeBadge, { backgroundColor: assetCfg.color + '22', borderColor: assetCfg.color + '44' }]}>
+                          <Feather name={assetCfg.icon as any} size={9} color={assetCfg.color} />
+                          <Text style={[styles.assetTypeLabel, { color: assetCfg.color }]}>{assetCfg.label}</Text>
+                        </View>
+                      </View>
                       <Text style={styles.posName} numberOfLines={1}>{pos.name}</Text>
                     </View>
                   </Pressable>
                   <View style={styles.posRight}>
                     <Text style={styles.posValue}>{formatCurrency(pos.marketValue)}</Text>
                     <Pressable
-                      onPress={() => handleDeletePos(pos.id, pos.symbol)}
-                      style={styles.deleteBtn}
+                      onPress={() => setMenuPos(pos)}
+                      style={styles.menuBtn}
                       hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
                     >
-                      <Feather name="trash-2" size={14} color={colors.textMuted} />
+                      <Feather name="more-vertical" size={16} color={colors.textMuted} />
                     </Pressable>
                   </View>
                 </View>
@@ -457,12 +716,17 @@ export default function AccountDetailScreen() {
                   <View style={styles.posStat}><Text style={styles.posStatLabel}>Last</Text><Text style={styles.posStatVal}>${pos.currentPrice.toFixed(2)}</Text></View>
                   <View style={styles.posStat}>
                     <Text style={styles.posStatLabel}>P&L</Text>
-                    <Text style={[styles.posStatVal, { color: isPos ? colors.positive : colors.negative }]}>
-                      {isPos ? '+' : ''}{pos.unrealizedPnlPct.toFixed(1)}%
+                    <Text style={[styles.posStatVal, { color: isOverallPos ? colors.positive : colors.negative }]}>
+                      {isOverallPos ? '+' : ''}{pos.unrealizedPnlPct.toFixed(1)}%
                     </Text>
                   </View>
                 </View>
-                {pos.sector && <Text style={styles.sector}>{pos.sector}</Text>}
+                <View style={styles.posDayRow}>
+                  <Feather name={isDayPos ? 'trending-up' : 'trending-down'} size={11} color={isDayPos ? colors.positive : colors.negative} />
+                  <Text style={[styles.posDayLabel, { color: isDayPos ? colors.positive : colors.negative }]}>
+                    Today {isDayPos ? '+' : ''}{formatCurrency(pos.dayChange ?? 0)} ({isDayPos ? '+' : ''}{(pos.dayChangePct ?? 0).toFixed(2)}%)
+                  </Text>
+                </View>
               </Card>
             );
           })
@@ -527,6 +791,20 @@ export default function AccountDetailScreen() {
               <TextInput style={[styles.input, { flex: 1 }]} placeholder="Quantity" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.quantity} onChangeText={t => setForm(f => ({ ...f, quantity: t }))} />
               <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Avg cost ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.avgCost} onChangeText={t => setForm(f => ({ ...f, avgCost: t }))} />
             </View>
+            <Text style={styles.pickerLabel}>Asset Type</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.assetPickerRow} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {ASSET_TYPES.map(at => (
+                <Pressable
+                  key={at.key}
+                  style={[styles.assetPickerChip, form.assetType === at.key && { borderColor: at.color, backgroundColor: at.color + '22' }]}
+                  onPress={() => setForm(f => ({ ...f, assetType: f.assetType === at.key ? '' : at.key }))}
+                >
+                  <Feather name={at.icon as any} size={11} color={form.assetType === at.key ? at.color : colors.textSecondary} />
+                  <Text style={[styles.assetPickerLabel, form.assetType === at.key && { color: at.color }]}>{at.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
             <TextInput style={styles.input} placeholder="Sector (optional)" placeholderTextColor={colors.textMuted} value={form.sector} onChangeText={t => setForm(f => ({ ...f, sector: t }))} />
             <TextInput style={styles.input} placeholder="Notes (optional)" placeholderTextColor={colors.textMuted} value={form.notes} onChangeText={t => setForm(f => ({ ...f, notes: t }))} />
 
@@ -656,6 +934,92 @@ export default function AccountDetailScreen() {
         </View>
       </Modal>
 
+      {/* ── Position Context Menu (3-dot) ─────────────────────────────────── */}
+      <Modal visible={!!menuPos} animationType="fade" transparent>
+        <Pressable style={styles.menuOverlay} onPress={() => setMenuPos(null)}>
+          <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{menuPos?.symbol}</Text>
+            <Pressable style={styles.sortItem} onPress={() => menuPos && openEditPos(menuPos)}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Feather name="edit-2" size={16} color={colors.primary} />
+                <Text style={[styles.sortItemText, { color: colors.primary }]}>Edit Position</Text>
+              </View>
+            </Pressable>
+            <Pressable style={styles.sortItem} onPress={() => { setMenuPos(null); if (menuPos) handleDeletePos(menuPos.id, menuPos.symbol); }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Feather name="trash-2" size={16} color={colors.negative} />
+                <Text style={[styles.sortItemText, { color: colors.negative }]}>Delete Position</Text>
+              </View>
+            </Pressable>
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Edit Position Modal ───────────────────────────────────────────── */}
+      <Modal visible={!!editPos} animationType="slide" transparent presentationStyle="pageSheet">
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Edit {editPos?.symbol}</Text>
+            <View style={styles.inputRow}>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Quantity" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={editForm.quantity} onChangeText={t => setEditForm(f => ({ ...f, quantity: t }))} />
+              <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Avg cost ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={editForm.avgCost} onChangeText={t => setEditForm(f => ({ ...f, avgCost: t }))} />
+            </View>
+            <Text style={styles.pickerLabel}>Asset Type</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.assetPickerRow} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {ASSET_TYPES.map(at => (
+                <Pressable
+                  key={at.key}
+                  style={[styles.assetPickerChip, editForm.assetType === at.key && { borderColor: at.color, backgroundColor: at.color + '22' }]}
+                  onPress={() => setEditForm(f => ({ ...f, assetType: f.assetType === at.key ? '' : at.key }))}
+                >
+                  <Feather name={at.icon as any} size={11} color={editForm.assetType === at.key ? at.color : colors.textSecondary} />
+                  <Text style={[styles.assetPickerLabel, editForm.assetType === at.key && { color: at.color }]}>{at.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+            <TextInput style={styles.input} placeholder="Notes (optional)" placeholderTextColor={colors.textMuted} value={editForm.notes} onChangeText={t => setEditForm(f => ({ ...f, notes: t }))} />
+            <View style={styles.modalButtons}>
+              <Pressable style={styles.cancelBtn} onPress={() => setEditPos(null)}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable style={[styles.saveBtn, isEditSubmitting && { opacity: 0.6 }]} onPress={handleEditPosition} disabled={isEditSubmitting}>
+                <Text style={styles.saveText}>{isEditSubmitting ? 'Saving…' : 'Save Changes'}</Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* ── Sort Menu ─────────────────────────────────────────────────────── */}
+      <Modal visible={showSortMenu} animationType="fade" transparent>
+        <Pressable style={styles.menuOverlay} onPress={() => setShowSortMenu(false)}>
+          <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Sort By</Text>
+            {(Object.keys(SORT_LABELS) as SortField[]).map(field => (
+              <Pressable
+                key={field}
+                style={styles.sortItem}
+                onPress={() => {
+                  if (sortBy === field) setSortAsc(a => !a);
+                  else { setSortBy(field); setSortAsc(false); }
+                  setShowSortMenu(false);
+                }}
+              >
+                <Text style={[styles.sortItemText, sortBy === field && { color: colors.primary }]}>
+                  {SORT_LABELS[field]}
+                </Text>
+                {sortBy === field && (
+                  <Feather name={sortAsc ? 'arrow-up' : 'arrow-down'} size={14} color={colors.primary} />
+                )}
+              </Pressable>
+            ))}
+          </View>
+        </Pressable>
+      </Modal>
+
       {/* ── Duplicate Resolution Modal (rendered last so it appears on top) ── */}
       <Modal visible={showDuplicateModal} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
@@ -710,19 +1074,28 @@ const styles = StyleSheet.create({
   emptyCard: { alignItems: 'center', padding: 32, gap: 8 },
   emptyText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: colors.textSecondary },
   emptySubText: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textMuted, textAlign: 'center' },
-  posCard: { marginBottom: 10 },
-  posHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 },
+  posCard: { marginBottom: 8 },
+  posHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 },
   posLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
-  posSymbol: { fontFamily: 'Inter_700Bold', fontSize: 17, color: colors.textPrimary },
-  posName: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 1, maxWidth: 160 },
-  posRight: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  posValue: { fontFamily: 'Inter_700Bold', fontSize: 16, color: colors.textPrimary },
-  deleteBtn: { padding: 8 },
-  posStats: { flexDirection: 'row' },
+  posSymbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
+  posSymbol: { fontFamily: 'Inter_700Bold', fontSize: 15, color: colors.textPrimary },
+  assetTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
+  assetTypeLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 9 },
+  posName: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textSecondary, marginTop: 1, maxWidth: 180 },
+  posRight: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  posValue: { fontFamily: 'Inter_700Bold', fontSize: 15, color: colors.textPrimary },
+  menuBtn: { padding: 6 },
+  posStats: { flexDirection: 'row', marginBottom: 6 },
   posStat: { flex: 1 },
   posStatLabel: { fontFamily: 'Inter_400Regular', fontSize: 10, color: colors.textMuted, marginBottom: 2 },
-  posStatVal: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary },
-  sector: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 8 },
+  posStatVal: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: colors.textPrimary },
+  posDayRow: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingTop: 6, borderTopWidth: 1, borderTopColor: colors.separator },
+  posDayLabel: { fontFamily: 'Inter_500Medium', fontSize: 11 },
+  sector: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 6 },
+  pickerLabel: { fontFamily: 'Inter_500Medium', fontSize: 12, color: colors.textSecondary, marginBottom: 6 },
+  assetPickerRow: { marginBottom: 12 },
+  assetPickerChip: { flexDirection: 'row', alignItems: 'center', gap: 4, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.separator, backgroundColor: colors.surfaceElevated },
+  assetPickerLabel: { fontFamily: 'Inter_500Medium', fontSize: 11, color: colors.textSecondary },
   // Modals
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
   modal: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
@@ -770,4 +1143,25 @@ const styles = StyleSheet.create({
   dupOption: { borderWidth: 1, borderColor: colors.separator, borderRadius: 12, padding: 14, marginBottom: 10 },
   dupOptionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textPrimary, marginBottom: 2 },
   dupOptionDesc: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted },
+  // Search + filter
+  searchRow: {
+    flexDirection: 'row', alignItems: 'center',
+    backgroundColor: colors.surfaceElevated, borderRadius: 10,
+    paddingHorizontal: 12, paddingVertical: 8,
+    marginBottom: 10, borderWidth: 1, borderColor: colors.separator,
+  },
+  searchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textPrimary },
+  filterRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'nowrap' },
+  filterChip: {
+    paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20,
+    borderWidth: 1, borderColor: colors.separator, backgroundColor: colors.surfaceElevated,
+  },
+  filterChipActive: { borderColor: colors.primary, backgroundColor: 'rgba(0,212,255,0.12)' },
+  filterChipText: { fontFamily: 'Inter_500Medium', fontSize: 12, color: colors.textSecondary },
+  filterChipTextActive: { color: colors.primary },
+  // Sort menu
+  menuOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
+  menuSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
+  sortItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.separator },
+  sortItemText: { fontFamily: 'Inter_500Medium', fontSize: 15, color: colors.textPrimary },
 });

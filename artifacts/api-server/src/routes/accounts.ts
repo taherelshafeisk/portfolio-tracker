@@ -145,6 +145,9 @@ router.get("/:id/positions", async (req, res) => {
       const marketValue = qty * cur;
       const unrealizedPnl = marketValue - qty * avg;
       const unrealizedPnlPct = qty * avg > 0 ? (unrealizedPnl / (qty * avg)) * 100 : 0;
+      const prevPrice = priceMap[p.symbol]?.previousClose ?? cur;
+      const dayChange = qty * (cur - prevPrice);
+      const dayChangePct = priceMap[p.symbol]?.changePercent ?? 0;
       return {
         id: p.id,
         accountId: p.accountId,
@@ -156,6 +159,9 @@ router.get("/:id/positions", async (req, res) => {
         marketValue,
         unrealizedPnl,
         unrealizedPnlPct,
+        dayChange,
+        dayChangePct,
+        assetType: p.assetType ?? undefined,
         sector: p.sector ?? undefined,
         notes: p.notes ?? undefined,
         createdAt: p.createdAt.toISOString(),

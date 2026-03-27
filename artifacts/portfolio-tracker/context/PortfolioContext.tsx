@@ -1,11 +1,21 @@
 import React, { createContext, useContext, useState, useMemo, ReactNode, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
-const BASE_URL = process.env.EXPO_PUBLIC_DOMAIN
-  ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
-    ? `http://${process.env.EXPO_PUBLIC_DOMAIN}`
-    : `https://${process.env.EXPO_PUBLIC_DOMAIN}`
-  : '';
+function resolveBaseUrl(): string {
+  const domain = process.env.EXPO_PUBLIC_DOMAIN;
+  if (domain) {
+    return domain.includes('localhost')
+      ? `http://${domain}`
+      : `https://${domain}`;
+  }
+  // On web, fall back to same hostname on port 3001 (API server default)
+  if (typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:3001`;
+  }
+  return '';
+}
+
+const BASE_URL = resolveBaseUrl();
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`);
@@ -61,6 +71,9 @@ export interface Position {
   marketValue: number;
   unrealizedPnl: number;
   unrealizedPnlPct: number;
+  dayChange: number;
+  dayChangePct: number;
+  assetType?: string;
   sector?: string;
   notes?: string;
   createdAt: string;

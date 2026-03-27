@@ -83,7 +83,7 @@ export default function PositionDetailScreen() {
 
       <Pressable
         style={styles.chartBtn}
-        onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: position.symbol } })}
+        onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: position.symbol, avgCost: String(position.avgCost), accountId: String(position.accountId) } })}
       >
         <Feather name="trending-up" size={18} color={colors.background} />
         <Text style={styles.chartBtnText}>View Chart</Text>

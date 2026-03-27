@@ -10,6 +10,7 @@ export const positionsTable = pgTable("positions", {
   quantity: numeric("quantity", { precision: 20, scale: 8 }).notNull(),
   avgCost: numeric("avg_cost", { precision: 20, scale: 4 }).notNull(),
   currentPrice: numeric("current_price", { precision: 20, scale: 4 }).notNull().default("0"),
+  assetType: text("asset_type"),
   sector: text("sector"),
   notes: text("notes"),
   createdAt: timestamp("created_at").notNull().defaultNow(),

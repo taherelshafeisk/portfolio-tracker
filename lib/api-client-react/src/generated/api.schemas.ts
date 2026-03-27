@@ -70,6 +70,20 @@ export interface UpdateAccountBody {
   currentBalance?: number;
 }
 
+export type PositionAssetType =
+  (typeof PositionAssetType)[keyof typeof PositionAssetType];
+
+export const PositionAssetType = {
+  stock: "stock",
+  etf: "etf",
+  crypto: "crypto",
+  commodity: "commodity",
+  bond: "bond",
+  reit: "reit",
+  forex: "forex",
+  index: "index",
+} as const;
+
 export interface Position {
   id: number;
   accountId: number;
@@ -81,11 +95,28 @@ export interface Position {
   marketValue: number;
   unrealizedPnl: number;
   unrealizedPnlPct: number;
+  dayChange: number;
+  dayChangePct: number;
+  assetType?: PositionAssetType;
   sector?: string;
   notes?: string;
   createdAt: string;
   updatedAt: string;
 }
+
+export type CreatePositionBodyAssetType =
+  (typeof CreatePositionBodyAssetType)[keyof typeof CreatePositionBodyAssetType];
+
+export const CreatePositionBodyAssetType = {
+  stock: "stock",
+  etf: "etf",
+  crypto: "crypto",
+  commodity: "commodity",
+  bond: "bond",
+  reit: "reit",
+  forex: "forex",
+  index: "index",
+} as const;
 
 export interface CreatePositionBody {
   accountId: number;
@@ -93,14 +124,30 @@ export interface CreatePositionBody {
   name: string;
   quantity: number;
   avgCost: number;
+  assetType?: CreatePositionBodyAssetType;
   sector?: string;
   notes?: string;
 }
+
+export type UpdatePositionBodyAssetType =
+  (typeof UpdatePositionBodyAssetType)[keyof typeof UpdatePositionBodyAssetType];
+
+export const UpdatePositionBodyAssetType = {
+  stock: "stock",
+  etf: "etf",
+  crypto: "crypto",
+  commodity: "commodity",
+  bond: "bond",
+  reit: "reit",
+  forex: "forex",
+  index: "index",
+} as const;
 
 export interface UpdatePositionBody {
   quantity?: number;
   avgCost?: number;
   currentPrice?: number;
+  assetType?: UpdatePositionBodyAssetType;
   notes?: string;
 }
 

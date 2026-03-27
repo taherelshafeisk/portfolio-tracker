@@ -33,7 +33,7 @@ const INDEX_NAMES: Record<string, string> = {
 
 export default function PortfolioScreen() {
   const insets = useSafeAreaInsets();
-  const { summary, accounts, isLoading, refreshAll } = usePortfolio();
+  const { summary, accounts, positions, isLoading, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const { data: indices, isLoading: indicesLoading } = useQuery({
@@ -144,7 +144,7 @@ export default function PortfolioScreen() {
             : (indices || []).map(idx => {
                 const pos = idx.changePercent >= 0;
                 return (
-                  <Card key={idx.symbol} style={styles.indexCard}>
+                  <Card key={idx.symbol} style={styles.indexCard} onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: idx.symbol } })}>
                     <Text style={styles.indexName}>{INDEX_NAMES[idx.symbol] || idx.symbol}</Text>
                     <Text style={styles.indexPrice}>
                       {idx.price >= 1000
@@ -167,8 +167,19 @@ export default function PortfolioScreen() {
             <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.indicesScroll}>
               {summary!.topPositions.map(pos => {
                 const isUp = pos.dayChangePct >= 0;
+                const matchedPosition = positions.find(p => p.symbol === pos.symbol);
                 return (
-                  <Card key={pos.symbol} style={styles.indexCard}>
+                  <Card
+                    key={pos.symbol}
+                    style={styles.indexCard}
+                    onPress={() => router.push({
+                      pathname: '/chart/[symbol]',
+                      params: {
+                        symbol: pos.symbol,
+                        ...(matchedPosition ? { avgCost: matchedPosition.avgCost.toString(), accountId: matchedPosition.accountId.toString() } : {}),
+                      },
+                    })}
+                  >
                     <Text style={styles.indexName}>{pos.symbol}</Text>
                     <Text style={styles.indexPrice}>
                       {pos.currentPrice >= 1000

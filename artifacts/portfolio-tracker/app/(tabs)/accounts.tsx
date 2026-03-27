@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
-  Pressable, Modal, TextInput, Alert, Platform,
+  Pressable, Modal, TextInput, Alert, Platform, Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
@@ -42,6 +42,25 @@ export default function AccountsScreen() {
   }, []);
 
   const canSubmit = !!(form.name.trim() && form.broker.trim());
+
+  const exportAllCSV = () => {
+    const header = 'Account,Symbol,Name,Qty,Avg Cost,Current Price,Market Value,Unrealized P&L,P&L %';
+    const rows = positions.map(p => {
+      const acc = accounts.find(a => a.id === p.accountId);
+      return `"${acc?.name ?? ''}",${p.symbol},"${p.name}",${p.quantity},${p.avgCost.toFixed(4)},${p.currentPrice.toFixed(4)},${p.marketValue.toFixed(2)},${p.unrealizedPnl.toFixed(2)},${p.unrealizedPnlPct.toFixed(2)}`;
+    });
+    const csv = [header, ...rows].join('\n');
+    const filename = `portfolio_${new Date().toISOString().slice(0, 10)}.csv`;
+    if (Platform.OS === 'web') {
+      const blob = new Blob([csv], { type: 'text/csv' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = filename; a.click();
+      URL.revokeObjectURL(url);
+    } else {
+      Share.share({ message: csv, title: filename });
+    }
+  };
 
   const handleAdd = async () => {
     if (!canSubmit || isSubmitting) return;
@@ -87,15 +106,19 @@ export default function AccountsScreen() {
       {/* Header */}
       <View style={styles.header}>
         <Text style={styles.title}>Accounts</Text>
-        <Pressable
-          style={styles.addBtn}
-          onPress={() => {
-            Haptics.selectionAsync();
-            setShowAdd(true);
-          }}
-        >
-          <Feather name="plus" size={20} color={colors.background} />
-        </Pressable>
+        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+          {positions.length > 0 && (
+            <Pressable style={styles.exportBtn} onPress={exportAllCSV}>
+              <Feather name="download" size={15} color={colors.textSecondary} />
+            </Pressable>
+          )}
+          <Pressable
+            style={styles.addBtn}
+            onPress={() => { Haptics.selectionAsync(); setShowAdd(true); }}
+          >
+            <Feather name="plus" size={20} color={colors.background} />
+          </Pressable>
+        </View>
       </View>
 
       <ScrollView
@@ -278,6 +301,12 @@ const styles = StyleSheet.create({
     paddingTop: 4,
   },
   title: { fontFamily: 'Inter_700Bold', fontSize: 26, color: colors.textPrimary },
+  exportBtn: {
+    width: 36, height: 36, borderRadius: 18,
+    borderWidth: 1, borderColor: colors.separator,
+    alignItems: 'center', justifyContent: 'center',
+    backgroundColor: colors.surfaceElevated,
+  },
   addBtn: {
     width: 36,
     height: 36,

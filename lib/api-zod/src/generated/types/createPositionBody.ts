@@ -5,6 +5,7 @@
  * Portfolio Tracker API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { CreatePositionBodyAssetType } from "./createPositionBodyAssetType";
 
 export interface CreatePositionBody {
   accountId: number;
@@ -12,6 +13,7 @@ export interface CreatePositionBody {
   name: string;
   quantity: number;
   avgCost: number;
+  assetType?: CreatePositionBodyAssetType;
   sector?: string;
   notes?: string;
 }

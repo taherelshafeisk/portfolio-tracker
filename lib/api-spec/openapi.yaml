@@ -604,6 +604,13 @@ components:
           type: number
         unrealizedPnlPct:
           type: number
+        dayChange:
+          type: number
+        dayChangePct:
+          type: number
+        assetType:
+          type: string
+          enum: [stock, etf, crypto, commodity, bond, reit, forex, index]
         sector:
           type: string
         notes:
@@ -625,6 +632,8 @@ components:
         - marketValue
         - unrealizedPnl
         - unrealizedPnlPct
+        - dayChange
+        - dayChangePct
         - createdAt
         - updatedAt
 
@@ -641,6 +650,9 @@ components:
           type: number
         avgCost:
           type: number
+        assetType:
+          type: string
+          enum: [stock, etf, crypto, commodity, bond, reit, forex, index]
         sector:
           type: string
         notes:
@@ -661,6 +673,9 @@ components:
           type: number
         currentPrice:
           type: number
+        assetType:
+          type: string
+          enum: [stock, etf, crypto, commodity, bond, reit, forex, index]
         notes:
           type: string
 

@@ -21,10 +21,10 @@ const CRYPTO_SYMBOLS = new Set([
 
 // Explicit overrides for symbols that don't match Yahoo Finance tickers directly.
 const SYMBOL_OVERRIDES: Record<string, string> = {
-  "GOLD": "XAUUSD=X",
-  "XAU":  "XAUUSD=X",
-  "SILVER": "XAGUSD=X",
-  "XAG":  "XAGUSD=X",
+  "GOLD": "GC=F",
+  "XAU": "GC=F",
+  "SILVER": "SI=F",
+  "XAG": "SI=F",
 };
 
 /** Map a user-facing symbol to the Yahoo Finance ticker (e.g. BTC → BTC-USD, GOLD → XAUUSD=X). */
@@ -119,13 +119,16 @@ async function fetchLivePrices(symbols: string[]): Promise<Record<string, LivePr
   return result;
 }
 
-function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: number) {
+function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: number, livePriceData?: LivePriceData | null) {
   const qty = parseFloat(p.quantity);
   const avg = parseFloat(p.avgCost);
   const cur = livePrice ?? parseFloat(p.currentPrice);
   const marketValue = qty * cur;
   const unrealizedPnl = marketValue - qty * avg;
   const unrealizedPnlPct = qty * avg > 0 ? (unrealizedPnl / (qty * avg)) * 100 : 0;
+  const prevPrice = livePriceData?.previousClose ?? cur;
+  const dayChange = qty * (cur - prevPrice);
+  const dayChangePct = livePriceData?.changePercent ?? 0;
   return {
     id: p.id,
     accountId: p.accountId,
@@ -137,6 +140,9 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
     marketValue,
     unrealizedPnl,
     unrealizedPnlPct,
+    dayChange,
+    dayChangePct,
+    assetType: p.assetType ?? undefined,
     sector: p.sector ?? undefined,
     notes: p.notes ?? undefined,
     createdAt: p.createdAt.toISOString(),
@@ -146,7 +152,7 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
 
 router.post("/", async (req, res) => {
   try {
-    const { accountId, symbol, name, quantity, avgCost, sector, notes } = req.body;
+    const { accountId, symbol, name, quantity, avgCost, assetType, sector, notes } = req.body;
     const upperSymbol = symbol.toUpperCase();
 
     const livePriceData = await fetchLivePrice(upperSymbol);
@@ -160,11 +166,12 @@ router.post("/", async (req, res) => {
       quantity: quantity.toString(),
       avgCost: avgCost.toString(),
       currentPrice: priceToStore.toString(),
+      assetType: assetType || null,
       sector: sector || null,
       notes: notes || null,
     }).returning();
 
-    res.status(201).json(toPositionResponse(position, livePrice ?? undefined));
+    res.status(201).json(toPositionResponse(position, livePrice ?? undefined, livePriceData));
   } catch (error) {
     console.error("Failed to create position:", error);
     res.status(500).json({ error: "Failed to create position" });
@@ -174,11 +181,12 @@ router.post("/", async (req, res) => {
 router.put("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { quantity, avgCost, currentPrice, notes } = req.body;
+    const { quantity, avgCost, currentPrice, assetType, notes } = req.body;
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (quantity !== undefined) updates.quantity = quantity.toString();
     if (avgCost !== undefined) updates.avgCost = avgCost.toString();
     if (currentPrice !== undefined) updates.currentPrice = currentPrice.toString();
+    if (assetType !== undefined) updates.assetType = assetType || null;
     if (notes !== undefined) updates.notes = notes;
     const [position] = await db.update(positionsTable).set(updates).where(eq(positionsTable.id, id)).returning();
     if (!position) return res.status(404).json({ error: "Position not found" });

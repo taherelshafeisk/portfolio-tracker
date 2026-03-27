@@ -5,6 +5,7 @@
  * Portfolio Tracker API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { PositionAssetType } from "./positionAssetType";
 
 export interface Position {
   id: number;
@@ -17,6 +18,9 @@ export interface Position {
   marketValue: number;
   unrealizedPnl: number;
   unrealizedPnlPct: number;
+  dayChange: number;
+  dayChangePct: number;
+  assetType?: PositionAssetType;
   sector?: string;
   notes?: string;
   createdAt: Date;

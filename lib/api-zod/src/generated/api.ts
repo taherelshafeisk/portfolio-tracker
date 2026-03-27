@@ -114,6 +114,20 @@ export const ListAccountPositionsResponseItem = zod.object({
   marketValue: zod.number(),
   unrealizedPnl: zod.number(),
   unrealizedPnlPct: zod.number(),
+  dayChange: zod.number(),
+  dayChangePct: zod.number(),
+  assetType: zod
+    .enum([
+      "stock",
+      "etf",
+      "crypto",
+      "commodity",
+      "bond",
+      "reit",
+      "forex",
+      "index",
+    ])
+    .optional(),
   sector: zod.string().optional(),
   notes: zod.string().optional(),
   createdAt: zod.date(),
@@ -132,6 +146,18 @@ export const CreatePositionBody = zod.object({
   name: zod.string(),
   quantity: zod.number(),
   avgCost: zod.number(),
+  assetType: zod
+    .enum([
+      "stock",
+      "etf",
+      "crypto",
+      "commodity",
+      "bond",
+      "reit",
+      "forex",
+      "index",
+    ])
+    .optional(),
   sector: zod.string().optional(),
   notes: zod.string().optional(),
 });
@@ -147,6 +173,18 @@ export const UpdatePositionBody = zod.object({
   quantity: zod.number().optional(),
   avgCost: zod.number().optional(),
   currentPrice: zod.number().optional(),
+  assetType: zod
+    .enum([
+      "stock",
+      "etf",
+      "crypto",
+      "commodity",
+      "bond",
+      "reit",
+      "forex",
+      "index",
+    ])
+    .optional(),
   notes: zod.string().optional(),
 });
 
@@ -161,6 +199,20 @@ export const UpdatePositionResponse = zod.object({
   marketValue: zod.number(),
   unrealizedPnl: zod.number(),
   unrealizedPnlPct: zod.number(),
+  dayChange: zod.number(),
+  dayChangePct: zod.number(),
+  assetType: zod
+    .enum([
+      "stock",
+      "etf",
+      "crypto",
+      "commodity",
+      "bond",
+      "reit",
+      "forex",
+      "index",
+    ])
+    .optional(),
   sector: zod.string().optional(),
   notes: zod.string().optional(),
   createdAt: zod.date(),

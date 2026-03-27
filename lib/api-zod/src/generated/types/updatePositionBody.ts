@@ -5,10 +5,12 @@
  * Portfolio Tracker API specification
  * OpenAPI spec version: 0.1.0
  */
+import type { UpdatePositionBodyAssetType } from "./updatePositionBodyAssetType";
 
 export interface UpdatePositionBody {
   quantity?: number;
   avgCost?: number;
   currentPrice?: number;
+  assetType?: UpdatePositionBodyAssetType;
   notes?: string;
 }

@@ -1,9 +1,71 @@
 import { Router, type IRouter } from "express";
 import { db, conversations as conversationsTable, messages as messagesTable } from "@workspace/db";
+import { accountsTable, positionsTable } from "@workspace/db";
 import { eq, asc } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
+import { fetchLivePrices } from "../positions";
 
 const router: IRouter = Router();
+
+async function buildPortfolioContext(): Promise<string> {
+  try {
+    const accounts = await db.select().from(accountsTable);
+    const allPositions = await db.select().from(positionsTable);
+    if (accounts.length === 0) return "The user has not added any accounts or positions yet.";
+
+    const symbols = [...new Set(allPositions.map(p => p.symbol))];
+    const priceMap = symbols.length > 0 ? await fetchLivePrices(symbols) : {};
+
+    let totalNav = 0;
+    let totalCost = 0;
+    let totalUnrealizedPnl = 0;
+
+    const accountLines: string[] = [];
+    for (const account of accounts) {
+      const positions = allPositions.filter(p => p.accountId === account.id);
+      let accNav = parseFloat(account.currentBalance);
+      let accCost = 0;
+      let accPnl = 0;
+
+      const posLines: string[] = [];
+      for (const p of positions) {
+        const qty = parseFloat(p.quantity);
+        const avg = parseFloat(p.avgCost);
+        const cur = priceMap[p.symbol]?.price ?? parseFloat(p.currentPrice);
+        const mv = qty * cur;
+        const cost = qty * avg;
+        const pnl = mv - cost;
+        const pnlPct = cost > 0 ? (pnl / cost) * 100 : 0;
+        accNav += mv;
+        accCost += cost;
+        accPnl += pnl;
+        posLines.push(
+          `    - ${p.symbol} (${p.name}): ${qty} shares @ avg $${avg.toFixed(2)}, current $${cur.toFixed(2)}, market value $${mv.toFixed(2)}, P&L ${pnl >= 0 ? "+" : ""}$${pnl.toFixed(2)} (${pnlPct >= 0 ? "+" : ""}${pnlPct.toFixed(1)}%)${p.sector ? `, sector: ${p.sector}` : ""}`
+        );
+      }
+
+      totalNav += accNav;
+      totalCost += accCost + parseFloat(account.currentBalance);
+      totalUnrealizedPnl += accPnl;
+
+      const accPnlPct = accCost > 0 ? (accPnl / accCost) * 100 : 0;
+      accountLines.push(
+        `  Account: "${account.name}" (${account.accountType}, broker: ${account.broker})\n  NAV: $${accNav.toFixed(2)}, Cash: $${parseFloat(account.currentBalance).toFixed(2)}, Unrealized P&L: ${accPnl >= 0 ? "+" : ""}$${accPnl.toFixed(2)} (${accPnlPct >= 0 ? "+" : ""}${accPnlPct.toFixed(1)}%)\n  Positions:\n${posLines.join("\n") || "    (none)"}`
+      );
+    }
+
+    const totalPnlPct = totalCost > 0 ? (totalUnrealizedPnl / totalCost) * 100 : 0;
+
+    return `CURRENT PORTFOLIO DATA (live, as of now):
+Total Portfolio Value (NAV): $${totalNav.toFixed(2)}
+Total Unrealized P&L: ${totalUnrealizedPnl >= 0 ? "+" : ""}$${totalUnrealizedPnl.toFixed(2)} (${totalPnlPct >= 0 ? "+" : ""}${totalPnlPct.toFixed(1)}%)
+Number of accounts: ${accounts.length}
+
+${accountLines.join("\n\n")}`;
+  } catch {
+    return "Portfolio data temporarily unavailable.";
+  }
+}
 
 async function fetchForexRateToUSD(fromCurrency: string): Promise<number> {
   try {
@@ -119,13 +181,15 @@ router.post("/conversations/:id/messages", async (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
+    const portfolioContext = await buildPortfolioContext();
+
     let fullResponse = "";
 
     const stream = anthropic.messages.stream({
       model: "claude-sonnet-4-6",
       max_tokens: 8192,
-      system: `You are an expert financial advisor and portfolio manager AI assistant. 
-You help users analyze their portfolio, make trading decisions, screen stocks for swing trades, 
+      system: `You are an expert financial advisor and portfolio manager AI assistant.
+You help users analyze their portfolio, make trading decisions, screen stocks for swing trades,
 and understand market movements. You have deep knowledge of:
 - Long-term investing strategies (buy and hold, dividend investing)
 - Swing trading techniques (technical analysis, RSI, MACD, support/resistance)
@@ -134,7 +198,13 @@ and understand market movements. You have deep knowledge of:
 - Market indices and macroeconomic analysis
 
 Provide concise, actionable advice. Use specific numbers and percentages when possible.
-Be direct but acknowledge risks. Format responses clearly with bullet points when listing multiple items.`,
+Be direct but acknowledge risks. Format responses clearly with bullet points when listing multiple items.
+
+---
+${portfolioContext}
+---
+
+Always use the portfolio data above when answering questions about the user's holdings, P&L, risk, or allocation. Do not ask the user to provide data you already have.`,
       messages: chatMessages,
     });
 
@@ -215,6 +285,16 @@ If there is a cash, USD, or money market row, extract its value as cashBalance a
     }
   ]
 }
+4. CURRENCY CONVERSION for mixed-currency accounts:
+   If the screenshot shows crypto values in AED (฿ symbol on a Wio/UAE account) 
+   but ETFs/stocks in USD, apply the following AFTER deriving avgCost:
+   - For crypto positions: avgCost is in AED. Convert to USD by dividing by 3.6725 
+     (the fixed AED/USD peg rate).
+   - For USD-denominated positions (stocks, ETFs): no conversion needed.
+   - Set a "derivedCurrency" field on each position: "AED" or "USD" before conversion,
+     and always return avgCost and currentPrice in USD in the final output.
+   - Also convert currentPrice: currentPrice (AED) / 3.6725 = currentPrice (USD)
+   
 Only return the JSON object, no additional text. If no trades are visible, return an empty trades array.`;
 
     const response = await anthropic.messages.create({

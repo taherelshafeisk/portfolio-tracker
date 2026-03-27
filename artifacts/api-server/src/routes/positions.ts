@@ -237,5 +237,18 @@ router.post("/refresh-prices", async (req, res) => {
   }
 });
 
+/** Returns only prices already in the 60s in-memory cache. No HTTP calls, no side effects. */
+export function getCachedPrices(symbols: string[]): Record<string, LivePriceData> {
+  const now = Date.now();
+  const result: Record<string, LivePriceData> = {};
+  for (const sym of [...new Set(symbols)]) {
+    const cached = _priceCache.get(sym);
+    if (cached && now - cached.ts < CACHE_TTL_MS) {
+      result[sym] = cached.data;
+    }
+  }
+  return result;
+}
+
 export { fetchLivePrices };
 export default router;

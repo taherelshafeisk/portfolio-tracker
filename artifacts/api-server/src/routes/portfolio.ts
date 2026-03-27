@@ -1,8 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { accountsTable, positionsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
-import { fetchLivePrices } from "./positions";
+import { getCachedPrices } from "./positions";
 
 const router: IRouter = Router();
 
@@ -16,18 +15,9 @@ router.get("/summary", async (_req, res) => {
     let totalDayChange = 0;
 
     const allSymbols = [...new Set(allPositions.map(p => p.symbol))];
-    const priceMap = allSymbols.length > 0 ? await fetchLivePrices(allSymbols) : {};
-
-    // Persist fresh prices to DB
-    await Promise.allSettled(
-      allPositions
-        .filter(p => priceMap[p.symbol] !== undefined)
-        .map(p =>
-          db.update(positionsTable)
-            .set({ currentPrice: priceMap[p.symbol].price.toString(), updatedAt: new Date() })
-            .where(eq(positionsTable.id, p.id))
-        )
-    );
+    // Read-only: use in-memory cache populated by /accounts/:id/positions or POST /positions/refresh-prices.
+    // No live HTTP calls and no DB writes on the summary path.
+    const priceMap = getCachedPrices(allSymbols);
 
     const accountSummaries = await Promise.all(accounts.map(async (account) => {
       const positions = allPositions.filter(p => p.accountId === account.id);

@@ -17,6 +17,7 @@ export interface SleeveData {
   unrealizedPnlPct: number;
   positionCount: number;
   topMover?: { symbol: string; dayChangePct: number };
+  cashBalance?: number;
 }
 
 interface Props {
@@ -55,6 +56,11 @@ export function SleeveSection({ sleeves }: Props) {
               <Text style={[styles.day, { color: isDayUp ? colors.positive : colors.negative }]}>
                 {isDayUp ? '+' : ''}{sleeve.dayChangePct.toFixed(2)}% today
               </Text>
+              {sleeve.cashBalance !== undefined && sleeve.cashBalance < 0 && (
+                <View style={styles.leveragedChip}>
+                  <Text style={styles.leveragedText}>LEVERAGED</Text>
+                </View>
+              )}
               {sleeve.topMover && (
                 <View style={[
                   styles.moverChip,
@@ -125,6 +131,20 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_500Medium',
     fontSize: 11,
     color: colors.textMuted,
+  },
+  leveragedChip: {
+    alignSelf: 'flex-start',
+    backgroundColor: 'rgba(255,71,87,0.12)',
+    borderRadius: 4,
+    paddingHorizontal: 5,
+    paddingVertical: 2,
+    marginTop: 4,
+  },
+  leveragedText: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 9,
+    color: colors.negative,
+    letterSpacing: 0.5,
   },
   moverChip: {
     flexDirection: 'row',

@@ -155,6 +155,54 @@ function computeAlerts(
   return alerts;
 }
 
+function computeOrderSuggestions(
+  alerts: DashboardAlert[],
+  positions: ReturnType<typeof usePortfolio>['positions'],
+  accounts: ReturnType<typeof usePortfolio>['accounts'],
+  totalNav: number,
+): OrderSuggestion[] {
+  // Derived from live alerts + positions — no backend, no DB.
+  // TODO: replace with GET /order-suggestions once the table exists.
+  const suggestions: OrderSuggestion[] = [];
+  const accountNameMap = new Map(accounts.map(a => [a.id, a.name]));
+  const positionMap = new Map(positions.map(p => [p.symbol, p]));
+
+  for (const alert of alerts) {
+    if (suggestions.length >= 3) break;
+
+    if (alert.type === 'concentration' && alert.symbol) {
+      const pos = positionMap.get(alert.symbol);
+      if (!pos) continue;
+      const pct = totalNav > 0 ? (pos.marketValue / totalNav) * 100 : 0;
+      suggestions.push({
+        id: `suggest-trim-${alert.symbol}`,
+        symbol: alert.symbol,
+        side: 'sell',
+        orderType: 'Laddered Limit',
+        urgency: alert.severity === 'critical' ? 'high' : 'medium',
+        rationale: `Trim to reduce ${pct.toFixed(0)}% concentration`,
+        sleeve: accountNameMap.get(pos.accountId) ?? 'Unknown',
+      });
+    }
+
+    if (alert.type === 'drawdown' && alert.symbol) {
+      const pos = positionMap.get(alert.symbol);
+      if (!pos) continue;
+      suggestions.push({
+        id: `suggest-cut-${alert.symbol}`,
+        symbol: alert.symbol,
+        side: 'sell',
+        orderType: alert.severity === 'critical' ? 'Market' : 'Stop',
+        urgency: alert.severity === 'critical' ? 'critical' : 'high',
+        rationale: `Cut position down ${Math.abs(pos.unrealizedPnlPct).toFixed(1)}%`,
+        sleeve: accountNameMap.get(pos.accountId) ?? 'Unknown',
+      });
+    }
+  }
+
+  return suggestions;
+}
+
 function computeActionItems(alerts: DashboardAlert[]): ActionItem[] {
   // Derive action items from live alerts.
   // TODO: replace with server-side action_items table once that schema lands.
@@ -238,21 +286,25 @@ export default function HomeScreen() {
 
   const sleeves = useMemo<SleeveData[]>(
     () =>
-      (summary?.accounts ?? []).map(acc => ({
-        id: acc.id,
-        name: acc.name,
-        accountType: acc.accountType,
-        nav: acc.nav,
-        dayChange: acc.dayChange,
-        dayChangePct: acc.dayChangePct,
-        unrealizedPnl: acc.unrealizedPnl,
-        unrealizedPnlPct: acc.unrealizedPnlPct,
-        positionCount: acc.positionCount,
-        topMover: acc.topMovers[0]
-          ? { symbol: acc.topMovers[0].symbol, dayChangePct: acc.topMovers[0].dayChangePct }
-          : undefined,
-      })),
-    [summary],
+      (summary?.accounts ?? []).map(acc => {
+        const flatAcc = accounts.find(a => a.id === acc.id);
+        return {
+          id: acc.id,
+          name: acc.name,
+          accountType: acc.accountType,
+          nav: acc.nav,
+          dayChange: acc.dayChange,
+          dayChangePct: acc.dayChangePct,
+          unrealizedPnl: acc.unrealizedPnl,
+          unrealizedPnlPct: acc.unrealizedPnlPct,
+          positionCount: acc.positionCount,
+          topMover: acc.topMovers[0]
+            ? { symbol: acc.topMovers[0].symbol, dayChangePct: acc.topMovers[0].dayChangePct }
+            : undefined,
+          cashBalance: flatAcc?.currentBalance,
+        };
+      }),
+    [summary, accounts],
   );
 
   const riskIndicators = useMemo(
@@ -270,8 +322,10 @@ export default function HomeScreen() {
     [alerts],
   );
 
-  // TODO: replace with GET /dashboard once order_suggestions table exists
-  const orderSuggestions: OrderSuggestion[] = [];
+  const orderSuggestions = useMemo(
+    () => computeOrderSuggestions(alerts, positions, accounts, totalNav),
+    [alerts, positions, accounts, totalNav],
+  );
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -313,19 +367,19 @@ export default function HomeScreen() {
           isLoading={isLoading && !summary}
         />
 
-        {/* 2. Alerts — shown early so critical signals are not buried */}
-        <AlertSection alerts={alerts} />
-
-        {/* 3. Action items */}
-        <ActionSection items={actionItems} />
-
-        {/* 4. Sleeve summaries */}
+        {/* 2. Sleeve summaries */}
         <SleeveSection sleeves={sleeves} />
 
-        {/* 5. Risk indicators */}
+        {/* 3. Risk indicators */}
         <RiskSection indicators={riskIndicators} />
 
-        {/* 6. Suggested orders preview */}
+        {/* 4. Alerts */}
+        <AlertSection alerts={alerts} />
+
+        {/* 5. Action items */}
+        <ActionSection items={actionItems} />
+
+        {/* 6. Suggested orders preview — derived from alerts, no backend */}
         <OrderSuggestionsPreview suggestions={orderSuggestions} />
 
         {/* ── Market strip (retained from previous screen) ────────────────── */}

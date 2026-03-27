@@ -6,9 +6,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiGet } from '@/context/PortfolioContext';
+import { usePortfolio, apiGet, apiPost } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 
@@ -155,53 +155,6 @@ function computeAlerts(
   return alerts;
 }
 
-function computeOrderSuggestions(
-  alerts: DashboardAlert[],
-  positions: ReturnType<typeof usePortfolio>['positions'],
-  accounts: ReturnType<typeof usePortfolio>['accounts'],
-  totalNav: number,
-): OrderSuggestion[] {
-  // Derived from live alerts + positions — no backend, no DB.
-  // TODO: replace with GET /order-suggestions once the table exists.
-  const suggestions: OrderSuggestion[] = [];
-  const accountNameMap = new Map(accounts.map(a => [a.id, a.name]));
-  const positionMap = new Map(positions.map(p => [p.symbol, p]));
-
-  for (const alert of alerts) {
-    if (suggestions.length >= 3) break;
-
-    if (alert.type === 'concentration' && alert.symbol) {
-      const pos = positionMap.get(alert.symbol);
-      if (!pos) continue;
-      const pct = totalNav > 0 ? (pos.marketValue / totalNav) * 100 : 0;
-      suggestions.push({
-        id: `suggest-trim-${alert.symbol}`,
-        symbol: alert.symbol,
-        side: 'sell',
-        orderType: 'Laddered Limit',
-        urgency: alert.severity === 'critical' ? 'high' : 'medium',
-        rationale: `Trim to reduce ${pct.toFixed(0)}% concentration`,
-        sleeve: accountNameMap.get(pos.accountId) ?? 'Unknown',
-      });
-    }
-
-    if (alert.type === 'drawdown' && alert.symbol) {
-      const pos = positionMap.get(alert.symbol);
-      if (!pos) continue;
-      suggestions.push({
-        id: `suggest-cut-${alert.symbol}`,
-        symbol: alert.symbol,
-        side: 'sell',
-        orderType: alert.severity === 'critical' ? 'Market' : 'Stop',
-        urgency: alert.severity === 'critical' ? 'critical' : 'high',
-        rationale: `Cut position down ${Math.abs(pos.unrealizedPnlPct).toFixed(1)}%`,
-        sleeve: accountNameMap.get(pos.accountId) ?? 'Unknown',
-      });
-    }
-  }
-
-  return suggestions;
-}
 
 function computeActionItems(alerts: DashboardAlert[]): ActionItem[] {
   // Derive action items from live alerts.
@@ -322,10 +275,25 @@ export default function HomeScreen() {
     [alerts],
   );
 
-  const orderSuggestions = useMemo(
-    () => computeOrderSuggestions(alerts, positions, accounts, totalNav),
-    [alerts, positions, accounts, totalNav],
+  const {
+    data: rawSuggestions,
+    isLoading: suggestionsLoading,
+    refetch: refetchSuggestions,
+  } = useQuery({
+    queryKey: ['order-suggestions'],
+    queryFn: () => apiGet<OrderSuggestion[]>('/order-suggestions'),
+    staleTime: Infinity, // user controls refresh explicitly
+  });
+
+  const pendingSuggestions = useMemo(
+    () => (rawSuggestions ?? []).filter(s => s.status === 'pending'),
+    [rawSuggestions],
   );
+
+  const { mutate: generateSuggestions, isPending: isGenerating } = useMutation({
+    mutationFn: () => apiPost<OrderSuggestion[]>('/order-suggestions/generate', {}),
+    onSuccess: () => refetchSuggestions(),
+  });
 
   // ── Render ──────────────────────────────────────────────────────────────────
 
@@ -379,8 +347,13 @@ export default function HomeScreen() {
         {/* 5. Action items */}
         <ActionSection items={actionItems} />
 
-        {/* 6. Suggested orders preview — derived from alerts, no backend */}
-        <OrderSuggestionsPreview suggestions={orderSuggestions} />
+        {/* 6. Suggested orders — real API data, explicit generation */}
+        <OrderSuggestionsPreview
+          suggestions={pendingSuggestions}
+          isLoading={suggestionsLoading}
+          isGenerating={isGenerating}
+          onGenerate={() => generateSuggestions()}
+        />
 
         {/* ── Market strip (retained from previous screen) ────────────────── */}
         <Text style={styles.sectionTitle}>Markets</Text>

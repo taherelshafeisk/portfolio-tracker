@@ -19,6 +19,8 @@ tags:
     description: Market data operations
   - name: anthropic
     description: Anthropic AI chat operations
+  - name: order-suggestions
+    description: Order suggestion operations
 paths:
   /healthz:
     get:
@@ -493,6 +495,77 @@ paths:
           description: SSE stream of assistant response chunks
           content:
             text/event-stream: {}
+
+  /order-suggestions/generate:
+    post:
+      operationId: generateOrderSuggestions
+      tags: [order-suggestions]
+      summary: Run suggestion engine and persist results
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateOrderSuggestionsBody"
+      responses:
+        "200":
+          description: All pending suggestions after generation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderSuggestion"
+
+  /order-suggestions:
+    get:
+      operationId: listOrderSuggestions
+      tags: [order-suggestions]
+      summary: List order suggestions
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [pending, dismissed, executed]
+      responses:
+        "200":
+          description: List of order suggestions
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OrderSuggestion"
+
+  /order-suggestions/{id}:
+    patch:
+      operationId: updateOrderSuggestion
+      tags: [order-suggestions]
+      summary: Update suggestion status
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateOrderSuggestionBody"
+      responses:
+        "200":
+          description: Updated suggestion
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/OrderSuggestion"
 
 components:
   schemas:
@@ -974,6 +1047,102 @@ components:
         - title
         - createdAt
         - messages
+
+    OrderSuggestion:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        accountName:
+          type: string
+        symbol:
+          type: string
+        side:
+          type: string
+          enum: [buy, sell]
+        quantity:
+          type: number
+          nullable: true
+        quantityMin:
+          type: number
+          nullable: true
+        quantityMax:
+          type: number
+          nullable: true
+        orderType:
+          type: string
+          enum: [market, limit, stop, stop_limit, laddered_limit]
+        limitPrice:
+          type: number
+          nullable: true
+        stopPrice:
+          type: number
+          nullable: true
+        priceLogic:
+          type: string
+          nullable: true
+        timeInForce:
+          type: string
+          enum: [day, gtc, ioc]
+        urgency:
+          type: string
+          enum: [low, medium, high, critical]
+        rationale:
+          type: string
+        trigger:
+          type: string
+        executionNotes:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [pending, dismissed, executed]
+        generatedAt:
+          type: string
+          format: date-time
+        expiresAt:
+          type: string
+          format: date-time
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - accountId
+        - accountName
+        - symbol
+        - side
+        - orderType
+        - timeInForce
+        - urgency
+        - rationale
+        - trigger
+        - status
+        - generatedAt
+        - createdAt
+        - updatedAt
+
+    GenerateOrderSuggestionsBody:
+      type: object
+      properties:
+        accountId:
+          type: integer
+          nullable: true
+
+    UpdateOrderSuggestionBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [pending, dismissed, executed]
+      required:
+        - status
 
     AnthropicError:
       type: object

@@ -28,10 +28,13 @@ import type {
   CreateActivityBody,
   CreateAnthropicConversationBody,
   CreatePositionBody,
+  GenerateOrderSuggestionsBody,
   GetMarketChartParams,
   HealthStatus,
   ListActivitiesParams,
+  ListOrderSuggestionsParams,
   MarketQuote,
+  OrderSuggestion,
   PortfolioSummary,
   Position,
   ScreenStocksParams,
@@ -39,6 +42,7 @@ import type {
   SendAnthropicMessageBody,
   TradeActivity,
   UpdateAccountBody,
+  UpdateOrderSuggestionBody,
   UpdatePositionBody,
 } from "./api.schemas";
 
@@ -2115,4 +2119,279 @@ export const useSendAnthropicMessage = <
   TContext
 > => {
   return useMutation(getSendAnthropicMessageMutationOptions(options));
+};
+
+/**
+ * @summary Run suggestion engine and persist results
+ */
+export const getGenerateOrderSuggestionsUrl = () => {
+  return `/api/order-suggestions/generate`;
+};
+
+export const generateOrderSuggestions = async (
+  generateOrderSuggestionsBody: GenerateOrderSuggestionsBody,
+  options?: RequestInit,
+): Promise<OrderSuggestion[]> => {
+  return customFetch<OrderSuggestion[]>(getGenerateOrderSuggestionsUrl(), {
+    ...options,
+    method: "POST",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(generateOrderSuggestionsBody),
+  });
+};
+
+export const getGenerateOrderSuggestionsMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateOrderSuggestions>>,
+    TError,
+    { data: BodyType<GenerateOrderSuggestionsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof generateOrderSuggestions>>,
+  TError,
+  { data: BodyType<GenerateOrderSuggestionsBody> },
+  TContext
+> => {
+  const mutationKey = ["generateOrderSuggestions"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof generateOrderSuggestions>>,
+    { data: BodyType<GenerateOrderSuggestionsBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return generateOrderSuggestions(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type GenerateOrderSuggestionsMutationResult = NonNullable<
+  Awaited<ReturnType<typeof generateOrderSuggestions>>
+>;
+export type GenerateOrderSuggestionsMutationBody =
+  BodyType<GenerateOrderSuggestionsBody>;
+export type GenerateOrderSuggestionsMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Run suggestion engine and persist results
+ */
+export const useGenerateOrderSuggestions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof generateOrderSuggestions>>,
+    TError,
+    { data: BodyType<GenerateOrderSuggestionsBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof generateOrderSuggestions>>,
+  TError,
+  { data: BodyType<GenerateOrderSuggestionsBody> },
+  TContext
+> => {
+  return useMutation(getGenerateOrderSuggestionsMutationOptions(options));
+};
+
+/**
+ * @summary List order suggestions
+ */
+export const getListOrderSuggestionsUrl = (
+  params?: ListOrderSuggestionsParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/order-suggestions?${stringifiedParams}`
+    : `/api/order-suggestions`;
+};
+
+export const listOrderSuggestions = async (
+  params?: ListOrderSuggestionsParams,
+  options?: RequestInit,
+): Promise<OrderSuggestion[]> => {
+  return customFetch<OrderSuggestion[]>(getListOrderSuggestionsUrl(params), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getListOrderSuggestionsQueryKey = (
+  params?: ListOrderSuggestionsParams,
+) => {
+  return [`/api/order-suggestions`, ...(params ? [params] : [])] as const;
+};
+
+export const getListOrderSuggestionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listOrderSuggestions>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListOrderSuggestionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listOrderSuggestions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getListOrderSuggestionsQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof listOrderSuggestions>>
+  > = ({ signal }) =>
+    listOrderSuggestions(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listOrderSuggestions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListOrderSuggestionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listOrderSuggestions>>
+>;
+export type ListOrderSuggestionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List order suggestions
+ */
+
+export function useListOrderSuggestions<
+  TData = Awaited<ReturnType<typeof listOrderSuggestions>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListOrderSuggestionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listOrderSuggestions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListOrderSuggestionsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Update suggestion status
+ */
+export const getUpdateOrderSuggestionUrl = (id: number) => {
+  return `/api/order-suggestions/${id}`;
+};
+
+export const updateOrderSuggestion = async (
+  id: number,
+  updateOrderSuggestionBody: UpdateOrderSuggestionBody,
+  options?: RequestInit,
+): Promise<OrderSuggestion> => {
+  return customFetch<OrderSuggestion>(getUpdateOrderSuggestionUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updateOrderSuggestionBody),
+  });
+};
+
+export const getUpdateOrderSuggestionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateOrderSuggestion>>,
+    TError,
+    { id: number; data: BodyType<UpdateOrderSuggestionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updateOrderSuggestion>>,
+  TError,
+  { id: number; data: BodyType<UpdateOrderSuggestionBody> },
+  TContext
+> => {
+  const mutationKey = ["updateOrderSuggestion"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updateOrderSuggestion>>,
+    { id: number; data: BodyType<UpdateOrderSuggestionBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return updateOrderSuggestion(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdateOrderSuggestionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updateOrderSuggestion>>
+>;
+export type UpdateOrderSuggestionMutationBody =
+  BodyType<UpdateOrderSuggestionBody>;
+export type UpdateOrderSuggestionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Update suggestion status
+ */
+export const useUpdateOrderSuggestion = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updateOrderSuggestion>>,
+    TError,
+    { id: number; data: BodyType<UpdateOrderSuggestionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updateOrderSuggestion>>,
+  TError,
+  { id: number; data: BodyType<UpdateOrderSuggestionBody> },
+  TContext
+> => {
+  return useMutation(getUpdateOrderSuggestionMutationOptions(options));
 };

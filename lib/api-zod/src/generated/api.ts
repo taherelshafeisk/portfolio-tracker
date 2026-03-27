@@ -477,3 +477,128 @@ export const SendAnthropicMessageParams = zod.object({
 export const SendAnthropicMessageBody = zod.object({
   content: zod.string(),
 });
+
+/**
+ * @summary Run suggestion engine and persist results
+ */
+export const GenerateOrderSuggestionsBody = zod.object({
+  accountId: zod.number().nullish(),
+});
+
+export const GenerateOrderSuggestionsResponseItem = zod.object({
+  id: zod.number(),
+  accountId: zod.number(),
+  accountName: zod.string(),
+  symbol: zod.string(),
+  side: zod.enum(["buy", "sell"]),
+  quantity: zod.number().nullish(),
+  quantityMin: zod.number().nullish(),
+  quantityMax: zod.number().nullish(),
+  orderType: zod.enum([
+    "market",
+    "limit",
+    "stop",
+    "stop_limit",
+    "laddered_limit",
+  ]),
+  limitPrice: zod.number().nullish(),
+  stopPrice: zod.number().nullish(),
+  priceLogic: zod.string().nullish(),
+  timeInForce: zod.enum(["day", "gtc", "ioc"]),
+  urgency: zod.enum(["low", "medium", "high", "critical"]),
+  rationale: zod.string(),
+  trigger: zod.string(),
+  executionNotes: zod.string().nullish(),
+  status: zod.enum(["pending", "dismissed", "executed"]),
+  generatedAt: zod.date(),
+  expiresAt: zod.date().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const GenerateOrderSuggestionsResponse = zod.array(
+  GenerateOrderSuggestionsResponseItem,
+);
+
+/**
+ * @summary List order suggestions
+ */
+export const ListOrderSuggestionsQueryParams = zod.object({
+  accountId: zod.coerce.number().optional(),
+  status: zod.enum(["pending", "dismissed", "executed"]).optional(),
+});
+
+export const ListOrderSuggestionsResponseItem = zod.object({
+  id: zod.number(),
+  accountId: zod.number(),
+  accountName: zod.string(),
+  symbol: zod.string(),
+  side: zod.enum(["buy", "sell"]),
+  quantity: zod.number().nullish(),
+  quantityMin: zod.number().nullish(),
+  quantityMax: zod.number().nullish(),
+  orderType: zod.enum([
+    "market",
+    "limit",
+    "stop",
+    "stop_limit",
+    "laddered_limit",
+  ]),
+  limitPrice: zod.number().nullish(),
+  stopPrice: zod.number().nullish(),
+  priceLogic: zod.string().nullish(),
+  timeInForce: zod.enum(["day", "gtc", "ioc"]),
+  urgency: zod.enum(["low", "medium", "high", "critical"]),
+  rationale: zod.string(),
+  trigger: zod.string(),
+  executionNotes: zod.string().nullish(),
+  status: zod.enum(["pending", "dismissed", "executed"]),
+  generatedAt: zod.date(),
+  expiresAt: zod.date().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const ListOrderSuggestionsResponse = zod.array(
+  ListOrderSuggestionsResponseItem,
+);
+
+/**
+ * @summary Update suggestion status
+ */
+export const UpdateOrderSuggestionParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateOrderSuggestionBody = zod.object({
+  status: zod.enum(["pending", "dismissed", "executed"]),
+});
+
+export const UpdateOrderSuggestionResponse = zod.object({
+  id: zod.number(),
+  accountId: zod.number(),
+  accountName: zod.string(),
+  symbol: zod.string(),
+  side: zod.enum(["buy", "sell"]),
+  quantity: zod.number().nullish(),
+  quantityMin: zod.number().nullish(),
+  quantityMax: zod.number().nullish(),
+  orderType: zod.enum([
+    "market",
+    "limit",
+    "stop",
+    "stop_limit",
+    "laddered_limit",
+  ]),
+  limitPrice: zod.number().nullish(),
+  stopPrice: zod.number().nullish(),
+  priceLogic: zod.string().nullish(),
+  timeInForce: zod.enum(["day", "gtc", "ioc"]),
+  urgency: zod.enum(["low", "medium", "high", "critical"]),
+  rationale: zod.string(),
+  trigger: zod.string(),
+  executionNotes: zod.string().nullish(),
+  status: zod.enum(["pending", "dismissed", "executed"]),
+  generatedAt: zod.date(),
+  expiresAt: zod.date().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});

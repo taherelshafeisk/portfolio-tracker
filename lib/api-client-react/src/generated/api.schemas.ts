@@ -290,6 +290,95 @@ export interface AnthropicConversationWithMessages {
   messages: AnthropicMessage[];
 }
 
+export type OrderSuggestionSide =
+  (typeof OrderSuggestionSide)[keyof typeof OrderSuggestionSide];
+
+export const OrderSuggestionSide = {
+  buy: "buy",
+  sell: "sell",
+} as const;
+
+export type OrderSuggestionOrderType =
+  (typeof OrderSuggestionOrderType)[keyof typeof OrderSuggestionOrderType];
+
+export const OrderSuggestionOrderType = {
+  market: "market",
+  limit: "limit",
+  stop: "stop",
+  stop_limit: "stop_limit",
+  laddered_limit: "laddered_limit",
+} as const;
+
+export type OrderSuggestionTimeInForce =
+  (typeof OrderSuggestionTimeInForce)[keyof typeof OrderSuggestionTimeInForce];
+
+export const OrderSuggestionTimeInForce = {
+  day: "day",
+  gtc: "gtc",
+  ioc: "ioc",
+} as const;
+
+export type OrderSuggestionUrgency =
+  (typeof OrderSuggestionUrgency)[keyof typeof OrderSuggestionUrgency];
+
+export const OrderSuggestionUrgency = {
+  low: "low",
+  medium: "medium",
+  high: "high",
+  critical: "critical",
+} as const;
+
+export type OrderSuggestionStatus =
+  (typeof OrderSuggestionStatus)[keyof typeof OrderSuggestionStatus];
+
+export const OrderSuggestionStatus = {
+  pending: "pending",
+  dismissed: "dismissed",
+  executed: "executed",
+} as const;
+
+export interface OrderSuggestion {
+  id: number;
+  accountId: number;
+  accountName: string;
+  symbol: string;
+  side: OrderSuggestionSide;
+  quantity?: number | null;
+  quantityMin?: number | null;
+  quantityMax?: number | null;
+  orderType: OrderSuggestionOrderType;
+  limitPrice?: number | null;
+  stopPrice?: number | null;
+  priceLogic?: string | null;
+  timeInForce: OrderSuggestionTimeInForce;
+  urgency: OrderSuggestionUrgency;
+  rationale: string;
+  trigger: string;
+  executionNotes?: string | null;
+  status: OrderSuggestionStatus;
+  generatedAt: string;
+  expiresAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenerateOrderSuggestionsBody {
+  accountId?: number | null;
+}
+
+export type UpdateOrderSuggestionBodyStatus =
+  (typeof UpdateOrderSuggestionBodyStatus)[keyof typeof UpdateOrderSuggestionBodyStatus];
+
+export const UpdateOrderSuggestionBodyStatus = {
+  pending: "pending",
+  dismissed: "dismissed",
+  executed: "executed",
+} as const;
+
+export interface UpdateOrderSuggestionBody {
+  status: UpdateOrderSuggestionBodyStatus;
+}
+
 export interface AnthropicError {
   error: string;
 }
@@ -310,3 +399,17 @@ export type ScreenStocksParams = {
   minVolume?: number;
   sector?: string;
 };
+
+export type ListOrderSuggestionsParams = {
+  accountId?: number;
+  status?: ListOrderSuggestionsStatus;
+};
+
+export type ListOrderSuggestionsStatus =
+  (typeof ListOrderSuggestionsStatus)[keyof typeof ListOrderSuggestionsStatus];
+
+export const ListOrderSuggestionsStatus = {
+  pending: "pending",
+  dismissed: "dismissed",
+  executed: "executed",
+} as const;

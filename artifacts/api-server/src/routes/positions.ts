@@ -2,6 +2,8 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { positionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { validate } from "../middlewares/validate";
+import { CreatePositionBody, UpdatePositionBody } from "@workspace/api-zod/schemas";
 
 const router: IRouter = Router();
 
@@ -150,7 +152,7 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
   };
 }
 
-router.post("/", async (req, res) => {
+router.post("/", validate(CreatePositionBody), async (req, res) => {
   try {
     const { accountId, symbol, name, quantity, avgCost, assetType, sector, notes } = req.body;
     const upperSymbol = symbol.toUpperCase();
@@ -178,7 +180,7 @@ router.post("/", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const { quantity, avgCost, currentPrice, assetType, notes } = req.body;

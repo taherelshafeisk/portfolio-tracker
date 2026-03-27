@@ -2,6 +2,11 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { activitiesTable } from "@workspace/db";
 import { eq, desc } from "drizzle-orm";
+import { validate } from "../middlewares/validate";
+import { CreateActivityBody, z } from "@workspace/api-zod/schemas";
+
+// tradeDate arrives as an ISO string over HTTP; coerce it to Date before validation.
+const CreateActivityBodyHttp = CreateActivityBody.extend({ tradeDate: z.coerce.date() });
 
 const router: IRouter = Router();
 
@@ -37,7 +42,7 @@ router.get("/", async (req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", validate(CreateActivityBodyHttp), async (req, res) => {
   try {
     const { accountId, symbol, activityType, quantity, price, totalAmount, notes, tradeDate } = req.body;
     const [activity] = await db.insert(activitiesTable).values({

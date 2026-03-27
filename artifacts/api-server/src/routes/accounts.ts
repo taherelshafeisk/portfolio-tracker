@@ -3,6 +3,8 @@ import { db } from "@workspace/db";
 import { accountsTable, positionsTable, activitiesTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
 import { fetchLivePrices } from "./positions";
+import { validate } from "../middlewares/validate";
+import { CreateAccountBody, UpdateAccountBody } from "@workspace/api-zod/schemas";
 
 const router: IRouter = Router();
 
@@ -26,7 +28,7 @@ router.get("/", async (_req, res) => {
   }
 });
 
-router.post("/", async (req, res) => {
+router.post("/", validate(CreateAccountBody), async (req, res) => {
   try {
     const { name, broker, accountType, currency, initialBalance } = req.body;
     const [account] = await db.insert(accountsTable).values({
@@ -74,7 +76,7 @@ router.get("/:id", async (req, res) => {
   }
 });
 
-router.put("/:id", async (req, res) => {
+router.put("/:id", validate(UpdateAccountBody), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const { name, broker, accountType, currentBalance } = req.body;

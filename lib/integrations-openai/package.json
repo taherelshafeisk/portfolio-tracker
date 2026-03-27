@@ -1,0 +1,15 @@
+{
+    "name": "@workspace/integrations-openai",
+    "version": "0.0.0",
+    "private": true,
+    "type": "module",
+    "exports": {
+        ".": "./src/index.ts"
+    },
+    "dependencies": {
+        "openai": "^4.28.0"
+    },
+    "devDependencies": {
+        "@types/node": "catalog:"
+    }
+}

@@ -48,9 +48,10 @@ interface Props {
   isLoading: boolean;
   isGenerating: boolean;
   onGenerate: () => void;
+  onViewAll?: () => void;
 }
 
-export function OrderSuggestionsPreview({ suggestions, isLoading, isGenerating, onGenerate }: Props) {
+export function OrderSuggestionsPreview({ suggestions, isLoading, isGenerating, onGenerate, onViewAll }: Props) {
   const busy = isLoading || isGenerating;
   const shown = suggestions.slice(0, MAX_VISIBLE);
   const overflow = suggestions.length - MAX_VISIBLE;
@@ -58,7 +59,9 @@ export function OrderSuggestionsPreview({ suggestions, isLoading, isGenerating, 
   return (
     <View style={styles.section}>
       <View style={styles.titleRow}>
-        <Text style={styles.sectionTitle}>Suggested Orders</Text>
+        <Pressable onPress={onViewAll} disabled={!onViewAll} style={styles.titlePressable}>
+          <Text style={styles.sectionTitle}>Suggested Orders</Text>
+        </Pressable>
         <Pressable
           onPress={onGenerate}
           disabled={busy}
@@ -120,9 +123,13 @@ export function OrderSuggestionsPreview({ suggestions, isLoading, isGenerating, 
             );
           })}
           {overflow > 0 && (
-            <View style={[styles.overflowRow, styles.rowBorder]}>
+            <Pressable
+              style={[styles.overflowRow, styles.rowBorder]}
+              onPress={onViewAll}
+              disabled={!onViewAll}
+            >
               <Text style={styles.overflowText}>+{overflow} more suggestion{overflow > 1 ? 's' : ''}</Text>
-            </View>
+            </Pressable>
           )}
         </Card>
       )}
@@ -139,6 +146,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     marginBottom: 12,
+  },
+  titlePressable: {
+    flex: 1,
   },
   sectionTitle: {
     fontFamily: 'Inter_600SemiBold',

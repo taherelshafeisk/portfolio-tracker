@@ -353,6 +353,7 @@ export default function HomeScreen() {
           isLoading={suggestionsLoading}
           isGenerating={isGenerating}
           onGenerate={() => generateSuggestions()}
+          onViewAll={() => router.push('/orders')}
         />
 
         {/* ── Market strip (retained from previous screen) ────────────────── */}

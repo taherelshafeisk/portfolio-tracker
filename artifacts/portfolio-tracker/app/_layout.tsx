@@ -54,6 +54,17 @@ function RootLayoutNav() {
           presentation: 'card',
         }}
       />
+      <Stack.Screen
+        name="orders/index"
+        options={{
+          headerShown: true,
+          title: 'Suggested Orders',
+          headerStyle: { backgroundColor: '#0A0E1A' },
+          headerTintColor: '#F0F4FF',
+          headerBackTitle: 'Back',
+          presentation: 'card',
+        }}
+      />
     </Stack>
   );
 }

@@ -1,7 +1,7 @@
 import React, { useCallback } from 'react';
 import {
-  View, Text, StyleSheet, ScrollView, Pressable,
-  RefreshControl, Platform, Alert, ActivityIndicator,
+  View, Text, StyleSheet, ScrollView,
+  RefreshControl, Platform, Alert,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
@@ -10,33 +10,7 @@ import { apiGet, apiPatch } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { OrderSuggestion } from '@/components/home/OrderSuggestionsPreview';
-
-const ORDER_TYPE_LABEL: Record<OrderSuggestion['orderType'], string> = {
-  market: 'Market',
-  limit: 'Limit',
-  stop: 'Stop',
-  stop_limit: 'Stop Limit',
-  laddered_limit: 'Laddered Limit',
-};
-
-const URGENCY_COLOR: Record<OrderSuggestion['urgency'], string> = {
-  low: colors.textMuted,
-  medium: '#F5A623',
-  high: colors.negative,
-  critical: colors.negative,
-};
-
-const URGENCY_LABEL: Record<OrderSuggestion['urgency'], string> = {
-  low: 'Low',
-  medium: 'Medium',
-  high: 'High',
-  critical: 'Critical',
-};
-
-const SIDE_COLOR: Record<OrderSuggestion['side'], string> = {
-  buy: colors.positive,
-  sell: colors.negative,
-};
+import { SuggestionCard } from '@/components/home/SuggestionCard';
 
 export default function OrdersScreen() {
   const insets = useSafeAreaInsets();
@@ -138,103 +112,12 @@ export default function OrdersScreen() {
   );
 }
 
-// ─── Sub-components ───────────────────────────────────────────────────────────
-
-interface SuggestionCardProps {
-  suggestion: OrderSuggestion;
-  isUpdating: boolean;
-  onDismiss: () => void;
-  onExecuted: () => void;
-}
-
-function SuggestionCard({ suggestion: s, isUpdating, onDismiss, onExecuted }: SuggestionCardProps) {
-  const sideColor = SIDE_COLOR[s.side];
-  const urgencyColor = URGENCY_COLOR[s.urgency];
-
-  return (
-    <Card style={styles.card}>
-      {/* Header row */}
-      <View style={styles.cardHeader}>
-        <View style={[styles.sideBadge, { backgroundColor: `${sideColor}22` }]}>
-          <Text style={[styles.sideText, { color: sideColor }]}>
-            {s.side.toUpperCase()}
-          </Text>
-        </View>
-        <Text style={styles.symbol}>{s.symbol}</Text>
-        <Text style={styles.orderType}>{ORDER_TYPE_LABEL[s.orderType]}</Text>
-        <View style={styles.urgencyPill}>
-          <View style={[styles.urgencyDot, { backgroundColor: urgencyColor }]} />
-          <Text style={[styles.urgencyText, { color: urgencyColor }]}>
-            {URGENCY_LABEL[s.urgency]}
-          </Text>
-        </View>
-      </View>
-
-      {/* Sleeve */}
-      <Text style={styles.accountName}>{s.accountName}</Text>
-
-      {/* Rationale */}
-      <Text style={styles.rationale}>{s.rationale}</Text>
-
-      {/* Price details if present */}
-      {(s.quantity != null || s.limitPrice != null || s.stopPrice != null) && (
-        <View style={styles.priceRow}>
-          {s.quantity != null && (
-            <PriceChip label="Qty" value={s.quantity.toFixed(4)} />
-          )}
-          {s.limitPrice != null && (
-            <PriceChip label="Limit" value={`$${s.limitPrice.toFixed(2)}`} />
-          )}
-          {s.stopPrice != null && (
-            <PriceChip label="Stop" value={`$${s.stopPrice.toFixed(2)}`} />
-          )}
-        </View>
-      )}
-
-      {/* Execution notes */}
-      {s.executionNotes && (
-        <Text style={styles.executionNotes}>{s.executionNotes}</Text>
-      )}
-
-      {/* Actions */}
-      <View style={styles.actions}>
-        <Pressable
-          style={[styles.actionBtn, styles.dismissBtn]}
-          onPress={onDismiss}
-          disabled={isUpdating}
-        >
-          <Text style={styles.dismissText}>Dismiss</Text>
-        </Pressable>
-        <Pressable
-          style={[styles.actionBtn, styles.executeBtn]}
-          onPress={onExecuted}
-          disabled={isUpdating}
-        >
-          {isUpdating
-            ? <ActivityIndicator size={14} color={colors.background} />
-            : <Text style={styles.executeText}>Mark Executed</Text>
-          }
-        </Pressable>
-      </View>
-    </Card>
-  );
-}
-
-function PriceChip({ label, value }: { label: string; value: string }) {
-  return (
-    <View style={styles.priceChip}>
-      <Text style={styles.priceChipLabel}>{label}</Text>
-      <Text style={styles.priceChipValue}>{value}</Text>
-    </View>
-  );
-}
-
 function LoadingSkeleton() {
   return (
     <>
       {[1, 2].map(i => (
-        <Card key={i} style={styles.card}>
-          <View style={styles.cardHeader}>
+        <Card key={i} style={styles.skeletonCard}>
+          <View style={styles.skeletonHeader}>
             <Skeleton height={28} width={44} style={{ borderRadius: 6 }} />
             <Skeleton height={16} width={60} />
             <Skeleton height={12} width={80} />
@@ -259,8 +142,6 @@ function EmptyState() {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   container: {
     flex: 1,
@@ -276,124 +157,15 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginBottom: 12,
   },
-  card: {
+  skeletonCard: {
     marginBottom: 12,
     gap: 8,
   },
-  cardHeader: {
+  skeletonHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
     flexWrap: 'wrap',
-  },
-  sideBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-    minWidth: 44,
-    alignItems: 'center',
-  },
-  sideText: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 11,
-  },
-  symbol: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 16,
-    color: colors.textPrimary,
-  },
-  orderType: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: colors.textMuted,
-    flex: 1,
-  },
-  urgencyPill: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  urgencyDot: {
-    width: 7,
-    height: 7,
-    borderRadius: 4,
-  },
-  urgencyText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 11,
-  },
-  accountName: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
-  },
-  rationale: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: colors.textSecondary,
-    lineHeight: 19,
-  },
-  priceRow: {
-    flexDirection: 'row',
-    gap: 8,
-    flexWrap: 'wrap',
-    marginTop: 2,
-  },
-  priceChip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-  },
-  priceChipLabel: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 11,
-    color: colors.textMuted,
-  },
-  priceChipValue: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 11,
-    color: colors.textPrimary,
-  },
-  executionNotes: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
-    fontStyle: 'italic',
-    lineHeight: 17,
-  },
-  actions: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 4,
-  },
-  actionBtn: {
-    flex: 1,
-    paddingVertical: 10,
-    borderRadius: 10,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  dismissBtn: {
-    backgroundColor: colors.surfaceElevated,
-    borderWidth: 1,
-    borderColor: colors.separator,
-  },
-  dismissText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-  executeBtn: {
-    backgroundColor: colors.primary,
-  },
-  executeText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 13,
-    color: colors.background,
   },
   emptyCard: {
     gap: 8,

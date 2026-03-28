@@ -1,13 +1,15 @@
-import React from 'react';
-import { View, Text, StyleSheet, ScrollView, Platform } from 'react-native';
+import React, { useCallback } from 'react';
+import { View, Text, StyleSheet, ScrollView, Platform, Pressable, Alert } from 'react-native';
 import { useLocalSearchParams, useNavigation, router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { Pressable } from 'react-native';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
-import { usePortfolio } from '@/context/PortfolioContext';
+import { usePortfolio, apiGet, apiPatch } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
+import { OrderSuggestion } from '@/components/home/OrderSuggestionsPreview';
+import { SuggestionCard } from '@/components/home/SuggestionCard';
 
 export default function PositionDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -15,6 +17,7 @@ export default function PositionDetailScreen() {
   const navigation = useNavigation();
   const insets = useSafeAreaInsets();
   const { positions, accounts } = usePortfolio();
+  const queryClient = useQueryClient();
 
   const position = positions.find(p => p.id === posId);
   const account = position ? accounts.find(a => a.id === position.accountId) : null;
@@ -23,6 +26,60 @@ export default function PositionDetailScreen() {
     if (position) navigation.setOptions({ title: position.symbol });
   }, [position]);
 
+  // Read from the shared cache — no extra network request if already populated
+  const { data: allSuggestions } = useQuery({
+    queryKey: ['order-suggestions'],
+    queryFn: () => apiGet<OrderSuggestion[]>('/order-suggestions'),
+    staleTime: Infinity,
+    enabled: !!position,
+  });
+
+  const positionSuggestions = (allSuggestions ?? []).filter(
+    s => s.status === 'pending' && s.symbol === position?.symbol && s.accountId === position?.accountId,
+  );
+
+  const { mutate: updateStatus, isPending: isUpdating } = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: 'dismissed' | 'executed' }) =>
+      apiPatch<OrderSuggestion>(`/order-suggestions/${id}`, { status }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<OrderSuggestion[]>(['order-suggestions'], prev =>
+        (prev ?? []).map(s => s.id === updated.id ? updated : s),
+      );
+    },
+    onError: () => {
+      Alert.alert('Error', 'Failed to update suggestion. Please try again.');
+    },
+  });
+
+  const handleDismiss = useCallback((s: OrderSuggestion) => {
+    Alert.alert(
+      'Dismiss suggestion',
+      `Dismiss ${s.side.toUpperCase()} ${s.symbol}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Dismiss',
+          style: 'destructive',
+          onPress: () => updateStatus({ id: s.id, status: 'dismissed' }),
+        },
+      ],
+    );
+  }, [updateStatus]);
+
+  const handleExecuted = useCallback((s: OrderSuggestion) => {
+    Alert.alert(
+      'Mark as executed',
+      `Mark ${s.side.toUpperCase()} ${s.symbol} as executed?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark Executed',
+          onPress: () => updateStatus({ id: s.id, status: 'executed' }),
+        },
+      ],
+    );
+  }, [updateStatus]);
+
   if (!position) {
     return (
       <View style={styles.container}>
@@ -30,8 +87,6 @@ export default function PositionDetailScreen() {
       </View>
     );
   }
-
-  const isPos = position.unrealizedPnl >= 0;
 
   return (
     <ScrollView
@@ -81,6 +136,22 @@ export default function PositionDetailScreen() {
         </Card>
       )}
 
+      {/* Suggestions for this position */}
+      {positionSuggestions.length > 0 && (
+        <View style={styles.suggestionsSection}>
+          <Text style={styles.suggestionsTitle}>Suggested Orders</Text>
+          {positionSuggestions.map(s => (
+            <SuggestionCard
+              key={s.id}
+              suggestion={s}
+              isUpdating={isUpdating}
+              onDismiss={() => handleDismiss(s)}
+              onExecuted={() => handleExecuted(s)}
+            />
+          ))}
+        </View>
+      )}
+
       <Pressable
         style={styles.chartBtn}
         onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: position.symbol, avgCost: String(position.avgCost), accountId: String(position.accountId) } })}
@@ -106,6 +177,15 @@ const styles = StyleSheet.create({
   statLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginBottom: 4 },
   statValue: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textPrimary },
   notes: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary, lineHeight: 20 },
+  suggestionsSection: {
+    marginTop: 4,
+  },
+  suggestionsTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 15,
+    color: colors.textPrimary,
+    marginBottom: 10,
+  },
   chartBtn: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 8,
     backgroundColor: colors.primary, borderRadius: 14, padding: 16, marginTop: 8,

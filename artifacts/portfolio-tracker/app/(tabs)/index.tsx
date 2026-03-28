@@ -68,7 +68,7 @@ function computeRiskIndicators(
       const pct = (p.marketValue / totalNav) * 100;
       if (pct >= 20) {
         indicators.push({
-          id: `conc-${p.symbol}`,
+          id: `conc-${p.id}`,
           label: 'Concentration',
           value: `${pct.toFixed(1)}%`,
           severity: pct >= 35 ? 'critical' : 'warning',
@@ -82,7 +82,7 @@ function computeRiskIndicators(
   positions.forEach(p => {
     if (p.unrealizedPnlPct <= -15) {
       indicators.push({
-        id: `dd-${p.symbol}`,
+        id: `dd-${p.id}`,
         label: 'Drawdown',
         value: `${p.unrealizedPnlPct.toFixed(1)}%`,
         severity: p.unrealizedPnlPct <= -30 ? 'critical' : 'warning',
@@ -119,7 +119,7 @@ function computeAlerts(
       const pct = (p.marketValue / totalNav) * 100;
       if (pct >= 20) {
         alerts.push({
-          id: `conc-${p.symbol}`,
+          id: `conc-${p.id}`,
           type: 'concentration',
           severity: pct >= 30 ? 'critical' : 'warning',
           title: `${p.symbol} ${pct.toFixed(0)}% of portfolio`,
@@ -132,7 +132,7 @@ function computeAlerts(
   positions.forEach(p => {
     if (p.unrealizedPnlPct <= -15) {
       alerts.push({
-        id: `dd-${p.symbol}`,
+        id: `dd-${p.id}`,
         type: 'drawdown',
         severity: p.unrealizedPnlPct <= -25 ? 'critical' : 'warning',
         title: `${p.symbol} down ${Math.abs(p.unrealizedPnlPct).toFixed(1)}%`,
@@ -200,6 +200,41 @@ function computeActionItems(alerts: DashboardAlert[]): ActionItem[] {
   }
 
   return items;
+}
+
+function collapseAlerts(alerts: DashboardAlert[]): DashboardAlert[] {
+  const drawdowns = alerts.filter(a => a.type === 'drawdown');
+  const others = alerts.filter(a => a.type !== 'drawdown');
+  if (drawdowns.length <= 1) return alerts;
+  const worstSeverity = drawdowns.some(a => a.severity === 'critical') ? 'critical' : 'warning';
+  const symbols = drawdowns.map(a => a.symbol).filter(Boolean).join(', ');
+  return [
+    ...others,
+    {
+      id: 'dd-summary',
+      type: 'drawdown',
+      severity: worstSeverity,
+      title: `${drawdowns.length} positions down · ${symbols}`,
+    },
+  ];
+}
+
+function computeRiskSummaryIndicators(indicators: RiskIndicator[]): RiskIndicator[] {
+  const drawdowns = indicators.filter(i => i.label === 'Drawdown');
+  const others = indicators.filter(i => i.label !== 'Drawdown');
+  if (drawdowns.length <= 1) return indicators;
+  const worstSeverity = drawdowns.some(d => d.severity === 'critical') ? 'critical' : 'warning';
+  const symbols = drawdowns.map(d => d.detail).filter(Boolean).join(', ');
+  return [
+    ...others,
+    {
+      id: 'dd-summary',
+      label: 'Drawdown',
+      value: `${drawdowns.length} positions`,
+      severity: worstSeverity,
+      detail: symbols,
+    },
+  ];
 }
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -275,6 +310,13 @@ export default function HomeScreen() {
     [alerts],
   );
 
+  const collapsedAlerts = useMemo(() => collapseAlerts(alerts), [alerts]);
+
+  const riskSummaryIndicators = useMemo(
+    () => computeRiskSummaryIndicators(riskIndicators),
+    [riskIndicators],
+  );
+
   const {
     data: rawSuggestions,
     isLoading: suggestionsLoading,
@@ -338,16 +380,10 @@ export default function HomeScreen() {
         {/* 2. Sleeve summaries */}
         <SleeveSection sleeves={sleeves} />
 
-        {/* 3. Risk indicators */}
-        <RiskSection indicators={riskIndicators} />
-
-        {/* 4. Alerts */}
-        <AlertSection alerts={alerts} />
-
-        {/* 5. Action items */}
+        {/* 3. Action items */}
         <ActionSection items={actionItems} />
 
-        {/* 6. Suggested orders — real API data, explicit generation */}
+        {/* 4. Suggested orders — real API data, explicit generation */}
         <OrderSuggestionsPreview
           suggestions={pendingSuggestions}
           isLoading={suggestionsLoading}
@@ -355,6 +391,12 @@ export default function HomeScreen() {
           onGenerate={() => generateSuggestions()}
           onViewAll={() => router.push('/orders')}
         />
+
+        {/* 5. Risk summary */}
+        <RiskSection indicators={riskSummaryIndicators} />
+
+        {/* 6. Alerts summary */}
+        <AlertSection alerts={collapsedAlerts} />
 
         {/* ── Market strip (retained from previous screen) ────────────────── */}
         <Text style={styles.sectionTitle}>Markets</Text>

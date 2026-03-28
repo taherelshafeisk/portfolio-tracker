@@ -402,7 +402,7 @@ export default function ActivityScreen() {
         />
       )}
 
-      <Modal visible={showAdd} animationType="slide" transparent presentationStyle="pageSheet">
+      <Modal visible={showAdd} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />

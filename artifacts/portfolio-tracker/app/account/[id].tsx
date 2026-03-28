@@ -830,7 +830,7 @@ export default function AccountDetailScreen() {
       </Modal>
 
       {/* ── Add Position Modal ─────────────────────────────────────────────── */}
-      <Modal visible={showAddPos} animationType="slide" transparent presentationStyle="pageSheet">
+      <Modal visible={showAddPos} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />
@@ -896,7 +896,7 @@ export default function AccountDetailScreen() {
       </Modal>
 
       {/* ── Portfolio Import Modal ─────────────────────────────────────────── */}
-      <Modal visible={showImport} animationType="slide" transparent presentationStyle="pageSheet">
+      <Modal visible={showImport} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16, maxHeight: '90%' }]}>
             <View style={styles.modalHandle} />
@@ -1032,7 +1032,7 @@ export default function AccountDetailScreen() {
       </Modal>
 
       {/* ── Edit Position Modal ───────────────────────────────────────────── */}
-      <Modal visible={!!editPos} animationType="slide" transparent presentationStyle="pageSheet">
+      <Modal visible={!!editPos} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalOverlay}>
           <View style={[styles.modal, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />

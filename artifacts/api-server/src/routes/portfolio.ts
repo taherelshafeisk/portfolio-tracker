@@ -130,6 +130,7 @@ router.get("/summary", async (_req, res) => {
       accounts: accountSummaries,
     });
   } catch (error) {
+    console.error("[portfolio/summary] Error:", error);
     res.status(500).json({ error: "Failed to fetch portfolio summary" });
   }
 });

@@ -16,6 +16,7 @@ function resolveBaseUrl(): string {
 }
 
 const BASE_URL = resolveBaseUrl();
+console.log('BASE_URL =', BASE_URL);
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`);

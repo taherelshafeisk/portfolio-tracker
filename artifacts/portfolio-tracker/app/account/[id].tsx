@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useMemo } from 'react';
+import React, { useEffect, useState, useRef, useMemo, useCallback } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
   Modal, TextInput, Alert, Platform, RefreshControl,
@@ -11,12 +11,15 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
 import { ASSET_TYPES, getAssetType } from '@/constants/assetTypes';
-import { usePortfolio, apiGet, apiPost, apiPut, apiDelete, Position, Account } from '@/context/PortfolioContext';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { usePortfolio, apiGet, apiPost, apiPut, apiDelete, apiPatch, Position, Account } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
 import { AccountTypeBadge } from '@/components/ui/AccountTypeBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StockLogo } from '@/components/ui/StockLogo';
+import { OrderSuggestion } from '@/components/home/OrderSuggestionsPreview';
+import { SuggestionCard } from '@/components/home/SuggestionCard';
 
 const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
   ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
@@ -559,6 +562,62 @@ export default function AccountDetailScreen() {
     }
   };
 
+  // ─── Order suggestions for this account ──────────────────────────────────
+  const queryClient = useQueryClient();
+
+  const { data: allSuggestions } = useQuery({
+    queryKey: ['order-suggestions'],
+    queryFn: () => apiGet<OrderSuggestion[]>('/order-suggestions'),
+    staleTime: Infinity,
+    enabled: !!account,
+  });
+
+  const accountSuggestions = (allSuggestions ?? []).filter(
+    s => s.status === 'pending' && s.accountId === accountId,
+  );
+
+  const { mutate: updateSuggestionStatus, isPending: isSuggestionUpdating } = useMutation({
+    mutationFn: ({ id, status }: { id: number; status: 'dismissed' | 'executed' }) =>
+      apiPatch<OrderSuggestion>(`/order-suggestions/${id}`, { status }),
+    onSuccess: (updated) => {
+      queryClient.setQueryData<OrderSuggestion[]>(['order-suggestions'], prev =>
+        (prev ?? []).map(s => s.id === updated.id ? updated : s),
+      );
+    },
+    onError: () => {
+      Alert.alert('Error', 'Failed to update suggestion. Please try again.');
+    },
+  });
+
+  const handleSuggestionDismiss = useCallback((s: OrderSuggestion) => {
+    Alert.alert(
+      'Dismiss suggestion',
+      `Dismiss ${s.side.toUpperCase()} ${s.symbol}?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Dismiss',
+          style: 'destructive',
+          onPress: () => updateSuggestionStatus({ id: s.id, status: 'dismissed' }),
+        },
+      ],
+    );
+  }, [updateSuggestionStatus]);
+
+  const handleSuggestionExecuted = useCallback((s: OrderSuggestion) => {
+    Alert.alert(
+      'Mark as executed',
+      `Mark ${s.side.toUpperCase()} ${s.symbol} as executed?`,
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Mark Executed',
+          onPress: () => updateSuggestionStatus({ id: s.id, status: 'executed' }),
+        },
+      ],
+    );
+  }, [updateSuggestionStatus]);
+
   // Computed import summary
   const importNav = importPositions.reduce((sum, p) => {
     const qty = parseFloat(p.quantity) || 0;
@@ -730,6 +789,22 @@ export default function AccountDetailScreen() {
               </Card>
             );
           })
+        )}
+
+        {/* Suggestions for this account */}
+        {accountSuggestions.length > 0 && (
+          <View style={styles.suggestionsSection}>
+            <Text style={styles.suggestionsTitle}>Suggested Orders</Text>
+            {accountSuggestions.map(s => (
+              <SuggestionCard
+                key={s.id}
+                suggestion={s}
+                isUpdating={isSuggestionUpdating}
+                onDismiss={() => handleSuggestionDismiss(s)}
+                onExecuted={() => handleSuggestionExecuted(s)}
+              />
+            ))}
+          </View>
         )}
       </ScrollView>
 
@@ -1164,4 +1239,6 @@ const styles = StyleSheet.create({
   menuSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
   sortItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.separator },
   sortItemText: { fontFamily: 'Inter_500Medium', fontSize: 15, color: colors.textPrimary },
+  suggestionsSection: { marginTop: 8 },
+  suggestionsTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textPrimary, marginBottom: 10 },
 });

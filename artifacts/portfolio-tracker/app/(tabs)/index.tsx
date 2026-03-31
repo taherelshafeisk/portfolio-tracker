@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useCallback, useEffect, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
   Pressable, StatusBar, Platform,
@@ -8,7 +8,7 @@ import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiGet, apiPost, type Position, type Account } from '@/context/PortfolioContext';
+import { usePortfolio, apiGet, apiPost, apiPatch, type Position, type Account } from '@/context/PortfolioContext';
 import {
   evaluateConcentration, evaluateDrawdown, evaluateLeverage, resolveOverride,
   type StrategyProfile,
@@ -31,6 +31,26 @@ interface MarketIndex {
   price: number;
   change: number;
   changePercent: number;
+}
+
+interface ApiAlert {
+  id: number;
+  accountId: number;
+  positionId: number | null;
+  symbol: string | null;
+  alertType: string;
+  severity: string;
+  title: string;
+  message: string;
+  metricValue: number;
+  thresholdValue: number;
+  fingerprint: string;
+  status: string;
+  acknowledgedAt: string | null;
+  resolvedAt: string | null;
+  generatedAt: string;
+  createdAt: string;
+  updatedAt: string;
 }
 
 const INDEX_NAMES: Record<string, string> = {
@@ -383,8 +403,6 @@ export default function HomeScreen() {
     [alerts],
   );
 
-  const collapsedAlerts = useMemo(() => collapseAlerts(alerts), [alerts]);
-
   const riskSummaryIndicators = useMemo(
     () => computeRiskSummaryIndicators(riskIndicators),
     [riskIndicators],
@@ -410,6 +428,65 @@ export default function HomeScreen() {
     onSuccess: () => refetchSuggestions(),
   });
 
+  // ── Persisted alerts ────────────────────────────────────────────────────────
+
+  const {
+    data: apiAlerts,
+    refetch: refetchAlerts,
+  } = useQuery({
+    queryKey: ['alerts', 'active'],
+    queryFn: () => apiGet<ApiAlert[]>('/alerts?status=active'),
+    staleTime: Infinity, // user controls refresh explicitly
+  });
+
+  const { mutate: generateAlerts } = useMutation({
+    mutationFn: () => apiPost<ApiAlert[]>('/alerts/generate', {}),
+    onSuccess: () => refetchAlerts(),
+  });
+
+  const { mutate: acknowledgeAlert } = useMutation({
+    mutationFn: (id: number) => apiPatch<ApiAlert>(`/alerts/${id}`, { status: 'acknowledged' }),
+    onSuccess: () => refetchAlerts(),
+  });
+
+  // Explicit refresh: refresh portfolio data, then generate alerts.
+  // Only wired to user-triggered actions (refresh button, pull-to-refresh).
+  // The passive 60s interval calls refreshAll() only — no alert generation.
+  const handleExplicitRefresh = useCallback(async () => {
+    await refreshAll();
+    generateAlerts();
+  }, [refreshAll, generateAlerts]);
+
+  // Map API alerts to DashboardAlert for AlertSection.
+  // Falls back to client-computed alerts if no API alerts exist yet
+  // (i.e. generate has never been called for this device session).
+  const alertTypeMap: Record<string, DashboardAlert['type']> = {
+    concentration: 'concentration',
+    drawdown: 'drawdown',
+    leverage: 'leverage',
+  };
+  const mappedApiAlerts = useMemo<DashboardAlert[]>(
+    () =>
+      (apiAlerts ?? []).map(a => ({
+        id: String(a.id),
+        dbId: a.id,
+        type: alertTypeMap[a.alertType] ?? 'manual',
+        severity: a.severity as DashboardAlert['severity'],
+        title: a.title,
+        symbol: a.symbol ?? undefined,
+        positionId: a.positionId ?? undefined,
+        accountId: a.accountId,
+        onPress: a.positionId != null
+          ? () => router.push({ pathname: '/position/[id]', params: { id: String(a.positionId) } })
+          : () => router.push({ pathname: '/account/[id]', params: { id: String(a.accountId) } }),
+      })),
+    [apiAlerts],
+  );
+
+  // Use API alerts when available; fall back to computed until first generate runs.
+  const displayAlerts = mappedApiAlerts.length > 0 ? mappedApiAlerts : alerts;
+  const collapsedAlerts = useMemo(() => collapseAlerts(displayAlerts), [displayAlerts]);
+
   // ── Render ──────────────────────────────────────────────────────────────────
 
   return (
@@ -418,13 +495,13 @@ export default function HomeScreen() {
 
       <View style={styles.header}>
         <Text style={styles.greeting}>{getGreeting()}</Text>
-        <Pressable onPress={refreshAll} style={styles.refreshBtn}>
+        <Pressable onPress={handleExplicitRefresh} style={styles.refreshBtn}>
           <Feather name="refresh-cw" size={18} color={colors.textSecondary} />
         </Pressable>
       </View>
 
       {error && (
-        <Pressable style={styles.errorBanner} onPress={refreshAll}>
+        <Pressable style={styles.errorBanner} onPress={handleExplicitRefresh}>
           <Feather name="wifi-off" size={13} color={colors.negative} />
           <Text style={styles.errorBannerText}>{error}</Text>
           <Text style={styles.errorBannerRetry}>Retry</Text>
@@ -436,7 +513,7 @@ export default function HomeScreen() {
         refreshControl={
           <RefreshControl
             refreshing={isLoading}
-            onRefresh={refreshAll}
+            onRefresh={handleExplicitRefresh}
             tintColor={colors.primary}
           />
         }
@@ -477,7 +554,10 @@ export default function HomeScreen() {
         <RiskSection indicators={riskSummaryIndicators} />
 
         {/* 6. Alerts summary */}
-        <AlertSection alerts={collapsedAlerts} />
+        <AlertSection
+          alerts={collapsedAlerts}
+          onAcknowledge={acknowledgeAlert}
+        />
 
         {/* ── Market strip (retained from previous screen) ────────────────── */}
         <Text style={styles.sectionTitle}>Markets</Text>

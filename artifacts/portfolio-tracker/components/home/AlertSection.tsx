@@ -5,6 +5,8 @@ import { colors } from '@/constants/colors';
 
 export interface DashboardAlert {
   id: string;
+  /** DB primary key — present on API-sourced alerts, absent on client-computed ones */
+  dbId?: number;
   type: 'concentration' | 'drawdown' | 'leverage' | 'manual';
   severity: 'info' | 'warning' | 'critical';
   title: string;
@@ -29,9 +31,11 @@ const TYPE_ICON: Record<DashboardAlert['type'], React.ComponentProps<typeof Feat
 
 interface Props {
   alerts: DashboardAlert[];
+  /** Called when the user acknowledges an API-sourced alert. Only shown when dbId is present. */
+  onAcknowledge?: (dbId: number) => void;
 }
 
-export function AlertSection({ alerts }: Props) {
+export function AlertSection({ alerts, onAcknowledge }: Props) {
   if (alerts.length === 0) return null;
 
   return (
@@ -51,19 +55,32 @@ export function AlertSection({ alerts }: Props) {
         {alerts.map(alert => {
           const color = SEVERITY_COLOR[alert.severity];
           return (
-            <Pressable
+            <View
               key={alert.id}
-              onPress={alert.onPress}
               style={[
                 styles.chip,
                 { borderColor: `${color}44`, backgroundColor: `${color}11` },
               ]}
             >
-              <Feather name={TYPE_ICON[alert.type]} size={12} color={color} />
-              <Text style={[styles.chipText, { color }]} numberOfLines={1}>
-                {alert.title}
-              </Text>
-            </Pressable>
+              <Pressable
+                style={styles.chipMain}
+                onPress={alert.onPress}
+              >
+                <Feather name={TYPE_ICON[alert.type]} size={12} color={color} />
+                <Text style={[styles.chipText, { color }]} numberOfLines={1}>
+                  {alert.title}
+                </Text>
+              </Pressable>
+              {alert.dbId != null && onAcknowledge && (
+                <Pressable
+                  style={styles.chipDismiss}
+                  onPress={() => onAcknowledge(alert.dbId!)}
+                  hitSlop={6}
+                >
+                  <Feather name="x" size={11} color={color} />
+                </Pressable>
+              )}
+            </View>
           );
         })}
       </ScrollView>
@@ -110,11 +127,21 @@ const styles = StyleSheet.create({
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
+    borderRadius: 20,
+    borderWidth: 1,
+    overflow: 'hidden',
+  },
+  chipMain: {
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
     paddingHorizontal: 12,
     paddingVertical: 8,
-    borderRadius: 20,
-    borderWidth: 1,
+  },
+  chipDismiss: {
+    paddingRight: 10,
+    paddingLeft: 2,
+    paddingVertical: 8,
   },
   chipText: {
     fontFamily: 'Inter_600SemiBold',

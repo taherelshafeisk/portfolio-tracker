@@ -383,6 +383,66 @@ export interface AnthropicError {
   error: string;
 }
 
+export type AlertAlertType =
+  (typeof AlertAlertType)[keyof typeof AlertAlertType];
+
+export const AlertAlertType = {
+  concentration: "concentration",
+  drawdown: "drawdown",
+  leverage: "leverage",
+} as const;
+
+export type AlertSeverity = (typeof AlertSeverity)[keyof typeof AlertSeverity];
+
+export const AlertSeverity = {
+  warning: "warning",
+  critical: "critical",
+} as const;
+
+export type AlertStatus = (typeof AlertStatus)[keyof typeof AlertStatus];
+
+export const AlertStatus = {
+  active: "active",
+  acknowledged: "acknowledged",
+  resolved: "resolved",
+} as const;
+
+export interface Alert {
+  id: number;
+  accountId: number;
+  positionId?: number | null;
+  symbol?: string | null;
+  alertType: AlertAlertType;
+  severity: AlertSeverity;
+  title: string;
+  message: string;
+  metricValue: number;
+  thresholdValue: number;
+  fingerprint: string;
+  status: AlertStatus;
+  acknowledgedAt?: string | null;
+  resolvedAt?: string | null;
+  generatedAt: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GenerateAlertsBody {
+  accountId?: number | null;
+}
+
+export type UpdateAlertBodyStatus =
+  (typeof UpdateAlertBodyStatus)[keyof typeof UpdateAlertBodyStatus];
+
+export const UpdateAlertBodyStatus = {
+  acknowledged: "acknowledged",
+  resolved: "resolved",
+} as const;
+
+export interface UpdateAlertBody {
+  status: UpdateAlertBodyStatus;
+}
+
 export type ListActivitiesParams = {
   accountId?: number;
   limit?: number;
@@ -412,4 +472,19 @@ export const ListOrderSuggestionsStatus = {
   pending: "pending",
   dismissed: "dismissed",
   executed: "executed",
+} as const;
+
+export type ListAlertsParams = {
+  status?: ListAlertsStatus;
+  accountId?: number;
+  positionId?: number;
+};
+
+export type ListAlertsStatus =
+  (typeof ListAlertsStatus)[keyof typeof ListAlertsStatus];
+
+export const ListAlertsStatus = {
+  active: "active",
+  acknowledged: "acknowledged",
+  resolved: "resolved",
 } as const;

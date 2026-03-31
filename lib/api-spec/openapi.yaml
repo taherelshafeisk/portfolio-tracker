@@ -21,6 +21,8 @@ tags:
     description: Anthropic AI chat operations
   - name: order-suggestions
     description: Order suggestion operations
+  - name: alerts
+    description: Persisted risk alert operations
 paths:
   /healthz:
     get:
@@ -566,6 +568,87 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/OrderSuggestion"
+
+  /alerts/generate:
+    post:
+      operationId: generateAlerts
+      tags: [alerts]
+      summary: Run alert engine and upsert alerts
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/GenerateAlertsBody"
+      responses:
+        "200":
+          description: Active alerts after generation
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Alert"
+
+  /alerts:
+    get:
+      operationId: listAlerts
+      tags: [alerts]
+      summary: List alerts
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [active, acknowledged, resolved]
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+        - name: positionId
+          in: query
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: List of alerts
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/Alert"
+
+  /alerts/{id}:
+    patch:
+      operationId: updateAlert
+      tags: [alerts]
+      summary: Acknowledge or resolve an alert
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: integer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateAlertBody"
+      responses:
+        "200":
+          description: Updated alert
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Alert"
+        "404":
+          description: Not found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApiError"
 
 components:
   schemas:
@@ -1151,3 +1234,83 @@ components:
           type: string
       required:
         - error
+
+    Alert:
+      type: object
+      properties:
+        id:
+          type: integer
+        accountId:
+          type: integer
+        positionId:
+          type: integer
+          nullable: true
+        symbol:
+          type: string
+          nullable: true
+        alertType:
+          type: string
+          enum: [concentration, drawdown, leverage]
+        severity:
+          type: string
+          enum: [warning, critical]
+        title:
+          type: string
+        message:
+          type: string
+        metricValue:
+          type: number
+        thresholdValue:
+          type: number
+        fingerprint:
+          type: string
+        status:
+          type: string
+          enum: [active, acknowledged, resolved]
+        acknowledgedAt:
+          type: string
+          format: date-time
+          nullable: true
+        resolvedAt:
+          type: string
+          format: date-time
+          nullable: true
+        generatedAt:
+          type: string
+          format: date-time
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - accountId
+        - alertType
+        - severity
+        - title
+        - message
+        - metricValue
+        - thresholdValue
+        - fingerprint
+        - status
+        - generatedAt
+        - createdAt
+        - updatedAt
+
+    GenerateAlertsBody:
+      type: object
+      properties:
+        accountId:
+          type: integer
+          nullable: true
+
+    UpdateAlertBody:
+      type: object
+      properties:
+        status:
+          type: string
+          enum: [acknowledged, resolved]
+      required:
+        - status

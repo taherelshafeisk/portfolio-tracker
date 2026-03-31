@@ -602,3 +602,92 @@ export const UpdateOrderSuggestionResponse = zod.object({
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
+
+/**
+ * @summary Run alert engine and upsert alerts
+ */
+export const GenerateAlertsBody = zod.object({
+  accountId: zod.number().nullish(),
+});
+
+export const GenerateAlertsResponseItem = zod.object({
+  id: zod.number(),
+  accountId: zod.number(),
+  positionId: zod.number().nullish(),
+  symbol: zod.string().nullish(),
+  alertType: zod.enum(["concentration", "drawdown", "leverage"]),
+  severity: zod.enum(["warning", "critical"]),
+  title: zod.string(),
+  message: zod.string(),
+  metricValue: zod.number(),
+  thresholdValue: zod.number(),
+  fingerprint: zod.string(),
+  status: zod.enum(["active", "acknowledged", "resolved"]),
+  acknowledgedAt: zod.date().nullish(),
+  resolvedAt: zod.date().nullish(),
+  generatedAt: zod.date(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const GenerateAlertsResponse = zod.array(GenerateAlertsResponseItem);
+
+/**
+ * @summary List alerts
+ */
+export const ListAlertsQueryParams = zod.object({
+  status: zod.enum(["active", "acknowledged", "resolved"]).optional(),
+  accountId: zod.coerce.number().optional(),
+  positionId: zod.coerce.number().optional(),
+});
+
+export const ListAlertsResponseItem = zod.object({
+  id: zod.number(),
+  accountId: zod.number(),
+  positionId: zod.number().nullish(),
+  symbol: zod.string().nullish(),
+  alertType: zod.enum(["concentration", "drawdown", "leverage"]),
+  severity: zod.enum(["warning", "critical"]),
+  title: zod.string(),
+  message: zod.string(),
+  metricValue: zod.number(),
+  thresholdValue: zod.number(),
+  fingerprint: zod.string(),
+  status: zod.enum(["active", "acknowledged", "resolved"]),
+  acknowledgedAt: zod.date().nullish(),
+  resolvedAt: zod.date().nullish(),
+  generatedAt: zod.date(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});
+export const ListAlertsResponse = zod.array(ListAlertsResponseItem);
+
+/**
+ * @summary Acknowledge or resolve an alert
+ */
+export const UpdateAlertParams = zod.object({
+  id: zod.coerce.number(),
+});
+
+export const UpdateAlertBody = zod.object({
+  status: zod.enum(["acknowledged", "resolved"]),
+});
+
+export const UpdateAlertResponse = zod.object({
+  id: zod.number(),
+  accountId: zod.number(),
+  positionId: zod.number().nullish(),
+  symbol: zod.string().nullish(),
+  alertType: zod.enum(["concentration", "drawdown", "leverage"]),
+  severity: zod.enum(["warning", "critical"]),
+  title: zod.string(),
+  message: zod.string(),
+  metricValue: zod.number(),
+  thresholdValue: zod.number(),
+  fingerprint: zod.string(),
+  status: zod.enum(["active", "acknowledged", "resolved"]),
+  acknowledgedAt: zod.date().nullish(),
+  resolvedAt: zod.date().nullish(),
+  generatedAt: zod.date(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+});

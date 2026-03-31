@@ -4,3 +4,4 @@ export * from "./activities";
 export * from "./conversations";
 export * from "./messages";
 export * from "./orderSuggestions";
+export * from "./alerts";

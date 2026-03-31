@@ -20,7 +20,7 @@ console.log('BASE_URL =', BASE_URL);
 
 export async function apiGet<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`);
-  if (!res.ok) throw new Error(`API error ${res.status}`);
+  if (!res.ok) throw new Error(`API error ${res.status} on GET ${path}`);
   return res.json();
 }
 
@@ -149,6 +149,8 @@ interface PortfolioContextValue {
   activities: TradeActivity[];
   summary: PortfolioSummary | null;
   isLoading: boolean;
+  /** Non-null when the last refresh failed. Cleared on the next successful fetch. */
+  error: string | null;
   refreshAll: () => Promise<void>;
   refreshPositions: (accountId?: number) => Promise<void>;
   refreshActivities: () => Promise<void>;
@@ -162,9 +164,11 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [activities, setActivities] = useState<TradeActivity[]>([]);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const refreshAll = useCallback(async () => {
     setIsLoading(true);
+    setError(null);
     try {
       // 1. Fetch accounts and activities in parallel
       const [accs, acts] = await Promise.all([
@@ -186,7 +190,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       const summ = await apiGet<PortfolioSummary>('/portfolio/summary');
       setSummary(summ);
     } catch (e) {
-      console.error('Failed to refresh portfolio:', e);
+      const isNetworkError = e instanceof TypeError && (e as TypeError).message.includes('Network request failed');
+      setError(isNetworkError ? "Can't reach the server. Check your connection." : "Failed to load portfolio. Pull down to retry.");
+      console.warn('Portfolio refresh failed:', e);
     } finally {
       setIsLoading(false);
     }
@@ -206,7 +212,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
         setPositions(allPositions);
       }
     } catch (e) {
-      console.error('Failed to refresh positions:', e);
+      console.warn('Failed to refresh positions:', e);
     }
   }, [accounts]);
 
@@ -215,7 +221,7 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       const acts = await apiGet<TradeActivity[]>('/activities');
       setActivities(acts);
     } catch (e) {
-      console.error('Failed to refresh activities:', e);
+      console.warn('Failed to refresh activities:', e);
     }
   }, []);
 
@@ -225,10 +231,11 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     activities,
     summary,
     isLoading,
+    error,
     refreshAll,
     refreshPositions,
     refreshActivities,
-  }), [accounts, positions, activities, summary, isLoading, refreshAll, refreshPositions, refreshActivities]);
+  }), [accounts, positions, activities, summary, isLoading, error, refreshAll, refreshPositions, refreshActivities]);
 
   return (
     <PortfolioContext.Provider value={value}>

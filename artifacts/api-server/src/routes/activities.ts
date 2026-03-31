@@ -38,6 +38,7 @@ router.get("/", async (req, res) => {
     const activities = await query;
     res.json(activities.map(toResponse));
   } catch (error) {
+    console.error("[activities GET /] Error:", error);
     res.status(500).json({ error: "Failed to fetch activities" });
   }
 });

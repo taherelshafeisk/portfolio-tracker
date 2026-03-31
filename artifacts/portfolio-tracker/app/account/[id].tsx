@@ -20,6 +20,19 @@ import { Skeleton } from '@/components/ui/Skeleton';
 import { StockLogo } from '@/components/ui/StockLogo';
 import { OrderSuggestion } from '@/components/home/OrderSuggestionsPreview';
 import { SuggestionCard } from '@/components/home/SuggestionCard';
+import {
+  Bucket, BUCKET_ORDER, BUCKET_LABELS, BUCKET_COLORS,
+  effectiveBucket, loadAllBucketOverrides, saveBucketOverride, clearBucketOverride,
+} from '@/lib/buckets';
+import { AccountMode, defaultMode, loadAccountMode, saveAccountMode } from '@/lib/marketHours';
+import { ActionableNowSection, type ActionableItem } from '@/components/account/ActionableNowSection';
+import { IntradayPositionRow } from '@/components/account/IntradayPositionRow';
+import {
+  evaluateConcentration,
+  evaluateDrawdown,
+  resolveOverride,
+  defaultStrategyProfile,
+} from '@workspace/portfolio-policy';
 
 const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
   ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
@@ -91,12 +104,18 @@ export default function AccountDetailScreen() {
 
   // ─── Filter / Sort / Search ───────────────────────────────────────────────
   type FilterType = 'all' | 'risers' | 'losers';
-  type SortField = 'value' | 'pct' | 'pnl' | 'name' | 'symbol';
+  type SortField = 'value' | 'pct' | 'pnl' | 'name' | 'symbol' | 'day';
   const [filter, setFilter] = useState<FilterType>('all');
   const [sortBy, setSortBy] = useState<SortField>('value');
   const [sortAsc, setSortAsc] = useState(false);
   const [search, setSearch] = useState('');
   const [showSortMenu, setShowSortMenu] = useState(false);
+
+  // ─── Workbench: mode + buckets ────────────────────────────────────────────
+  const [mode, setMode] = useState<AccountMode>(defaultMode);
+  const [bucketOverrides, setBucketOverrides] = useState<Record<number, Bucket>>({});
+  const [bucketFilter, setBucketFilter] = useState<Bucket | 'all'>('all');
+  const [showBucketPicker, setShowBucketPicker] = useState<Position | null>(null);
 
   const displayPositions = useMemo(() => {
     let list = [...positions];
@@ -113,13 +132,14 @@ export default function AccountDetailScreen() {
       else if (sortBy === 'pnl') diff = a.unrealizedPnl - b.unrealizedPnl;
       else if (sortBy === 'name') diff = a.name.localeCompare(b.name);
       else if (sortBy === 'symbol') diff = a.symbol.localeCompare(b.symbol);
+      else if (sortBy === 'day') diff = (a.dayChangePct ?? 0) - (b.dayChangePct ?? 0);
       return sortAsc ? diff : -diff;
     });
     return list;
   }, [positions, filter, sortBy, sortAsc, search]);
 
   const SORT_LABELS: Record<SortField, string> = {
-    value: 'Market Value', pct: 'P&L %', pnl: 'P&L $', name: 'Name', symbol: 'Symbol',
+    value: 'Market Value', pct: 'P&L %', pnl: 'P&L $', name: 'Name', symbol: 'Symbol', day: 'Today',
   };
 
   const [isLoading, setIsLoading] = useState(false);
@@ -190,6 +210,109 @@ export default function AccountDetailScreen() {
   const cashBalance = account?.currentBalance ?? 0;
   const equity = positionsValue + cashBalance;
   const leverageRatio = cashBalance < 0 && equity > 0 ? positionsValue / equity : null;
+
+  // Load persisted mode preference (user's last manual choice for this account)
+  useEffect(() => {
+    loadAccountMode(accountId).then(saved => { if (saved) setMode(saved); });
+  }, [accountId]);
+
+  // Load bucket overrides whenever the position list changes
+  useEffect(() => {
+    if (positions.length === 0) { setBucketOverrides({}); return; }
+    loadAllBucketOverrides(positions.map(p => p.id)).then(setBucketOverrides);
+  }, [positions.length, accountId]);
+
+  // Resolved bucket for every position
+  const positionBuckets = useMemo<Record<number, Bucket>>(() => {
+    const result: Record<number, Bucket> = {};
+    for (const p of positions) {
+      result[p.id] = effectiveBucket(p.id, p.assetType, bucketOverrides);
+    }
+    return result;
+  }, [positions, bucketOverrides]);
+
+  // Actionable Now items (scored, ranked, capped at 5)
+  const actionableItems = useMemo<ActionableItem[]>(() => {
+    const nav = totalValue;
+    const items: ActionableItem[] = [];
+    for (const p of positions) {
+      const reasons: ActionableItem['reasons'] = [];
+      let score = 0;
+      const ov = resolveOverride(defaultStrategyProfile, { accountId: p.accountId, ticker: p.symbol });
+
+      if (nav > 0) {
+        const conc = evaluateConcentration(p.marketValue / nav, defaultStrategyProfile.concentrationRule, ov);
+        if (conc === 'critical') { score += 15; reasons.push({ label: 'Concentration', isNegative: true }); }
+        else if (conc === 'warning') { score += 5; reasons.push({ label: 'Concentration', isNegative: true }); }
+      }
+
+      const dd = evaluateDrawdown(p.unrealizedPnlPct / 100, defaultStrategyProfile.drawdownRule, ov);
+      if (dd === 'critical') { score += 15; reasons.push({ label: `Drawdown ${p.unrealizedPnlPct.toFixed(1)}%`, isNegative: true }); }
+      else if (dd === 'warning') { score += 5; reasons.push({ label: `Drawdown ${p.unrealizedPnlPct.toFixed(1)}%`, isNegative: true }); }
+
+      const dayPct = Math.abs(p.dayChangePct ?? 0);
+      const dailyDollarNavPct = nav > 0 ? Math.abs((p.dayChange ?? 0) * p.quantity) / nav * 100 : 0;
+      score += dayPct * 0.5 + dailyDollarNavPct * 2;
+      if (dayPct >= 3) {
+        const dir = (p.dayChangePct ?? 0) >= 0 ? '↑' : '↓';
+        reasons.push({ label: `${dir}${dayPct.toFixed(1)}% today`, isNegative: (p.dayChangePct ?? 0) < 0 });
+      }
+
+      if (score >= 2 || reasons.length > 0) {
+        items.push({ id: `pos-${p.id}`, title: p.symbol, score, reasons: reasons.slice(0, 2), positionId: p.id });
+      }
+    }
+    return items.sort((a, b) => b.score - a.score).slice(0, 5);
+  }, [positions, totalValue, bucketOverrides]);
+
+  // Grouped + filtered positions for Intraday mode
+  const intradayGroups = useMemo<Record<Bucket, Position[]>>(() => {
+    let list = positions.filter(p => {
+      if (!search.trim()) return true;
+      const q = search.trim().toLowerCase();
+      return p.symbol.toLowerCase().includes(q) || p.name.toLowerCase().includes(q);
+    });
+    if (bucketFilter !== 'all') list = list.filter(p => positionBuckets[p.id] === bucketFilter);
+    list.sort((a, b) => {
+      if (sortBy === 'value') return sortAsc ? a.marketValue - b.marketValue : b.marketValue - a.marketValue;
+      if (sortBy === 'pct')   return sortAsc ? a.unrealizedPnlPct - b.unrealizedPnlPct : b.unrealizedPnlPct - a.unrealizedPnlPct;
+      if (sortBy === 'day')   return sortAsc ? (a.dayChangePct ?? 0) - (b.dayChangePct ?? 0) : (b.dayChangePct ?? 0) - (a.dayChangePct ?? 0);
+      // Default intraday sort: biggest absolute daily mover first
+      return Math.abs(b.dayChangePct ?? 0) - Math.abs(a.dayChangePct ?? 0);
+    });
+    const groups: Record<Bucket, Position[]> = { long_term: [], speculative: [], crypto: [] };
+    for (const p of list) groups[positionBuckets[p.id]].push(p);
+    return groups;
+  }, [positions, search, bucketFilter, positionBuckets, sortBy, sortAsc]);
+
+  // Policy severity per position (used by IntradayPositionRow badges)
+  const positionSeverities = useMemo(() => {
+    const nav = totalValue;
+    const result: Record<number, { conc: 'warning' | 'critical' | null; dd: 'warning' | 'critical' | null }> = {};
+    for (const p of positions) {
+      const ov = resolveOverride(defaultStrategyProfile, { accountId: p.accountId, ticker: p.symbol });
+      const conc = nav > 0 ? evaluateConcentration(p.marketValue / nav, defaultStrategyProfile.concentrationRule, ov) : null;
+      const dd = evaluateDrawdown(p.unrealizedPnlPct / 100, defaultStrategyProfile.drawdownRule, ov);
+      result[p.id] = {
+        conc: conc === 'info' ? null : conc,
+        dd:   dd   === 'info' ? null : dd,
+      };
+    }
+    return result;
+  }, [positions, totalValue]);
+
+  const handleBucketOverride = useCallback(async (pos: Position, bucket: Bucket) => {
+    await saveBucketOverride(pos.id, bucket);
+    setBucketOverrides(prev => ({ ...prev, [pos.id]: bucket }));
+    setShowBucketPicker(null);
+    setMenuPos(null);
+  }, []);
+
+  const handleResetBucket = useCallback(async (pos: Position) => {
+    await clearBucketOverride(pos.id);
+    setBucketOverrides(prev => { const next = { ...prev }; delete next[pos.id]; return next; });
+    setShowBucketPicker(null);
+  }, []);
 
   const exportCSV = () => {
     const header = 'Symbol,Name,Qty,Avg Cost,Current Price,Market Value,Unrealized P&L,P&L %';
@@ -661,6 +784,34 @@ export default function AccountDetailScreen() {
           </Card>
         )}
 
+        {positions.length > 0 && (
+          <ActionableNowSection
+            items={actionableItems}
+            leverageRatio={leverageRatio}
+            onPressItem={item => {
+              if (item.positionId != null)
+                router.push({ pathname: '/position/[id]', params: { id: String(item.positionId) } });
+            }}
+          />
+        )}
+
+        {/* Mode toggle: Overview / Intraday */}
+        {positions.length > 0 && (
+          <View style={styles.modeRow}>
+            {(['overview', 'intraday'] as AccountMode[]).map(m => (
+              <Pressable
+                key={m}
+                style={[styles.modeTab, mode === m && styles.modeTabActive]}
+                onPress={() => { setMode(m); saveAccountMode(accountId, m); setBucketFilter('all'); }}
+              >
+                <Text style={[styles.modeTabText, mode === m && styles.modeTabTextActive]}>
+                  {m === 'overview' ? 'Overview' : 'Intraday'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+        )}
+
         <View style={styles.sectionHeader}>
           <Text style={styles.sectionTitle}>Positions</Text>
           <View style={styles.sectionActions}>
@@ -703,17 +854,33 @@ export default function AccountDetailScreen() {
 
             {/* Filter chips + Sort */}
             <View style={styles.filterRow}>
-              {(['all', 'risers', 'losers'] as FilterType[]).map(f => (
-                <Pressable
-                  key={f}
-                  style={[styles.filterChip, filter === f && styles.filterChipActive]}
-                  onPress={() => setFilter(f)}
-                >
-                  <Text style={[styles.filterChipText, filter === f && styles.filterChipTextActive]}>
-                    {f === 'all' ? 'All' : f === 'risers' ? '↑ Risers' : '↓ Losers'}
-                  </Text>
-                </Pressable>
-              ))}
+              {mode === 'intraday' ? (
+                (['all', 'long_term', 'speculative', 'crypto'] as Array<'all' | Bucket>).map(b => (
+                  <Pressable
+                    key={b}
+                    style={[styles.filterChip, bucketFilter === b && styles.filterChipActive,
+                      b !== 'all' && bucketFilter === b && { borderColor: BUCKET_COLORS[b as Bucket] + '80', backgroundColor: BUCKET_COLORS[b as Bucket] + '18' }]}
+                    onPress={() => setBucketFilter(b)}
+                  >
+                    <Text style={[styles.filterChipText, bucketFilter === b && styles.filterChipTextActive,
+                      b !== 'all' && bucketFilter === b && { color: BUCKET_COLORS[b as Bucket] }]}>
+                      {b === 'all' ? 'All' : BUCKET_LABELS[b as Bucket]}
+                    </Text>
+                  </Pressable>
+                ))
+              ) : (
+                (['all', 'risers', 'losers'] as FilterType[]).map(f => (
+                  <Pressable
+                    key={f}
+                    style={[styles.filterChip, filter === f && styles.filterChipActive]}
+                    onPress={() => setFilter(f)}
+                  >
+                    <Text style={[styles.filterChipText, filter === f && styles.filterChipTextActive]}>
+                      {f === 'all' ? 'All' : f === 'risers' ? '↑ Risers' : '↓ Losers'}
+                    </Text>
+                  </Pressable>
+                ))
+              )}
               <Pressable style={[styles.filterChip, { marginLeft: 'auto', flexDirection: 'row', gap: 4 }]} onPress={() => setShowSortMenu(true)}>
                 <Feather name="sliders" size={12} color={colors.textSecondary} />
                 <Text style={styles.filterChipText}>{SORT_LABELS[sortBy]}</Text>
@@ -734,7 +901,7 @@ export default function AccountDetailScreen() {
             <Feather name="filter" size={28} color={colors.textMuted} />
             <Text style={styles.emptyText}>No matches</Text>
           </Card>
-        ) : (
+        ) : mode === 'overview' ? (
           displayPositions.map(pos => {
             const isOverallPos = pos.unrealizedPnl >= 0;
             const isDayPos = (pos.dayChangePct ?? 0) >= 0;
@@ -787,6 +954,32 @@ export default function AccountDetailScreen() {
                   </Text>
                 </View>
               </Card>
+            );
+          })
+        ) : (
+          // Intraday mode — grouped compact rows
+          BUCKET_ORDER.map(bucket => {
+            const group = intradayGroups[bucket] ?? [];
+            if (group.length === 0) return null;
+            return (
+              <View key={bucket}>
+                <View style={styles.bucketGroupHeader}>
+                  <View style={[styles.bucketDot, { backgroundColor: BUCKET_COLORS[bucket] }]} />
+                  <Text style={styles.bucketGroupTitle}>{BUCKET_LABELS[bucket]}</Text>
+                  <Text style={styles.bucketGroupCount}>{group.length}</Text>
+                </View>
+                {group.map(pos => (
+                  <IntradayPositionRow
+                    key={pos.id}
+                    position={pos}
+                    bucket={positionBuckets[pos.id] ?? 'speculative'}
+                    concentrationSeverity={positionSeverities[pos.id]?.conc}
+                    drawdownSeverity={positionSeverities[pos.id]?.dd}
+                    onPress={() => router.push({ pathname: '/position/[id]', params: { id: String(pos.id) } })}
+                    onMenuPress={() => setMenuPos(pos)}
+                  />
+                ))}
+              </View>
             );
           })
         )}
@@ -1021,6 +1214,15 @@ export default function AccountDetailScreen() {
                 <Text style={[styles.sortItemText, { color: colors.primary }]}>Edit Position</Text>
               </View>
             </Pressable>
+            <Pressable style={styles.sortItem} onPress={() => {
+              const pos = menuPos; setMenuPos(null);
+              if (pos) setShowBucketPicker(pos);
+            }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                <Feather name="tag" size={16} color={colors.textSecondary} />
+                <Text style={styles.sortItemText}>Change Group</Text>
+              </View>
+            </Pressable>
             <Pressable style={styles.sortItem} onPress={() => { setMenuPos(null); if (menuPos) handleDeletePos(menuPos.id, menuPos.symbol); }}>
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
                 <Feather name="trash-2" size={16} color={colors.negative} />
@@ -1091,6 +1293,49 @@ export default function AccountDetailScreen() {
                 )}
               </Pressable>
             ))}
+          </View>
+        </Pressable>
+      </Modal>
+
+      {/* ── Bucket Picker ─────────────────────────────────────────────────── */}
+      <Modal visible={!!showBucketPicker} animationType="fade" transparent>
+        <Pressable style={styles.menuOverlay} onPress={() => setShowBucketPicker(null)}>
+          <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>{showBucketPicker?.symbol} — Change Group</Text>
+            {BUCKET_ORDER.map(b => {
+              const isActive = showBucketPicker ? positionBuckets[showBucketPicker.id] === b : false;
+              const hasOverride = showBucketPicker ? !!bucketOverrides[showBucketPicker.id] : false;
+              return (
+                <Pressable
+                  key={b}
+                  style={[styles.sortItem, isActive && { backgroundColor: BUCKET_COLORS[b] + '11' }]}
+                  onPress={() => showBucketPicker && handleBucketOverride(showBucketPicker, b)}
+                >
+                  <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 }}>
+                    <View style={[styles.bucketDot, { backgroundColor: BUCKET_COLORS[b] }]} />
+                    <Text style={[styles.sortItemText, isActive && { color: BUCKET_COLORS[b] }]}>
+                      {BUCKET_LABELS[b]}
+                    </Text>
+                    {isActive && !hasOverride && (
+                      <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted }}>(auto)</Text>
+                    )}
+                  </View>
+                  {isActive && <Feather name="check" size={16} color={BUCKET_COLORS[b]} />}
+                </Pressable>
+              );
+            })}
+            {showBucketPicker && bucketOverrides[showBucketPicker.id] && (
+              <Pressable
+                style={[styles.sortItem]}
+                onPress={() => showBucketPicker && handleResetBucket(showBucketPicker)}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 10 }}>
+                  <Feather name="refresh-ccw" size={14} color={colors.textMuted} />
+                  <Text style={[styles.sortItemText, { color: colors.textMuted }]}>Reset to Auto</Text>
+                </View>
+              </Pressable>
+            )}
           </View>
         </Pressable>
       </Modal>
@@ -1218,6 +1463,63 @@ const styles = StyleSheet.create({
   dupOption: { borderWidth: 1, borderColor: colors.separator, borderRadius: 12, padding: 14, marginBottom: 10 },
   dupOptionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textPrimary, marginBottom: 2 },
   dupOptionDesc: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted },
+  // Mode toggle
+  modeRow: {
+    flexDirection: 'row',
+    backgroundColor: colors.surfaceElevated,
+    borderRadius: 12,
+    padding: 3,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  modeTab: {
+    flex: 1,
+    paddingVertical: 7,
+    alignItems: 'center',
+    borderRadius: 9,
+  },
+  modeTabActive: {
+    backgroundColor: colors.surface,
+  },
+  modeTabText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 13,
+    color: colors.textMuted,
+  },
+  modeTabTextActive: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+    color: colors.textPrimary,
+  },
+  // Intraday bucket groups
+  bucketGroupHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingVertical: 8,
+    paddingHorizontal: 4,
+    marginTop: 4,
+    marginBottom: 2,
+  },
+  bucketDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
+  bucketGroupTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+    color: colors.textSecondary,
+    flex: 1,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+  },
+  bucketGroupCount: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: colors.textMuted,
+  },
   // Search + filter
   searchRow: {
     flexDirection: 'row', alignItems: 'center',

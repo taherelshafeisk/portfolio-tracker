@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Pressable } from 'react-native';
 import { colors } from '@/constants/colors';
 import { Card } from '@/components/ui/Card';
 
@@ -9,6 +9,7 @@ export interface RiskIndicator {
   value: string;
   severity: 'ok' | 'warning' | 'critical';
   detail?: string;
+  onPress?: () => void;
 }
 
 const SEVERITY_COLOR: Record<RiskIndicator['severity'], string> = {
@@ -32,7 +33,7 @@ export function RiskSection({ indicators }: Props) {
         {flagged.map((item, i) => {
           const color = SEVERITY_COLOR[item.severity];
           return (
-            <View key={item.id} style={[styles.row, i > 0 && styles.rowBorder]}>
+            <Pressable key={item.id} onPress={item.onPress} style={[styles.row, i > 0 && styles.rowBorder]}>
               <View style={styles.left}>
                 <View style={[styles.dot, { backgroundColor: color }]} />
                 <View style={styles.textBlock}>
@@ -43,7 +44,7 @@ export function RiskSection({ indicators }: Props) {
                 </View>
               </View>
               <Text style={[styles.value, { color }]}>{item.value}</Text>
-            </View>
+            </Pressable>
           );
         })}
       </Card>

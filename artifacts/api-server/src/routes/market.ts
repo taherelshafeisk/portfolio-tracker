@@ -4,6 +4,32 @@ const router: IRouter = Router();
 
 const YAHOO_BASE = "https://query1.finance.yahoo.com";
 
+// Keep in sync with routes/positions.ts
+const CRYPTO_SYMBOLS = new Set([
+  "BTC", "ETH", "SOL", "ADA", "XRP", "DOGE", "AVAX", "DOT", "MATIC",
+  "LINK", "UNI", "ATOM", "LTC", "BCH", "XLM", "ALGO", "VET", "FIL",
+  "TRX", "SHIB", "BNB", "NEAR", "FTM", "SAND", "MANA", "THETA", "HBAR",
+  "ICP", "ETC", "FLOW", "CHZ", "APE", "CRO", "GRT", "ENJ", "BAT",
+  "ZEC", "DASH", "NEO", "EOS", "PEPE", "WIF", "BONK", "ARB", "OP",
+  "SUI", "APT", "INJ", "TIA", "SEI", "RUNE", "CRV", "AAVE", "COMP",
+  "MKR", "SNX", "YFI", "SUSHI", "ZRX",
+]);
+const SYMBOL_OVERRIDES: Record<string, string> = {
+  "GOLD": "GC=F",
+  "XAU": "GC=F",
+  "SILVER": "SI=F",
+  "XAG": "SI=F",
+};
+
+function toYahooSymbol(symbol: string): string {
+  const upper = symbol.toUpperCase();
+  if (SYMBOL_OVERRIDES[upper]) return SYMBOL_OVERRIDES[upper];
+  if (!upper.includes("-") && !upper.includes(".") && CRYPTO_SYMBOLS.has(upper)) {
+    return `${upper}-USD`;
+  }
+  return upper;
+}
+
 async function fetchYahoo(url: string) {
   const res = await fetch(url, {
     headers: {
@@ -37,7 +63,8 @@ router.get("/search", async (req, res) => {
 router.get("/quote/:symbol", async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
-    const url = `${YAHOO_BASE}/v8/finance/chart/${symbol}?interval=1d&range=5d`;
+    const yahooSymbol = toYahooSymbol(symbol);
+    const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSymbol}?interval=1d&range=5d`;
     const data = await fetchYahoo(url);
     const result = data?.chart?.result?.[0];
     if (!result) return res.status(404).json({ error: "Symbol not found" });
@@ -67,9 +94,10 @@ router.get("/quote/:symbol", async (req, res) => {
 router.get("/chart/:symbol", async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
+    const yahooSymbol = toYahooSymbol(symbol);
     const interval = (req.query.interval as string) || "1d";
     const range = (req.query.range as string) || "1mo";
-    const url = `${YAHOO_BASE}/v8/finance/chart/${symbol}?interval=${interval}&range=${range}`;
+    const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSymbol}?interval=${interval}&range=${range}`;
     const data = await fetchYahoo(url);
     const result = data?.chart?.result?.[0];
     if (!result) return res.status(404).json({ error: "Symbol not found" });

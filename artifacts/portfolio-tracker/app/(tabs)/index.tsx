@@ -8,7 +8,12 @@ import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiGet, apiPost } from '@/context/PortfolioContext';
+import { usePortfolio, apiGet, apiPost, type Position, type Account } from '@/context/PortfolioContext';
+import {
+  evaluateConcentration, evaluateDrawdown, evaluateLeverage, resolveOverride,
+  type StrategyProfile,
+} from '@workspace/portfolio-policy';
+import { defaultStrategyProfile } from '@workspace/portfolio-policy';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 
@@ -37,69 +42,102 @@ const INDEX_NAMES: Record<string, string> = {
 };
 
 // ─── Derivation helpers ───────────────────────────────────────────────────────
+//
+// All policy-driven thresholds come from a StrategyProfile argument.
+// Pass `defaultStrategyProfile` at each call site; swap it out to switch strategies.
+//
+// Metric computation (e.g. concentrationFraction = marketValue / totalNav) stays here.
+// Policy evaluation (is that fraction a warning or critical?) is delegated to the
+// pure evaluators imported from lib/portfolioPolicy.
 
 function computeHealthSignal(
-  positions: ReturnType<typeof usePortfolio>['positions'],
-  accounts: ReturnType<typeof usePortfolio>['accounts'],
+  positions: Position[],
+  accounts: Account[],
   totalNav: number,
+  policy: StrategyProfile,
 ): HealthSignal {
-  const hasCritical = positions.some(p => p.unrealizedPnlPct < -25);
-  const hasConcentration = totalNav > 0 && positions.some(p => p.marketValue / totalNav > 0.35);
-  const hasLeverage = accounts.some(a => a.currentBalance < 0);
+  const hasCritical =
+    positions.some(p => {
+      const ov = resolveOverride(policy, { accountId: p.accountId, ticker: p.symbol });
+      if (totalNav > 0 && evaluateConcentration(p.marketValue / totalNav, policy.concentrationRule, ov) === 'critical') return true;
+      if (evaluateDrawdown(p.unrealizedPnlPct / 100, policy.drawdownRule, ov) === 'critical') return true;
+      return false;
+    });
   if (hasCritical) return 'red';
-  if (
-    positions.some(p => p.unrealizedPnlPct < -15) ||
-    hasConcentration ||
-    hasLeverage
-  ) return 'amber';
+
+  const hasWarning =
+    positions.some(p => {
+      const ov = resolveOverride(policy, { accountId: p.accountId, ticker: p.symbol });
+      if (totalNav > 0 && evaluateConcentration(p.marketValue / totalNav, policy.concentrationRule, ov)) return true;
+      if (evaluateDrawdown(p.unrealizedPnlPct / 100, policy.drawdownRule, ov)) return true;
+      return false;
+    }) ||
+    accounts.some(a => {
+      const ov = resolveOverride(policy, { accountId: a.id });
+      return evaluateLeverage(a.currentBalance, policy.leverageRule, ov) != null;
+    });
+  if (hasWarning) return 'amber';
+
   return 'green';
 }
 
 function computeRiskIndicators(
-  positions: ReturnType<typeof usePortfolio>['positions'],
-  accounts: ReturnType<typeof usePortfolio>['accounts'],
+  positions: Position[],
+  accounts: Account[],
   totalNav: number,
+  policy: StrategyProfile,
 ): RiskIndicator[] {
   const indicators: RiskIndicator[] = [];
 
-  // Concentration — one indicator per position over threshold
+  // Concentration — one indicator per position that breaches the policy threshold
   if (totalNav > 0) {
     positions.forEach(p => {
-      const pct = (p.marketValue / totalNav) * 100;
-      if (pct >= 20) {
+      const fraction = p.marketValue / totalNav;
+      const ov = resolveOverride(policy, { accountId: p.accountId, ticker: p.symbol });
+      const severity = evaluateConcentration(fraction, policy.concentrationRule, ov);
+      // Risk evaluators only return 'warning' or 'critical', never 'info'.
+      // Cast to the RiskIndicator severity union which excludes 'info'.
+      if (severity) {
         indicators.push({
           id: `conc-${p.id}`,
           label: 'Concentration',
-          value: `${pct.toFixed(1)}%`,
-          severity: pct >= 35 ? 'critical' : 'warning',
+          value: `${(fraction * 100).toFixed(1)}%`,
+          severity: severity as RiskIndicator['severity'],
           detail: `${p.symbol} · ${p.name}`,
+          onPress: () => router.push({ pathname: '/position/[id]', params: { id: String(p.id) } }),
         });
       }
     });
   }
 
-  // Large drawdown — one indicator per position under threshold
+  // Drawdown — one indicator per position that breaches the policy threshold
   positions.forEach(p => {
-    if (p.unrealizedPnlPct <= -15) {
+    const ov = resolveOverride(policy, { accountId: p.accountId, ticker: p.symbol });
+    const severity = evaluateDrawdown(p.unrealizedPnlPct / 100, policy.drawdownRule, ov);
+    if (severity) {
       indicators.push({
         id: `dd-${p.id}`,
         label: 'Drawdown',
         value: `${p.unrealizedPnlPct.toFixed(1)}%`,
-        severity: p.unrealizedPnlPct <= -30 ? 'critical' : 'warning',
+        severity: severity as RiskIndicator['severity'],
         detail: p.symbol,
+        onPress: () => router.push({ pathname: '/position/[id]', params: { id: String(p.id) } }),
       });
     }
   });
 
-  // Leverage — one indicator per account with negative cash balance
+  // Leverage — one indicator per account with a negative cash balance
   accounts.forEach(a => {
-    if (a.currentBalance < 0) {
+    const ov = resolveOverride(policy, { accountId: a.id });
+    const severity = evaluateLeverage(a.currentBalance, policy.leverageRule, ov);
+    if (severity) {
       indicators.push({
         id: `lev-${a.id}`,
         label: 'Leverage',
         value: `$${Math.abs(a.currentBalance).toFixed(0)} borrowed`,
-        severity: 'warning',
+        severity: severity as RiskIndicator['severity'],
         detail: a.name,
+        onPress: () => router.push({ pathname: '/account/[id]', params: { id: String(a.id) } }),
       });
     }
   });
@@ -108,46 +146,61 @@ function computeRiskIndicators(
 }
 
 function computeAlerts(
-  positions: ReturnType<typeof usePortfolio>['positions'],
-  accounts: ReturnType<typeof usePortfolio>['accounts'],
+  positions: Position[],
+  accounts: Account[],
   totalNav: number,
+  policy: StrategyProfile,
 ): DashboardAlert[] {
   const alerts: DashboardAlert[] = [];
 
   if (totalNav > 0) {
     positions.forEach(p => {
-      const pct = (p.marketValue / totalNav) * 100;
-      if (pct >= 20) {
+      const fraction = p.marketValue / totalNav;
+      const ov = resolveOverride(policy, { accountId: p.accountId, ticker: p.symbol });
+      const severity = evaluateConcentration(fraction, policy.concentrationRule, ov);
+      if (severity) {
         alerts.push({
           id: `conc-${p.id}`,
           type: 'concentration',
-          severity: pct >= 30 ? 'critical' : 'warning',
-          title: `${p.symbol} ${pct.toFixed(0)}% of portfolio`,
+          severity,
+          title: `${p.symbol} ${(fraction * 100).toFixed(0)}% of portfolio`,
           symbol: p.symbol,
+          positionId: p.id,
+          accountId: p.accountId,
+          onPress: () => router.push({ pathname: '/position/[id]', params: { id: String(p.id) } }),
         });
       }
     });
   }
 
   positions.forEach(p => {
-    if (p.unrealizedPnlPct <= -15) {
+    const ov = resolveOverride(policy, { accountId: p.accountId, ticker: p.symbol });
+    const severity = evaluateDrawdown(p.unrealizedPnlPct / 100, policy.drawdownRule, ov);
+    if (severity) {
       alerts.push({
         id: `dd-${p.id}`,
         type: 'drawdown',
-        severity: p.unrealizedPnlPct <= -25 ? 'critical' : 'warning',
+        severity,
         title: `${p.symbol} down ${Math.abs(p.unrealizedPnlPct).toFixed(1)}%`,
         symbol: p.symbol,
+        positionId: p.id,
+        accountId: p.accountId,
+        onPress: () => router.push({ pathname: '/position/[id]', params: { id: String(p.id) } }),
       });
     }
   });
 
   accounts.forEach(a => {
-    if (a.currentBalance < 0) {
+    const ov = resolveOverride(policy, { accountId: a.id });
+    const severity = evaluateLeverage(a.currentBalance, policy.leverageRule, ov);
+    if (severity) {
       alerts.push({
         id: `lev-${a.id}`,
         type: 'leverage',
-        severity: 'warning',
+        severity,
         title: `Leverage active · ${a.name}`,
+        accountId: a.id,
+        onPress: () => router.push({ pathname: '/account/[id]', params: { id: String(a.id) } }),
       });
     }
   });
@@ -164,42 +217,60 @@ function computeActionItems(alerts: DashboardAlert[]): ActionItem[] {
   const concentrationAlerts = alerts.filter(a => a.type === 'concentration');
   if (concentrationAlerts.length > 0) {
     const symbols = concentrationAlerts.map(a => a.symbol).filter(Boolean).join(', ');
+    const onPress = concentrationAlerts.length === 1 && concentrationAlerts[0].positionId != null
+      ? () => router.push({ pathname: '/position/[id]', params: { id: String(concentrationAlerts[0].positionId) } })
+      : concentrationAlerts[0].accountId != null
+        ? () => router.push({ pathname: '/account/[id]', params: { id: String(concentrationAlerts[0].accountId) } })
+        : () => router.push('/(tabs)/accounts');
     items.push({
       id: 'action-concentration',
       title: 'Review concentrated positions',
       description: symbols || 'One or more positions exceed 20% of portfolio',
       urgency: concentrationAlerts.some(a => a.severity === 'critical') ? 'high' : 'medium',
       cta: 'Review',
-      onPress: () => router.push('/(tabs)/accounts'),
+      onPress,
     });
   }
 
   const drawdownAlerts = alerts.filter(a => a.type === 'drawdown');
   if (drawdownAlerts.length > 0) {
     const symbols = drawdownAlerts.map(a => a.symbol).filter(Boolean).join(', ');
+    const onPress = drawdownAlerts.length === 1 && drawdownAlerts[0].positionId != null
+      ? () => router.push({ pathname: '/position/[id]', params: { id: String(drawdownAlerts[0].positionId) } })
+      : drawdownAlerts[0].accountId != null
+        ? () => router.push({ pathname: '/account/[id]', params: { id: String(drawdownAlerts[0].accountId) } })
+        : () => router.push('/(tabs)/accounts');
     items.push({
       id: 'action-drawdown',
       title: 'Check drawdown positions',
       description: symbols || 'One or more positions are down significantly',
       urgency: drawdownAlerts.some(a => a.severity === 'critical') ? 'high' : 'medium',
       cta: 'View',
-      onPress: () => router.push('/(tabs)/accounts'),
+      onPress,
     });
   }
 
   const leverageAlerts = alerts.filter(a => a.type === 'leverage');
   if (leverageAlerts.length > 0) {
+    const onPress = leverageAlerts.length === 1 && leverageAlerts[0].accountId != null
+      ? () => router.push({ pathname: '/account/[id]', params: { id: String(leverageAlerts[0].accountId) } })
+      : () => router.push('/(tabs)/accounts');
     items.push({
       id: 'action-leverage',
       title: 'Leverage in use',
       description: 'One or more accounts have a negative cash balance',
       urgency: 'medium',
       cta: 'View',
-      onPress: () => router.push('/(tabs)/accounts'),
+      onPress,
     });
   }
 
   return items;
+}
+
+function truncateSymbols(symbols: string[], max = 3): string {
+  if (symbols.length <= max) return symbols.join(', ');
+  return `${symbols.slice(0, max).join(', ')} +${symbols.length - max}`;
 }
 
 function collapseAlerts(alerts: DashboardAlert[]): DashboardAlert[] {
@@ -207,7 +278,7 @@ function collapseAlerts(alerts: DashboardAlert[]): DashboardAlert[] {
   const others = alerts.filter(a => a.type !== 'drawdown');
   if (drawdowns.length <= 1) return alerts;
   const worstSeverity = drawdowns.some(a => a.severity === 'critical') ? 'critical' : 'warning';
-  const symbols = drawdowns.map(a => a.symbol).filter(Boolean).join(', ');
+  const symbols = truncateSymbols(drawdowns.map(a => a.symbol).filter(Boolean) as string[]);
   return [
     ...others,
     {
@@ -215,6 +286,7 @@ function collapseAlerts(alerts: DashboardAlert[]): DashboardAlert[] {
       type: 'drawdown',
       severity: worstSeverity,
       title: `${drawdowns.length} positions down · ${symbols}`,
+      onPress: () => router.push('/(tabs)/accounts'),
     },
   ];
 }
@@ -224,7 +296,7 @@ function computeRiskSummaryIndicators(indicators: RiskIndicator[]): RiskIndicato
   const others = indicators.filter(i => i.label !== 'Drawdown');
   if (drawdowns.length <= 1) return indicators;
   const worstSeverity = drawdowns.some(d => d.severity === 'critical') ? 'critical' : 'warning';
-  const symbols = drawdowns.map(d => d.detail).filter(Boolean).join(', ');
+  const symbols = truncateSymbols(drawdowns.map(d => d.detail).filter(Boolean) as string[]);
   return [
     ...others,
     {
@@ -233,6 +305,7 @@ function computeRiskSummaryIndicators(indicators: RiskIndicator[]): RiskIndicato
       value: `${drawdowns.length} positions`,
       severity: worstSeverity,
       detail: symbols,
+      onPress: () => router.push('/(tabs)/accounts'),
     },
   ];
 }
@@ -241,7 +314,7 @@ function computeRiskSummaryIndicators(indicators: RiskIndicator[]): RiskIndicato
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { summary, accounts, positions, isLoading, refreshAll } = usePortfolio();
+  const { summary, accounts, positions, isLoading, error, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const { data: indices, isLoading: indicesLoading } = useQuery({
@@ -268,7 +341,7 @@ export default function HomeScreen() {
   const totalNav = summary?.totalNav ?? 0;
 
   const healthSignal = useMemo(
-    () => computeHealthSignal(positions, accounts, totalNav),
+    () => computeHealthSignal(positions, accounts, totalNav, defaultStrategyProfile),
     [positions, accounts, totalNav],
   );
 
@@ -296,12 +369,12 @@ export default function HomeScreen() {
   );
 
   const riskIndicators = useMemo(
-    () => computeRiskIndicators(positions, accounts, totalNav),
+    () => computeRiskIndicators(positions, accounts, totalNav, defaultStrategyProfile),
     [positions, accounts, totalNav],
   );
 
   const alerts = useMemo(
-    () => computeAlerts(positions, accounts, totalNav),
+    () => computeAlerts(positions, accounts, totalNav, defaultStrategyProfile),
     [positions, accounts, totalNav],
   );
 
@@ -349,6 +422,14 @@ export default function HomeScreen() {
           <Feather name="refresh-cw" size={18} color={colors.textSecondary} />
         </Pressable>
       </View>
+
+      {error && (
+        <Pressable style={styles.errorBanner} onPress={refreshAll}>
+          <Feather name="wifi-off" size={13} color={colors.negative} />
+          <Text style={styles.errorBannerText}>{error}</Text>
+          <Text style={styles.errorBannerRetry}>Retry</Text>
+        </Pressable>
+      )}
 
       <ScrollView
         showsVerticalScrollIndicator={false}
@@ -467,6 +548,27 @@ const styles = StyleSheet.create({
     height: 36,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  errorBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(255,59,48,0.10)',
+    borderBottomWidth: 1,
+    borderBottomColor: 'rgba(255,59,48,0.25)',
+    paddingHorizontal: 16,
+    paddingVertical: 9,
+  },
+  errorBannerText: {
+    flex: 1,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: colors.negative,
+  },
+  errorBannerRetry: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+    color: colors.negative,
   },
   scroll: {
     paddingHorizontal: 16,

@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, ScrollView, StyleSheet, Pressable } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '@/constants/colors';
 
@@ -9,6 +9,9 @@ export interface DashboardAlert {
   severity: 'info' | 'warning' | 'critical';
   title: string;
   symbol?: string;
+  positionId?: number;
+  accountId?: number;
+  onPress?: () => void;
 }
 
 const SEVERITY_COLOR: Record<DashboardAlert['severity'], string> = {
@@ -48,8 +51,9 @@ export function AlertSection({ alerts }: Props) {
         {alerts.map(alert => {
           const color = SEVERITY_COLOR[alert.severity];
           return (
-            <View
+            <Pressable
               key={alert.id}
+              onPress={alert.onPress}
               style={[
                 styles.chip,
                 { borderColor: `${color}44`, backgroundColor: `${color}11` },
@@ -59,7 +63,7 @@ export function AlertSection({ alerts }: Props) {
               <Text style={[styles.chipText, { color }]} numberOfLines={1}>
                 {alert.title}
               </Text>
-            </View>
+            </Pressable>
           );
         })}
       </ScrollView>

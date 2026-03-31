@@ -24,6 +24,7 @@ router.get("/", async (_req, res) => {
     }));
     res.json(result);
   } catch (error) {
+    console.error("[accounts GET /] Error:", error);
     res.status(500).json({ error: "Failed to fetch accounts" });
   }
 });
@@ -172,6 +173,7 @@ router.get("/:id/positions", async (req, res) => {
     });
     res.json(result);
   } catch (error) {
+    console.error(`[accounts GET /:id/positions] Error:`, error);
     res.status(500).json({ error: "Failed to fetch positions" });
   }
 });

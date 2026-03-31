@@ -5,8 +5,12 @@ import { colors } from '@/constants/colors';
 
 export interface DashboardAlert {
   id: string;
-  /** DB primary key — present on API-sourced alerts, absent on client-computed ones */
-  dbId?: number;
+  /**
+   * DB primary key(s) — present on API-sourced alerts, absent on client-computed ones.
+   * A collapsed summary carries the dbIds of every alert it represents so all can be
+   * acknowledged in one tap.
+   */
+  dbIds?: number[];
   type: 'concentration' | 'drawdown' | 'leverage' | 'manual';
   severity: 'info' | 'warning' | 'critical';
   title: string;
@@ -31,11 +35,21 @@ const TYPE_ICON: Record<DashboardAlert['type'], React.ComponentProps<typeof Feat
 
 interface Props {
   alerts: DashboardAlert[];
-  /** Called when the user acknowledges an API-sourced alert. Only shown when dbId is present. */
-  onAcknowledge?: (dbId: number) => void;
+  /**
+   * Called when the user acknowledges alert(s). Receives all dbIds represented by
+   * the tapped chip — a collapsed summary passes multiple ids at once.
+   * Only rendered when the chip has dbIds (i.e. alerts came from the API).
+   */
+  onAcknowledge?: (dbIds: number[]) => void;
+  /**
+   * When true, alerts are client-computed fallback (no API data yet).
+   * Renders a small "Scan alerts" button so the user can trigger generation.
+   */
+  isFallback?: boolean;
+  onScan?: () => void;
 }
 
-export function AlertSection({ alerts, onAcknowledge }: Props) {
+export function AlertSection({ alerts, onAcknowledge, isFallback, onScan }: Props) {
   if (alerts.length === 0) return null;
 
   return (
@@ -45,6 +59,12 @@ export function AlertSection({ alerts, onAcknowledge }: Props) {
         <View style={styles.countBadge}>
           <Text style={styles.countText}>{alerts.length}</Text>
         </View>
+        {isFallback && onScan && (
+          <Pressable style={styles.scanBtn} onPress={onScan}>
+            <Feather name="refresh-cw" size={11} color={colors.textMuted} />
+            <Text style={styles.scanText}>Scan</Text>
+          </Pressable>
+        )}
       </View>
       <ScrollView
         horizontal
@@ -54,6 +74,7 @@ export function AlertSection({ alerts, onAcknowledge }: Props) {
       >
         {alerts.map(alert => {
           const color = SEVERITY_COLOR[alert.severity];
+          const canDismiss = (alert.dbIds?.length ?? 0) > 0 && onAcknowledge != null;
           return (
             <View
               key={alert.id}
@@ -71,14 +92,18 @@ export function AlertSection({ alerts, onAcknowledge }: Props) {
                   {alert.title}
                 </Text>
               </Pressable>
-              {alert.dbId != null && onAcknowledge && (
-                <Pressable
-                  style={styles.chipDismiss}
-                  onPress={() => onAcknowledge(alert.dbId!)}
-                  hitSlop={6}
-                >
-                  <Feather name="x" size={11} color={color} />
-                </Pressable>
+              {canDismiss && (
+                <>
+                  <View style={[styles.chipSeparator, { backgroundColor: `${color}44` }]} />
+                  <Pressable
+                    style={styles.chipDismiss}
+                    onPress={() => onAcknowledge(alert.dbIds!)}
+                    hitSlop={8}
+                    accessibilityLabel="Dismiss alert"
+                  >
+                    <Feather name="x" size={12} color={colors.textSecondary} />
+                  </Pressable>
+                </>
               )}
             </View>
           );
@@ -124,6 +149,23 @@ const styles = StyleSheet.create({
     paddingHorizontal: 4,
     gap: 8,
   },
+  scanBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 'auto',
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.separator,
+    backgroundColor: colors.surfaceElevated,
+  },
+  scanText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 11,
+    color: colors.textMuted,
+  },
   chip: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -138,10 +180,15 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
+  chipSeparator: {
+    width: 1,
+    alignSelf: 'stretch',
+  },
   chipDismiss: {
-    paddingRight: 10,
-    paddingLeft: 2,
+    paddingHorizontal: 10,
     paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   chipText: {
     fontFamily: 'Inter_600SemiBold',

@@ -299,6 +299,8 @@ function collapseAlerts(alerts: DashboardAlert[]): DashboardAlert[] {
   if (drawdowns.length <= 1) return alerts;
   const worstSeverity = drawdowns.some(a => a.severity === 'critical') ? 'critical' : 'warning';
   const symbols = truncateSymbols(drawdowns.map(a => a.symbol).filter(Boolean) as string[]);
+  // Collect all dbIds from the collapsed alerts so the summary can still be acknowledged.
+  const collectedDbIds = drawdowns.flatMap(a => a.dbIds ?? []);
   return [
     ...others,
     {
@@ -306,6 +308,7 @@ function collapseAlerts(alerts: DashboardAlert[]): DashboardAlert[] {
       type: 'drawdown',
       severity: worstSeverity,
       title: `${drawdowns.length} positions down · ${symbols}`,
+      dbIds: collectedDbIds.length > 0 ? collectedDbIds : undefined,
       onPress: () => router.push('/(tabs)/accounts'),
     },
   ];
@@ -444,10 +447,14 @@ export default function HomeScreen() {
     onSuccess: () => refetchAlerts(),
   });
 
-  const { mutate: acknowledgeAlert } = useMutation({
+  const { mutate: acknowledgeAlertById } = useMutation({
     mutationFn: (id: number) => apiPatch<ApiAlert>(`/alerts/${id}`, { status: 'acknowledged' }),
     onSuccess: () => refetchAlerts(),
   });
+
+  const acknowledgeAlerts = useCallback((dbIds: number[]) => {
+    dbIds.forEach(id => acknowledgeAlertById(id));
+  }, [acknowledgeAlertById]);
 
   // Explicit refresh: refresh portfolio data, then generate alerts.
   // Only wired to user-triggered actions (refresh button, pull-to-refresh).
@@ -469,7 +476,7 @@ export default function HomeScreen() {
     () =>
       (apiAlerts ?? []).map(a => ({
         id: String(a.id),
-        dbId: a.id,
+        dbIds: [a.id],
         type: alertTypeMap[a.alertType] ?? 'manual',
         severity: a.severity as DashboardAlert['severity'],
         title: a.title,
@@ -484,7 +491,8 @@ export default function HomeScreen() {
   );
 
   // Use API alerts when available; fall back to computed until first generate runs.
-  const displayAlerts = mappedApiAlerts.length > 0 ? mappedApiAlerts : alerts;
+  const alertsAreFallback = mappedApiAlerts.length === 0;
+  const displayAlerts = alertsAreFallback ? alerts : mappedApiAlerts;
   const collapsedAlerts = useMemo(() => collapseAlerts(displayAlerts), [displayAlerts]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
@@ -556,7 +564,9 @@ export default function HomeScreen() {
         {/* 6. Alerts summary */}
         <AlertSection
           alerts={collapsedAlerts}
-          onAcknowledge={acknowledgeAlert}
+          onAcknowledge={alertsAreFallback ? undefined : acknowledgeAlerts}
+          isFallback={alertsAreFallback}
+          onScan={generateAlerts}
         />
 
         {/* ── Market strip (retained from previous screen) ────────────────── */}

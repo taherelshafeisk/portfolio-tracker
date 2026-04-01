@@ -12,4 +12,7 @@ export interface UpdateAccountBody {
   broker?: string;
   accountType?: UpdateAccountBodyAccountType;
   currentBalance?: number;
+  sleeveKey?: string | null;
+  maxLeverageRatio?: number | null;
+  ipsVersion?: string;
 }

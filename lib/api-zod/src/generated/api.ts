@@ -26,6 +26,9 @@ export const ListAccountsResponseItem = zod.object({
   currency: zod.string(),
   initialBalance: zod.number(),
   currentBalance: zod.number(),
+  sleeveKey: zod.string().nullish(),
+  maxLeverageRatio: zod.number().nullish(),
+  ipsVersion: zod.string().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -57,6 +60,9 @@ export const GetAccountResponse = zod.object({
   currency: zod.string(),
   initialBalance: zod.number(),
   currentBalance: zod.number(),
+  sleeveKey: zod.string().nullish(),
+  maxLeverageRatio: zod.number().nullish(),
+  ipsVersion: zod.string().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -75,6 +81,9 @@ export const UpdateAccountBody = zod.object({
     .enum(["long_term", "swing", "day_trading", "savings"])
     .optional(),
   currentBalance: zod.number().optional(),
+  sleeveKey: zod.string().nullish(),
+  maxLeverageRatio: zod.number().nullish(),
+  ipsVersion: zod.string().optional(),
 });
 
 export const UpdateAccountResponse = zod.object({
@@ -85,6 +94,9 @@ export const UpdateAccountResponse = zod.object({
   currency: zod.string(),
   initialBalance: zod.number(),
   currentBalance: zod.number(),
+  sleeveKey: zod.string().nullish(),
+  maxLeverageRatio: zod.number().nullish(),
+  ipsVersion: zod.string().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -130,6 +142,18 @@ export const ListAccountPositionsResponseItem = zod.object({
     .optional(),
   sector: zod.string().optional(),
   notes: zod.string().optional(),
+  positionBucket: zod
+    .enum(["core", "swing", "spec", "def", "anchor", "inc", "cut"])
+    .nullish(),
+  ipsAction: zod
+    .enum(["hold", "add", "trim", "monitor", "cut", "exit"])
+    .nullish(),
+  stopPrice: zod.number().nullish(),
+  addZoneLow: zod.number().nullish(),
+  addZoneHigh: zod.number().nullish(),
+  cutListAddedAt: zod.date().nullish(),
+  policyNote: zod.string().nullish(),
+  ipsVersion: zod.string().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -160,6 +184,18 @@ export const CreatePositionBody = zod.object({
     .optional(),
   sector: zod.string().optional(),
   notes: zod.string().optional(),
+  positionBucket: zod
+    .enum(["core", "swing", "spec", "def", "anchor", "inc", "cut"])
+    .optional(),
+  ipsAction: zod
+    .enum(["hold", "add", "trim", "monitor", "cut", "exit"])
+    .optional(),
+  stopPrice: zod.number().optional(),
+  addZoneLow: zod.number().optional(),
+  addZoneHigh: zod.number().optional(),
+  cutListAddedAt: zod.date().optional(),
+  policyNote: zod.string().optional(),
+  ipsVersion: zod.string().optional(),
 });
 
 /**
@@ -186,6 +222,18 @@ export const UpdatePositionBody = zod.object({
     ])
     .optional(),
   notes: zod.string().optional(),
+  positionBucket: zod
+    .enum(["core", "swing", "spec", "def", "anchor", "inc", "cut"])
+    .optional(),
+  ipsAction: zod
+    .enum(["hold", "add", "trim", "monitor", "cut", "exit"])
+    .optional(),
+  stopPrice: zod.number().nullish(),
+  addZoneLow: zod.number().nullish(),
+  addZoneHigh: zod.number().nullish(),
+  cutListAddedAt: zod.date().nullish(),
+  policyNote: zod.string().nullish(),
+  ipsVersion: zod.string().optional(),
 });
 
 export const UpdatePositionResponse = zod.object({
@@ -215,6 +263,18 @@ export const UpdatePositionResponse = zod.object({
     .optional(),
   sector: zod.string().optional(),
   notes: zod.string().optional(),
+  positionBucket: zod
+    .enum(["core", "swing", "spec", "def", "anchor", "inc", "cut"])
+    .nullish(),
+  ipsAction: zod
+    .enum(["hold", "add", "trim", "monitor", "cut", "exit"])
+    .nullish(),
+  stopPrice: zod.number().nullish(),
+  addZoneLow: zod.number().nullish(),
+  addZoneHigh: zod.number().nullish(),
+  cutListAddedAt: zod.date().nullish(),
+  policyNote: zod.string().nullish(),
+  ipsVersion: zod.string().nullish(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
 });
@@ -660,6 +720,46 @@ export const ListAlertsResponseItem = zod.object({
   updatedAt: zod.date(),
 });
 export const ListAlertsResponse = zod.array(ListAlertsResponseItem);
+
+/**
+ * @summary Get portfolio-level IPS policy snapshot
+ */
+export const GetPortfolioPolicyResponse = zod.object({
+  id: zod.number(),
+  goldFloorPct: zod.number().nullish(),
+  goldTargetPct: zod.number().nullish(),
+  goldTargetDate: zod.date().nullish(),
+  monthlyContribution: zod.number().nullish(),
+  macroPosture: zod.string().nullish(),
+  ipsVersion: zod.string().nullish(),
+  ipsDate: zod.date().nullish(),
+  updatedAt: zod.date(),
+});
+
+/**
+ * @summary Upsert portfolio-level IPS policy fields
+ */
+export const UpdatePortfolioPolicyBody = zod.object({
+  goldFloorPct: zod.number().nullish(),
+  goldTargetPct: zod.number().nullish(),
+  goldTargetDate: zod.date().nullish(),
+  monthlyContribution: zod.number().nullish(),
+  macroPosture: zod.string().nullish(),
+  ipsVersion: zod.string().nullish(),
+  ipsDate: zod.date().nullish(),
+});
+
+export const UpdatePortfolioPolicyResponse = zod.object({
+  id: zod.number(),
+  goldFloorPct: zod.number().nullish(),
+  goldTargetPct: zod.number().nullish(),
+  goldTargetDate: zod.date().nullish(),
+  monthlyContribution: zod.number().nullish(),
+  macroPosture: zod.string().nullish(),
+  ipsVersion: zod.string().nullish(),
+  ipsDate: zod.date().nullish(),
+  updatedAt: zod.date(),
+});
 
 /**
  * @summary Acknowledge or resolve an alert

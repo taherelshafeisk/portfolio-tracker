@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { activitiesTable } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { activitiesTable, positionsTable } from "@workspace/db";
+import { eq, desc, and } from "drizzle-orm";
 import { validate } from "../middlewares/validate";
 import { CreateActivityBody, z } from "@workspace/api-zod/schemas";
 
@@ -46,9 +46,10 @@ router.get("/", async (req, res) => {
 router.post("/", validate(CreateActivityBodyHttp), async (req, res) => {
   try {
     const { accountId, symbol, activityType, quantity, price, totalAmount, notes, tradeDate } = req.body;
+    const upperSymbol = symbol ? symbol.toUpperCase() : null;
     const [activity] = await db.insert(activitiesTable).values({
       accountId,
-      symbol: symbol ? symbol.toUpperCase() : null,
+      symbol: upperSymbol,
       activityType,
       quantity: quantity ? quantity.toString() : null,
       price: price ? price.toString() : null,
@@ -56,6 +57,25 @@ router.post("/", validate(CreateActivityBodyHttp), async (req, res) => {
       notes: notes || null,
       tradeDate: new Date(tradeDate),
     }).returning();
+
+    // On a buy, update the matching position's quantity and avgCost using weighted average
+    if (activityType === "buy" && upperSymbol && quantity > 0 && price > 0) {
+      const [existing] = await db
+        .select()
+        .from(positionsTable)
+        .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.symbol, upperSymbol)));
+      if (existing) {
+        const oldQty = parseFloat(existing.quantity);
+        const oldAvg = parseFloat(existing.avgCost);
+        const newQty = oldQty + quantity;
+        const newAvg = (oldQty * oldAvg + quantity * price) / newQty;
+        await db
+          .update(positionsTable)
+          .set({ quantity: newQty.toString(), avgCost: newAvg.toFixed(6), updatedAt: new Date() })
+          .where(eq(positionsTable.id, existing.id));
+      }
+    }
+
     res.status(201).json(toResponse(activity));
   } catch (error) {
     res.status(500).json({ error: "Failed to create activity" });

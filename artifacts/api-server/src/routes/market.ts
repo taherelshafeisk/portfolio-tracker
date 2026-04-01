@@ -70,9 +70,25 @@ router.get("/quote/:symbol", async (req, res) => {
     if (!result) return res.status(404).json({ error: "Symbol not found" });
     const meta = result.meta;
     const regularMarketPrice = meta.regularMarketPrice || 0;
-    const previousClose = meta.previousClose || meta.chartPreviousClose || regularMarketPrice;
-    const change = regularMarketPrice - previousClose;
-    const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+    const marketState: string = meta?.marketState ?? "CLOSED";
+    const rawCloses: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+    const closes = rawCloses.filter((c): c is number => typeof c === "number" && c > 0);
+    let tail = closes.length;
+    while (tail > 1 && closes[tail - 1] === closes[tail - 2]) tail--;
+    const deduped = closes.slice(0, tail);
+    let previousClose = regularMarketPrice;
+    let change = 0;
+    let changePercent = 0;
+    if (marketState === "REGULAR" && deduped.length >= 1) {
+      previousClose = deduped[deduped.length - 1];
+      change = regularMarketPrice - previousClose;
+      changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+    } else if (deduped.length >= 2) {
+      previousClose = deduped[deduped.length - 2];
+      const lastClose = deduped[deduped.length - 1];
+      change = lastClose - previousClose;
+      changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+    }
     res.json({
       symbol: meta.symbol,
       name: meta.shortName || meta.longName || symbol,
@@ -130,9 +146,33 @@ router.get("/indices", async (_req, res) => {
         if (!result) return null;
         const meta = result.meta;
         const regularMarketPrice = meta.regularMarketPrice || 0;
-        const previousClose = meta.previousClose || meta.chartPreviousClose || regularMarketPrice;
-        const change = regularMarketPrice - previousClose;
-        const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+        const marketState: string = meta?.marketState ?? "CLOSED";
+
+        // Derive prior-session close from the OHLCV close array — same logic as
+        // positions.ts fetchLivePrice. meta.previousClose is null on the chart
+        // endpoint; meta.chartPreviousClose is the range-start close (5d ago).
+        const rawCloses: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+        const closes = rawCloses.filter((c): c is number => typeof c === "number" && c > 0);
+        // Yahoo duplicates the last close when market is closed — strip trailing dupes
+        let tail = closes.length;
+        while (tail > 1 && closes[tail - 1] === closes[tail - 2]) tail--;
+        const deduped = closes.slice(0, tail);
+
+        let previousClose = regularMarketPrice;
+        let change = 0;
+        let changePercent = 0;
+
+        if (marketState === "REGULAR" && deduped.length >= 1) {
+          previousClose = deduped[deduped.length - 1];
+          change = regularMarketPrice - previousClose;
+          changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+        } else if (deduped.length >= 2) {
+          previousClose = deduped[deduped.length - 2];
+          const lastClose = deduped[deduped.length - 1];
+          change = lastClose - previousClose;
+          changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+        }
+
         return {
           symbol: meta.symbol,
           name: meta.shortName || meta.longName || symbol,

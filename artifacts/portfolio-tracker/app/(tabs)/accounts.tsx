@@ -8,7 +8,7 @@ import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiPost, apiDelete, Account } from '@/context/PortfolioContext';
+import { usePortfolio, apiPost, apiPut, apiDelete, Account } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { AccountTypeBadge } from '@/components/ui/AccountTypeBadge';
 import { formatCurrency } from '@/components/ui/PnlBadge';
@@ -35,6 +35,8 @@ export default function AccountsScreen() {
     accountType: 'long_term',
     currency: 'USD',
     initialBalance: '',
+    sleeveKey: '',
+    maxLeverageRatio: '',
   });
 
   useEffect(() => {
@@ -66,15 +68,22 @@ export default function AccountsScreen() {
     if (!canSubmit || isSubmitting) return;
     setIsSubmitting(true);
     try {
-      await apiPost('/accounts', {
+      const created = await apiPost<Account>('/accounts', {
         name: form.name.trim(),
         broker: form.broker.trim(),
         accountType: form.accountType,
         currency: form.currency,
         initialBalance: parseFloat(form.initialBalance) || 0,
       });
+      // Persist IPS fields if provided (separate PUT since CreateAccountBody is minimal)
+      if (form.sleeveKey || form.maxLeverageRatio) {
+        await apiPut(`/accounts/${created.id}`, {
+          sleeveKey: form.sleeveKey || null,
+          maxLeverageRatio: form.maxLeverageRatio ? parseFloat(form.maxLeverageRatio) : null,
+        });
+      }
       setShowAdd(false);
-      setForm({ name: '', broker: '', accountType: 'long_term', currency: 'USD', initialBalance: '' });
+      setForm({ name: '', broker: '', accountType: 'long_term', currency: 'USD', initialBalance: '', sleeveKey: '', maxLeverageRatio: '' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await refreshAll();
     } catch (e) {
@@ -235,6 +244,25 @@ export default function AccountsScreen() {
               value={form.initialBalance}
               onChangeText={t => setForm(f => ({ ...f, initialBalance: t }))}
             />
+            <View style={{ flexDirection: 'row', gap: 8 }}>
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                placeholder="Sleeve key (A–H)"
+                placeholderTextColor={colors.textMuted}
+                autoCapitalize="characters"
+                maxLength={1}
+                value={form.sleeveKey}
+                onChangeText={t => setForm(f => ({ ...f, sleeveKey: t.toUpperCase() }))}
+              />
+              <TextInput
+                style={[styles.input, { flex: 1 }]}
+                placeholder="Max leverage (e.g. 1.5)"
+                placeholderTextColor={colors.textMuted}
+                keyboardType="decimal-pad"
+                value={form.maxLeverageRatio}
+                onChangeText={t => setForm(f => ({ ...f, maxLeverageRatio: t }))}
+              />
+            </View>
 
             <View style={styles.modalButtons}>
               <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>

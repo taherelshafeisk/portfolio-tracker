@@ -31,6 +31,9 @@ export interface Account {
   currency: string;
   initialBalance: number;
   currentBalance: number;
+  sleeveKey?: string | null;
+  maxLeverageRatio?: number | null;
+  ipsVersion?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -68,6 +71,9 @@ export interface UpdateAccountBody {
   broker?: string;
   accountType?: UpdateAccountBodyAccountType;
   currentBalance?: number;
+  sleeveKey?: string | null;
+  maxLeverageRatio?: number | null;
+  ipsVersion?: string;
 }
 
 export type PositionAssetType =
@@ -82,6 +88,33 @@ export const PositionAssetType = {
   reit: "reit",
   forex: "forex",
   index: "index",
+} as const;
+
+export type PositionPositionBucket =
+  | (typeof PositionPositionBucket)[keyof typeof PositionPositionBucket]
+  | null;
+
+export const PositionPositionBucket = {
+  core: "core",
+  swing: "swing",
+  spec: "spec",
+  def: "def",
+  anchor: "anchor",
+  inc: "inc",
+  cut: "cut",
+} as const;
+
+export type PositionIpsAction =
+  | (typeof PositionIpsAction)[keyof typeof PositionIpsAction]
+  | null;
+
+export const PositionIpsAction = {
+  hold: "hold",
+  add: "add",
+  trim: "trim",
+  monitor: "monitor",
+  cut: "cut",
+  exit: "exit",
 } as const;
 
 export interface Position {
@@ -100,6 +133,14 @@ export interface Position {
   assetType?: PositionAssetType;
   sector?: string;
   notes?: string;
+  positionBucket?: PositionPositionBucket;
+  ipsAction?: PositionIpsAction;
+  stopPrice?: number | null;
+  addZoneLow?: number | null;
+  addZoneHigh?: number | null;
+  cutListAddedAt?: string | null;
+  policyNote?: string | null;
+  ipsVersion?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -118,6 +159,31 @@ export const CreatePositionBodyAssetType = {
   index: "index",
 } as const;
 
+export type CreatePositionBodyPositionBucket =
+  (typeof CreatePositionBodyPositionBucket)[keyof typeof CreatePositionBodyPositionBucket];
+
+export const CreatePositionBodyPositionBucket = {
+  core: "core",
+  swing: "swing",
+  spec: "spec",
+  def: "def",
+  anchor: "anchor",
+  inc: "inc",
+  cut: "cut",
+} as const;
+
+export type CreatePositionBodyIpsAction =
+  (typeof CreatePositionBodyIpsAction)[keyof typeof CreatePositionBodyIpsAction];
+
+export const CreatePositionBodyIpsAction = {
+  hold: "hold",
+  add: "add",
+  trim: "trim",
+  monitor: "monitor",
+  cut: "cut",
+  exit: "exit",
+} as const;
+
 export interface CreatePositionBody {
   accountId: number;
   symbol: string;
@@ -127,6 +193,14 @@ export interface CreatePositionBody {
   assetType?: CreatePositionBodyAssetType;
   sector?: string;
   notes?: string;
+  positionBucket?: CreatePositionBodyPositionBucket;
+  ipsAction?: CreatePositionBodyIpsAction;
+  stopPrice?: number;
+  addZoneLow?: number;
+  addZoneHigh?: number;
+  cutListAddedAt?: string;
+  policyNote?: string;
+  ipsVersion?: string;
 }
 
 export type UpdatePositionBodyAssetType =
@@ -143,12 +217,45 @@ export const UpdatePositionBodyAssetType = {
   index: "index",
 } as const;
 
+export type UpdatePositionBodyPositionBucket =
+  (typeof UpdatePositionBodyPositionBucket)[keyof typeof UpdatePositionBodyPositionBucket];
+
+export const UpdatePositionBodyPositionBucket = {
+  core: "core",
+  swing: "swing",
+  spec: "spec",
+  def: "def",
+  anchor: "anchor",
+  inc: "inc",
+  cut: "cut",
+} as const;
+
+export type UpdatePositionBodyIpsAction =
+  (typeof UpdatePositionBodyIpsAction)[keyof typeof UpdatePositionBodyIpsAction];
+
+export const UpdatePositionBodyIpsAction = {
+  hold: "hold",
+  add: "add",
+  trim: "trim",
+  monitor: "monitor",
+  cut: "cut",
+  exit: "exit",
+} as const;
+
 export interface UpdatePositionBody {
   quantity?: number;
   avgCost?: number;
   currentPrice?: number;
   assetType?: UpdatePositionBodyAssetType;
   notes?: string;
+  positionBucket?: UpdatePositionBodyPositionBucket;
+  ipsAction?: UpdatePositionBodyIpsAction;
+  stopPrice?: number | null;
+  addZoneLow?: number | null;
+  addZoneHigh?: number | null;
+  cutListAddedAt?: string | null;
+  policyNote?: string | null;
+  ipsVersion?: string;
 }
 
 export type TradeActivityActivityType =
@@ -441,6 +548,28 @@ export const UpdateAlertBodyStatus = {
 
 export interface UpdateAlertBody {
   status: UpdateAlertBodyStatus;
+}
+
+export interface PortfolioPolicy {
+  id: number;
+  goldFloorPct?: number | null;
+  goldTargetPct?: number | null;
+  goldTargetDate?: string | null;
+  monthlyContribution?: number | null;
+  macroPosture?: string | null;
+  ipsVersion?: string | null;
+  ipsDate?: string | null;
+  updatedAt: string;
+}
+
+export interface UpdatePortfolioPolicyBody {
+  goldFloorPct?: number | null;
+  goldTargetPct?: number | null;
+  goldTargetDate?: string | null;
+  monthlyContribution?: number | null;
+  macroPosture?: string | null;
+  ipsVersion?: string | null;
+  ipsDate?: string | null;
 }
 
 export type ListActivitiesParams = {

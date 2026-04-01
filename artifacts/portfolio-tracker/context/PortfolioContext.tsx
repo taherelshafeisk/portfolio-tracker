@@ -67,6 +67,9 @@ export interface Account {
   currency: string;
   initialBalance: number;
   currentBalance: number;
+  sleeveKey?: string | null;
+  maxLeverageRatio?: number | null;
+  ipsVersion?: string | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -87,6 +90,14 @@ export interface Position {
   assetType?: string;
   sector?: string;
   notes?: string;
+  positionBucket?: string | null;
+  ipsAction?: string | null;
+  stopPrice?: number | null;
+  addZoneLow?: number | null;
+  addZoneHigh?: number | null;
+  cutListAddedAt?: string | null;
+  policyNote?: string | null;
+  ipsVersion?: string | null;
   createdAt: string;
   updatedAt: string;
 }

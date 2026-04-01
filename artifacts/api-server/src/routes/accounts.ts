@@ -8,20 +8,27 @@ import { CreateAccountBody, UpdateAccountBody } from "@workspace/api-zod/schemas
 
 const router: IRouter = Router();
 
+function toAccountResponse(a: typeof accountsTable.$inferSelect) {
+  return {
+    id: a.id,
+    name: a.name,
+    broker: a.broker,
+    accountType: a.accountType,
+    currency: a.currency,
+    initialBalance: parseFloat(a.initialBalance),
+    currentBalance: parseFloat(a.currentBalance),
+    sleeveKey: a.sleeveKey ?? null,
+    maxLeverageRatio: a.maxLeverageRatio != null ? parseFloat(a.maxLeverageRatio) : null,
+    ipsVersion: a.ipsVersion ?? null,
+    createdAt: a.createdAt.toISOString(),
+    updatedAt: a.updatedAt.toISOString(),
+  };
+}
+
 router.get("/", async (_req, res) => {
   try {
     const accounts = await db.select().from(accountsTable).orderBy(accountsTable.createdAt);
-    const result = accounts.map(a => ({
-      id: a.id,
-      name: a.name,
-      broker: a.broker,
-      accountType: a.accountType,
-      currency: a.currency,
-      initialBalance: parseFloat(a.initialBalance),
-      currentBalance: parseFloat(a.currentBalance),
-      createdAt: a.createdAt.toISOString(),
-      updatedAt: a.updatedAt.toISOString(),
-    }));
+    const result = accounts.map(toAccountResponse);
     res.json(result);
   } catch (error) {
     console.error("[accounts GET /] Error:", error);
@@ -40,17 +47,7 @@ router.post("/", validate(CreateAccountBody), async (req, res) => {
       initialBalance: initialBalance.toString(),
       currentBalance: initialBalance.toString(),
     }).returning();
-    res.status(201).json({
-      id: account.id,
-      name: account.name,
-      broker: account.broker,
-      accountType: account.accountType,
-      currency: account.currency,
-      initialBalance: parseFloat(account.initialBalance),
-      currentBalance: parseFloat(account.currentBalance),
-      createdAt: account.createdAt.toISOString(),
-      updatedAt: account.updatedAt.toISOString(),
-    });
+    res.status(201).json(toAccountResponse(account));
   } catch (error) {
     res.status(500).json({ error: "Failed to create account" });
   }
@@ -61,17 +58,7 @@ router.get("/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     const [account] = await db.select().from(accountsTable).where(eq(accountsTable.id, id));
     if (!account) return res.status(404).json({ error: "Account not found" });
-    res.json({
-      id: account.id,
-      name: account.name,
-      broker: account.broker,
-      accountType: account.accountType,
-      currency: account.currency,
-      initialBalance: parseFloat(account.initialBalance),
-      currentBalance: parseFloat(account.currentBalance),
-      createdAt: account.createdAt.toISOString(),
-      updatedAt: account.updatedAt.toISOString(),
-    });
+    res.json(toAccountResponse(account));
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch account" });
   }
@@ -80,25 +67,18 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", validate(UpdateAccountBody), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { name, broker, accountType, currentBalance } = req.body;
+    const { name, broker, accountType, currentBalance, sleeveKey, maxLeverageRatio, ipsVersion } = req.body;
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updates.name = name;
     if (broker !== undefined) updates.broker = broker;
     if (accountType !== undefined) updates.accountType = accountType;
     if (currentBalance !== undefined) updates.currentBalance = currentBalance.toString();
+    if (sleeveKey !== undefined) updates.sleeveKey = sleeveKey || null;
+    if (maxLeverageRatio !== undefined) updates.maxLeverageRatio = maxLeverageRatio != null ? maxLeverageRatio.toString() : null;
+    if (ipsVersion !== undefined) updates.ipsVersion = ipsVersion || null;
     const [account] = await db.update(accountsTable).set(updates).where(eq(accountsTable.id, id)).returning();
     if (!account) return res.status(404).json({ error: "Account not found" });
-    res.json({
-      id: account.id,
-      name: account.name,
-      broker: account.broker,
-      accountType: account.accountType,
-      currency: account.currency,
-      initialBalance: parseFloat(account.initialBalance),
-      currentBalance: parseFloat(account.currentBalance),
-      createdAt: account.createdAt.toISOString(),
-      updatedAt: account.updatedAt.toISOString(),
-    });
+    res.json(toAccountResponse(account));
   } catch (error) {
     res.status(500).json({ error: "Failed to update account" });
   }
@@ -167,6 +147,14 @@ router.get("/:id/positions", async (req, res) => {
         assetType: p.assetType ?? undefined,
         sector: p.sector ?? undefined,
         notes: p.notes ?? undefined,
+        positionBucket: p.positionBucket ?? null,
+        ipsAction: p.ipsAction ?? null,
+        stopPrice: p.stopPrice != null ? parseFloat(p.stopPrice) : null,
+        addZoneLow: p.addZoneLow != null ? parseFloat(p.addZoneLow) : null,
+        addZoneHigh: p.addZoneHigh != null ? parseFloat(p.addZoneHigh) : null,
+        cutListAddedAt: p.cutListAddedAt ? p.cutListAddedAt.toISOString() : null,
+        policyNote: p.policyNote ?? null,
+        ipsVersion: p.ipsVersion ?? null,
         createdAt: p.createdAt.toISOString(),
         updatedAt: p.updatedAt.toISOString(),
       };

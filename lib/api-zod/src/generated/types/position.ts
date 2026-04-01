@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { PositionAssetType } from "./positionAssetType";
+import type { PositionIpsAction } from "./positionIpsAction";
+import type { PositionPositionBucket } from "./positionPositionBucket";
 
 export interface Position {
   id: number;
@@ -23,6 +25,14 @@ export interface Position {
   assetType?: PositionAssetType;
   sector?: string;
   notes?: string;
+  positionBucket?: PositionPositionBucket;
+  ipsAction?: PositionIpsAction;
+  stopPrice?: number | null;
+  addZoneLow?: number | null;
+  addZoneHigh?: number | null;
+  cutListAddedAt?: Date | null;
+  policyNote?: string | null;
+  ipsVersion?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

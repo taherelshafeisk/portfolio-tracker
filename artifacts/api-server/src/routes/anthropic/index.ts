@@ -278,7 +278,7 @@ If there is a cash, USD, or money market row, extract its value as cashBalance a
       "activityType": "buy" or "sell" or "dividend" or "deposit" or "withdrawal",
       "symbol": "stock ticker symbol (null for cash transactions)",
       "quantity": number of shares (null for cash transactions),
-      "price": price per share as a number (null for cash transactions),
+      "price": price per share as a number (null for cash transactions). If price is not visible but quantity and totalAmount are both present and positive, derive price = totalAmount / quantity.
       "totalAmount": total transaction amount as a number,
       "tradeDate": "date in YYYY-MM-DD format",
       "notes": "any additional transaction notes"

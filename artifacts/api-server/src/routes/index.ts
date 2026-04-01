@@ -8,6 +8,7 @@ import portfolioRouter from "./portfolio";
 import anthropicRouter from "./anthropic/index";
 import orderSuggestionsRouter from "./orderSuggestions";
 import alertsRouter from "./alerts";
+import portfolioPolicyRouter from "./portfolioPolicy";
 
 const router: IRouter = Router();
 
@@ -20,5 +21,6 @@ router.use("/portfolio", portfolioRouter);
 router.use("/anthropic", anthropicRouter);
 router.use("/order-suggestions", orderSuggestionsRouter);
 router.use("/alerts", alertsRouter);
+router.use("/portfolio-policy", portfolioPolicyRouter);
 
 export default router;

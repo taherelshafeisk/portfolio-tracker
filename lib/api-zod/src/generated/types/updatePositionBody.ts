@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { UpdatePositionBodyAssetType } from "./updatePositionBodyAssetType";
+import type { UpdatePositionBodyIpsAction } from "./updatePositionBodyIpsAction";
+import type { UpdatePositionBodyPositionBucket } from "./updatePositionBodyPositionBucket";
 
 export interface UpdatePositionBody {
   quantity?: number;
@@ -13,4 +15,12 @@ export interface UpdatePositionBody {
   currentPrice?: number;
   assetType?: UpdatePositionBodyAssetType;
   notes?: string;
+  positionBucket?: UpdatePositionBodyPositionBucket;
+  ipsAction?: UpdatePositionBodyIpsAction;
+  stopPrice?: number | null;
+  addZoneLow?: number | null;
+  addZoneHigh?: number | null;
+  cutListAddedAt?: Date | null;
+  policyNote?: string | null;
+  ipsVersion?: string;
 }

@@ -34,6 +34,25 @@ import {
   defaultStrategyProfile,
 } from '@workspace/portfolio-policy';
 
+const POSITION_BUCKETS = [
+  { key: 'core',   label: 'Core'   },
+  { key: 'swing',  label: 'Swing'  },
+  { key: 'spec',   label: 'Spec'   },
+  { key: 'def',    label: 'Def'    },
+  { key: 'anchor', label: 'Anchor' },
+  { key: 'inc',    label: 'Inc'    },
+  { key: 'cut',    label: 'Cut'    },
+];
+
+const IPS_ACTIONS = [
+  { key: 'hold',    label: 'Hold'    },
+  { key: 'add',     label: 'Add'     },
+  { key: 'trim',    label: 'Trim'    },
+  { key: 'monitor', label: 'Monitor' },
+  { key: 'cut',     label: 'Cut'     },
+  { key: 'exit',    label: 'Exit'    },
+];
+
 const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
   ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
     ? `http://${process.env.EXPO_PUBLIC_DOMAIN}/api`
@@ -145,13 +164,13 @@ export default function AccountDetailScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAddPos, setShowAddPos] = useState(false);
-  const [form, setForm] = useState({ symbol: '', name: '', quantity: '', avgCost: '', assetType: '', sector: '', notes: '' });
+  const [form, setForm] = useState({ symbol: '', name: '', quantity: '', avgCost: '', assetType: '', sector: '', notes: '', positionBucket: '', ipsAction: '', stopPrice: '', addZoneLow: '', addZoneHigh: '', policyNote: '' });
 
   // 3-dot context menu
   const [menuPos, setMenuPos] = useState<Position | null>(null);
   // Edit position modal
   const [editPos, setEditPos] = useState<Position | null>(null);
-  const [editForm, setEditForm] = useState({ quantity: '', avgCost: '', assetType: '', notes: '' });
+  const [editForm, setEditForm] = useState({ quantity: '', avgCost: '', assetType: '', notes: '', positionBucket: '', ipsAction: '', stopPrice: '', addZoneLow: '', addZoneHigh: '', policyNote: '' });
   const [isEditSubmitting, setIsEditSubmitting] = useState(false);
 
   // Symbol search autocomplete
@@ -349,9 +368,15 @@ export default function AccountDetailScreen() {
         assetType: form.assetType || undefined,
         sector: form.sector || undefined,
         notes: form.notes || undefined,
+        positionBucket: form.positionBucket || undefined,
+        ipsAction: form.ipsAction || undefined,
+        stopPrice: form.stopPrice ? parseFloat(form.stopPrice) : undefined,
+        addZoneLow: form.addZoneLow ? parseFloat(form.addZoneLow) : undefined,
+        addZoneHigh: form.addZoneHigh ? parseFloat(form.addZoneHigh) : undefined,
+        policyNote: form.policyNote || undefined,
       });
       setShowAddPos(false);
-      setForm({ symbol: '', name: '', quantity: '', avgCost: '', assetType: '', sector: '', notes: '' });
+      setForm({ symbol: '', name: '', quantity: '', avgCost: '', assetType: '', sector: '', notes: '', positionBucket: '', ipsAction: '', stopPrice: '', addZoneLow: '', addZoneHigh: '', policyNote: '' });
       setSymbolResults([]);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await refreshAll();
@@ -364,7 +389,18 @@ export default function AccountDetailScreen() {
 
   const openEditPos = (pos: Position) => {
     setMenuPos(null);
-    setEditForm({ quantity: String(pos.quantity), avgCost: String(pos.avgCost), assetType: pos.assetType ?? '', notes: pos.notes ?? '' });
+    setEditForm({
+      quantity: String(pos.quantity),
+      avgCost: String(pos.avgCost),
+      assetType: pos.assetType ?? '',
+      notes: pos.notes ?? '',
+      positionBucket: pos.positionBucket ?? '',
+      ipsAction: pos.ipsAction ?? '',
+      stopPrice: pos.stopPrice != null ? String(pos.stopPrice) : '',
+      addZoneLow: pos.addZoneLow != null ? String(pos.addZoneLow) : '',
+      addZoneHigh: pos.addZoneHigh != null ? String(pos.addZoneHigh) : '',
+      policyNote: pos.policyNote ?? '',
+    });
     setEditPos(pos);
   };
 
@@ -381,6 +417,12 @@ export default function AccountDetailScreen() {
         avgCost: parseFloat(editForm.avgCost),
         assetType: editForm.assetType || undefined,
         notes: editForm.notes || undefined,
+        positionBucket: editForm.positionBucket || null,
+        ipsAction: editForm.ipsAction || null,
+        stopPrice: editForm.stopPrice ? parseFloat(editForm.stopPrice) : null,
+        addZoneLow: editForm.addZoneLow ? parseFloat(editForm.addZoneLow) : null,
+        addZoneHigh: editForm.addZoneHigh ? parseFloat(editForm.addZoneHigh) : null,
+        policyNote: editForm.policyNote || null,
       });
       setEditPos(null);
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
@@ -913,7 +955,7 @@ export default function AccountDetailScreen() {
                     onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: pos.symbol, avgCost: String(pos.avgCost), accountId: String(accountId) } })}
                     style={styles.posLeft}
                   >
-                    <StockLogo symbol={pos.symbol} size={36} />
+                    <StockLogo symbol={pos.symbol} size={36} assetType={pos.assetType} />
                     <View style={{ flex: 1 }}>
                       <View style={styles.posSymbolRow}>
                         <Text style={styles.posSymbol}>{pos.symbol}</Text>
@@ -1075,6 +1117,31 @@ export default function AccountDetailScreen() {
 
             <TextInput style={styles.input} placeholder="Sector (optional)" placeholderTextColor={colors.textMuted} value={form.sector} onChangeText={t => setForm(f => ({ ...f, sector: t }))} />
             <TextInput style={styles.input} placeholder="Notes (optional)" placeholderTextColor={colors.textMuted} value={form.notes} onChangeText={t => setForm(f => ({ ...f, notes: t }))} />
+
+            <Text style={styles.pickerLabel}>IPS Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.assetPickerRow} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {POSITION_BUCKETS.map(b => (
+                <Pressable key={b.key} style={[styles.assetPickerChip, form.positionBucket === b.key && { borderColor: colors.primary, backgroundColor: colors.primary + '22' }]} onPress={() => setForm(f => ({ ...f, positionBucket: f.positionBucket === b.key ? '' : b.key }))}>
+                  <Text style={[styles.assetPickerLabel, form.positionBucket === b.key && { color: colors.primary }]}>{b.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.pickerLabel}>IPS Action</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.assetPickerRow} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {IPS_ACTIONS.map(a => (
+                <Pressable key={a.key} style={[styles.assetPickerChip, form.ipsAction === a.key && { borderColor: colors.primary, backgroundColor: colors.primary + '22' }]} onPress={() => setForm(f => ({ ...f, ipsAction: f.ipsAction === a.key ? '' : a.key }))}>
+                  <Text style={[styles.assetPickerLabel, form.ipsAction === a.key && { color: colors.primary }]}>{a.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <View style={styles.inputRow}>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Stop price ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.stopPrice} onChangeText={t => setForm(f => ({ ...f, stopPrice: t }))} />
+              <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Add zone low ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.addZoneLow} onChangeText={t => setForm(f => ({ ...f, addZoneLow: t }))} />
+              <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Add zone high ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={form.addZoneHigh} onChangeText={t => setForm(f => ({ ...f, addZoneHigh: t }))} />
+            </View>
+            <TextInput style={styles.input} placeholder="Policy note (optional)" placeholderTextColor={colors.textMuted} value={form.policyNote} onChangeText={t => setForm(f => ({ ...f, policyNote: t }))} />
 
             <View style={styles.modalButtons}>
               <Pressable style={styles.cancelBtn} onPress={() => { setShowAddPos(false); setSymbolResults([]); }}>
@@ -1257,6 +1324,32 @@ export default function AccountDetailScreen() {
               ))}
             </ScrollView>
             <TextInput style={styles.input} placeholder="Notes (optional)" placeholderTextColor={colors.textMuted} value={editForm.notes} onChangeText={t => setEditForm(f => ({ ...f, notes: t }))} />
+
+            <Text style={styles.pickerLabel}>IPS Category</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.assetPickerRow} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {POSITION_BUCKETS.map(b => (
+                <Pressable key={b.key} style={[styles.assetPickerChip, editForm.positionBucket === b.key && { borderColor: colors.primary, backgroundColor: colors.primary + '22' }]} onPress={() => setEditForm(f => ({ ...f, positionBucket: f.positionBucket === b.key ? '' : b.key }))}>
+                  <Text style={[styles.assetPickerLabel, editForm.positionBucket === b.key && { color: colors.primary }]}>{b.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <Text style={styles.pickerLabel}>IPS Action</Text>
+            <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.assetPickerRow} contentContainerStyle={{ gap: 8, paddingVertical: 4 }}>
+              {IPS_ACTIONS.map(a => (
+                <Pressable key={a.key} style={[styles.assetPickerChip, editForm.ipsAction === a.key && { borderColor: colors.primary, backgroundColor: colors.primary + '22' }]} onPress={() => setEditForm(f => ({ ...f, ipsAction: f.ipsAction === a.key ? '' : a.key }))}>
+                  <Text style={[styles.assetPickerLabel, editForm.ipsAction === a.key && { color: colors.primary }]}>{a.label}</Text>
+                </Pressable>
+              ))}
+            </ScrollView>
+
+            <View style={styles.inputRow}>
+              <TextInput style={[styles.input, { flex: 1 }]} placeholder="Stop price ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={editForm.stopPrice} onChangeText={t => setEditForm(f => ({ ...f, stopPrice: t }))} />
+              <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Add zone low ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={editForm.addZoneLow} onChangeText={t => setEditForm(f => ({ ...f, addZoneLow: t }))} />
+              <TextInput style={[styles.input, { flex: 1, marginLeft: 8 }]} placeholder="Add zone high ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={editForm.addZoneHigh} onChangeText={t => setEditForm(f => ({ ...f, addZoneHigh: t }))} />
+            </View>
+            <TextInput style={styles.input} placeholder="Policy note (optional)" placeholderTextColor={colors.textMuted} value={editForm.policyNote} onChangeText={t => setEditForm(f => ({ ...f, policyNote: t }))} />
+
             <View style={styles.modalButtons}>
               <Pressable style={styles.cancelBtn} onPress={() => setEditPos(null)}>
                 <Text style={styles.cancelText}>Cancel</Text>

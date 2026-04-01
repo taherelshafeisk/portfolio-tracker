@@ -38,6 +38,7 @@ import type {
   ListOrderSuggestionsParams,
   MarketQuote,
   OrderSuggestion,
+  PortfolioPolicy,
   PortfolioSummary,
   Position,
   ScreenStocksParams,
@@ -47,6 +48,7 @@ import type {
   UpdateAccountBody,
   UpdateAlertBody,
   UpdateOrderSuggestionBody,
+  UpdatePortfolioPolicyBody,
   UpdatePositionBody,
 } from "./api.schemas";
 
@@ -2579,6 +2581,168 @@ export function useListAlerts<
 
   return { ...query, queryKey: queryOptions.queryKey };
 }
+
+/**
+ * @summary Get portfolio-level IPS policy snapshot
+ */
+export const getGetPortfolioPolicyUrl = () => {
+  return `/api/portfolio-policy`;
+};
+
+export const getPortfolioPolicy = async (
+  options?: RequestInit,
+): Promise<PortfolioPolicy> => {
+  return customFetch<PortfolioPolicy>(getGetPortfolioPolicyUrl(), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetPortfolioPolicyQueryKey = () => {
+  return [`/api/portfolio-policy`] as const;
+};
+
+export const getGetPortfolioPolicyQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPortfolioPolicy>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPortfolioPolicy>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetPortfolioPolicyQueryKey();
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPortfolioPolicy>>
+  > = ({ signal }) => getPortfolioPolicy({ signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPortfolioPolicy>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPortfolioPolicyQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPortfolioPolicy>>
+>;
+export type GetPortfolioPolicyQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Get portfolio-level IPS policy snapshot
+ */
+
+export function useGetPortfolioPolicy<
+  TData = Awaited<ReturnType<typeof getPortfolioPolicy>>,
+  TError = ErrorType<unknown>,
+>(options?: {
+  query?: UseQueryOptions<
+    Awaited<ReturnType<typeof getPortfolioPolicy>>,
+    TError,
+    TData
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPortfolioPolicyQueryOptions(options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Upsert portfolio-level IPS policy fields
+ */
+export const getUpdatePortfolioPolicyUrl = () => {
+  return `/api/portfolio-policy`;
+};
+
+export const updatePortfolioPolicy = async (
+  updatePortfolioPolicyBody: UpdatePortfolioPolicyBody,
+  options?: RequestInit,
+): Promise<PortfolioPolicy> => {
+  return customFetch<PortfolioPolicy>(getUpdatePortfolioPolicyUrl(), {
+    ...options,
+    method: "PUT",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(updatePortfolioPolicyBody),
+  });
+};
+
+export const getUpdatePortfolioPolicyMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePortfolioPolicy>>,
+    TError,
+    { data: BodyType<UpdatePortfolioPolicyBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof updatePortfolioPolicy>>,
+  TError,
+  { data: BodyType<UpdatePortfolioPolicyBody> },
+  TContext
+> => {
+  const mutationKey = ["updatePortfolioPolicy"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof updatePortfolioPolicy>>,
+    { data: BodyType<UpdatePortfolioPolicyBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return updatePortfolioPolicy(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type UpdatePortfolioPolicyMutationResult = NonNullable<
+  Awaited<ReturnType<typeof updatePortfolioPolicy>>
+>;
+export type UpdatePortfolioPolicyMutationBody =
+  BodyType<UpdatePortfolioPolicyBody>;
+export type UpdatePortfolioPolicyMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Upsert portfolio-level IPS policy fields
+ */
+export const useUpdatePortfolioPolicy = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof updatePortfolioPolicy>>,
+    TError,
+    { data: BodyType<UpdatePortfolioPolicyBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof updatePortfolioPolicy>>,
+  TError,
+  { data: BodyType<UpdatePortfolioPolicyBody> },
+  TContext
+> => {
+  return useMutation(getUpdatePortfolioPolicyMutationOptions(options));
+};
 
 /**
  * @summary Acknowledge or resolve an alert

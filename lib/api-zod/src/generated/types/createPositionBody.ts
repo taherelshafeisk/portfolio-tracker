@@ -6,6 +6,8 @@
  * OpenAPI spec version: 0.1.0
  */
 import type { CreatePositionBodyAssetType } from "./createPositionBodyAssetType";
+import type { CreatePositionBodyIpsAction } from "./createPositionBodyIpsAction";
+import type { CreatePositionBodyPositionBucket } from "./createPositionBodyPositionBucket";
 
 export interface CreatePositionBody {
   accountId: number;
@@ -16,4 +18,12 @@ export interface CreatePositionBody {
   assetType?: CreatePositionBodyAssetType;
   sector?: string;
   notes?: string;
+  positionBucket?: CreatePositionBodyPositionBucket;
+  ipsAction?: CreatePositionBodyIpsAction;
+  stopPrice?: number;
+  addZoneLow?: number;
+  addZoneHigh?: number;
+  cutListAddedAt?: Date;
+  policyNote?: string;
+  ipsVersion?: string;
 }

@@ -3,3 +3,4 @@
 // both Zod schema values and TypeScript interface types that share the same identifiers.
 // The types barrel is intentionally omitted here.
 export * from "./generated/api";
+export * from "./generated/types";

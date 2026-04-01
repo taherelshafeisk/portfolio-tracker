@@ -147,6 +147,14 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
     assetType: p.assetType ?? undefined,
     sector: p.sector ?? undefined,
     notes: p.notes ?? undefined,
+    positionBucket: p.positionBucket ?? null,
+    ipsAction: p.ipsAction ?? null,
+    stopPrice: p.stopPrice != null ? parseFloat(p.stopPrice) : null,
+    addZoneLow: p.addZoneLow != null ? parseFloat(p.addZoneLow) : null,
+    addZoneHigh: p.addZoneHigh != null ? parseFloat(p.addZoneHigh) : null,
+    cutListAddedAt: p.cutListAddedAt ? p.cutListAddedAt.toISOString() : null,
+    policyNote: p.policyNote ?? null,
+    ipsVersion: p.ipsVersion ?? null,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };
@@ -154,7 +162,9 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
 
 router.post("/", validate(CreatePositionBody), async (req, res) => {
   try {
-    const { accountId, symbol, name, quantity, avgCost, assetType, sector, notes } = req.body;
+    const { accountId, symbol, name, quantity, avgCost, assetType, sector, notes,
+            positionBucket, ipsAction, stopPrice, addZoneLow, addZoneHigh,
+            cutListAddedAt, policyNote, ipsVersion } = req.body;
     const upperSymbol = symbol.toUpperCase();
 
     const livePriceData = await fetchLivePrice(upperSymbol);
@@ -171,6 +181,14 @@ router.post("/", validate(CreatePositionBody), async (req, res) => {
       assetType: assetType || null,
       sector: sector || null,
       notes: notes || null,
+      positionBucket: positionBucket || null,
+      ipsAction: ipsAction || null,
+      stopPrice: stopPrice != null ? stopPrice.toString() : null,
+      addZoneLow: addZoneLow != null ? addZoneLow.toString() : null,
+      addZoneHigh: addZoneHigh != null ? addZoneHigh.toString() : null,
+      cutListAddedAt: cutListAddedAt ? new Date(cutListAddedAt) : null,
+      policyNote: policyNote || null,
+      ipsVersion: ipsVersion || null,
     }).returning();
 
     res.status(201).json(toPositionResponse(position, livePrice ?? undefined, livePriceData));
@@ -183,13 +201,23 @@ router.post("/", validate(CreatePositionBody), async (req, res) => {
 router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { quantity, avgCost, currentPrice, assetType, notes } = req.body;
+    const { quantity, avgCost, currentPrice, assetType, notes,
+            positionBucket, ipsAction, stopPrice, addZoneLow, addZoneHigh,
+            cutListAddedAt, policyNote, ipsVersion } = req.body;
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (quantity !== undefined) updates.quantity = quantity.toString();
     if (avgCost !== undefined) updates.avgCost = avgCost.toString();
     if (currentPrice !== undefined) updates.currentPrice = currentPrice.toString();
     if (assetType !== undefined) updates.assetType = assetType || null;
     if (notes !== undefined) updates.notes = notes;
+    if (positionBucket !== undefined) updates.positionBucket = positionBucket || null;
+    if (ipsAction !== undefined) updates.ipsAction = ipsAction || null;
+    if (stopPrice !== undefined) updates.stopPrice = stopPrice != null ? stopPrice.toString() : null;
+    if (addZoneLow !== undefined) updates.addZoneLow = addZoneLow != null ? addZoneLow.toString() : null;
+    if (addZoneHigh !== undefined) updates.addZoneHigh = addZoneHigh != null ? addZoneHigh.toString() : null;
+    if (cutListAddedAt !== undefined) updates.cutListAddedAt = cutListAddedAt ? new Date(cutListAddedAt) : null;
+    if (policyNote !== undefined) updates.policyNote = policyNote || null;
+    if (ipsVersion !== undefined) updates.ipsVersion = ipsVersion || null;
     const [position] = await db.update(positionsTable).set(updates).where(eq(positionsTable.id, id)).returning();
     if (!position) return res.status(404).json({ error: "Position not found" });
     res.json(toPositionResponse(position));

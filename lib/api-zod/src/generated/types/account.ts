@@ -15,6 +15,9 @@ export interface Account {
   currency: string;
   initialBalance: number;
   currentBalance: number;
+  sleeveKey?: string | null;
+  maxLeverageRatio?: number | null;
+  ipsVersion?: string | null;
   createdAt: Date;
   updatedAt: Date;
 }

@@ -10,6 +10,10 @@ export const accountsTable = pgTable("accounts", {
   currency: text("currency").notNull().default("USD"),
   initialBalance: numeric("initial_balance", { precision: 20, scale: 4 }).notNull().default("0"),
   currentBalance: numeric("current_balance", { precision: 20, scale: 4 }).notNull().default("0"),
+  // IPS / policy fields (all nullable — additive, no breaking change)
+  sleeveKey: text("sleeve_key"),                                            // 'A'|'B'|...|'H'
+  maxLeverageRatio: numeric("max_leverage_ratio", { precision: 10, scale: 4 }),
+  ipsVersion: text("ips_version"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

@@ -13,6 +13,15 @@ export const positionsTable = pgTable("positions", {
   assetType: text("asset_type"),
   sector: text("sector"),
   notes: text("notes"),
+  // IPS / policy fields (all nullable — additive, no breaking change)
+  positionBucket: text("position_bucket"),   // 'core'|'swing'|'spec'|'def'|'anchor'|'inc'|'cut'
+  ipsAction: text("ips_action"),             // 'hold'|'add'|'trim'|'monitor'|'cut'|'exit'
+  stopPrice: numeric("stop_price", { precision: 20, scale: 4 }),
+  addZoneLow: numeric("add_zone_low", { precision: 20, scale: 4 }),
+  addZoneHigh: numeric("add_zone_high", { precision: 20, scale: 4 }),
+  cutListAddedAt: timestamp("cut_list_added_at"),
+  policyNote: text("policy_note"),
+  ipsVersion: text("ips_version"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 });

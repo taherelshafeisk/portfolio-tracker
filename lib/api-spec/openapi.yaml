@@ -23,6 +23,8 @@ tags:
     description: Order suggestion operations
   - name: alerts
     description: Persisted risk alert operations
+  - name: portfolio-policy
+    description: Portfolio-level IPS policy snapshot
 paths:
   /healthz:
     get:
@@ -619,6 +621,36 @@ paths:
                 items:
                   $ref: "#/components/schemas/Alert"
 
+  /portfolio-policy:
+    get:
+      operationId: getPortfolioPolicy
+      tags: [portfolio-policy]
+      summary: Get portfolio-level IPS policy snapshot
+      responses:
+        "200":
+          description: Portfolio policy (empty object if not yet configured)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioPolicy"
+    put:
+      operationId: updatePortfolioPolicy
+      tags: [portfolio-policy]
+      summary: Upsert portfolio-level IPS policy fields
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdatePortfolioPolicyBody"
+      responses:
+        "200":
+          description: Updated portfolio policy
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PortfolioPolicy"
+
   /alerts/{id}:
     patch:
       operationId: updateAlert
@@ -686,6 +718,15 @@ components:
           type: number
         currentBalance:
           type: number
+        sleeveKey:
+          type: string
+          nullable: true
+        maxLeverageRatio:
+          type: number
+          nullable: true
+        ipsVersion:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -736,6 +777,14 @@ components:
           enum: [long_term, swing, day_trading, savings]
         currentBalance:
           type: number
+        sleeveKey:
+          type: string
+          nullable: true
+        maxLeverageRatio:
+          type: number
+          nullable: true
+        ipsVersion:
+          type: string
 
     Position:
       type: object
@@ -771,6 +820,33 @@ components:
           type: string
         notes:
           type: string
+        positionBucket:
+          type: string
+          enum: [core, swing, spec, def, anchor, inc, cut]
+          nullable: true
+        ipsAction:
+          type: string
+          enum: [hold, add, trim, monitor, cut, exit]
+          nullable: true
+        stopPrice:
+          type: number
+          nullable: true
+        addZoneLow:
+          type: number
+          nullable: true
+        addZoneHigh:
+          type: number
+          nullable: true
+        cutListAddedAt:
+          type: string
+          format: date-time
+          nullable: true
+        policyNote:
+          type: string
+          nullable: true
+        ipsVersion:
+          type: string
+          nullable: true
         createdAt:
           type: string
           format: date-time
@@ -813,6 +889,25 @@ components:
           type: string
         notes:
           type: string
+        positionBucket:
+          type: string
+          enum: [core, swing, spec, def, anchor, inc, cut]
+        ipsAction:
+          type: string
+          enum: [hold, add, trim, monitor, cut, exit]
+        stopPrice:
+          type: number
+        addZoneLow:
+          type: number
+        addZoneHigh:
+          type: number
+        cutListAddedAt:
+          type: string
+          format: date-time
+        policyNote:
+          type: string
+        ipsVersion:
+          type: string
       required:
         - accountId
         - symbol
@@ -833,6 +928,30 @@ components:
           type: string
           enum: [stock, etf, crypto, commodity, bond, reit, forex, index]
         notes:
+          type: string
+        positionBucket:
+          type: string
+          enum: [core, swing, spec, def, anchor, inc, cut]
+        ipsAction:
+          type: string
+          enum: [hold, add, trim, monitor, cut, exit]
+        stopPrice:
+          type: number
+          nullable: true
+        addZoneLow:
+          type: number
+          nullable: true
+        addZoneHigh:
+          type: number
+          nullable: true
+        cutListAddedAt:
+          type: string
+          format: date-time
+          nullable: true
+        policyNote:
+          type: string
+          nullable: true
+        ipsVersion:
           type: string
 
     TradeActivity:
@@ -1314,3 +1433,65 @@ components:
           enum: [acknowledged, resolved]
       required:
         - status
+
+    PortfolioPolicy:
+      type: object
+      properties:
+        id:
+          type: integer
+        goldFloorPct:
+          type: number
+          nullable: true
+        goldTargetPct:
+          type: number
+          nullable: true
+        goldTargetDate:
+          type: string
+          format: date
+          nullable: true
+        monthlyContribution:
+          type: number
+          nullable: true
+        macroPosture:
+          type: string
+          nullable: true
+        ipsVersion:
+          type: string
+          nullable: true
+        ipsDate:
+          type: string
+          format: date
+          nullable: true
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - updatedAt
+
+    UpdatePortfolioPolicyBody:
+      type: object
+      properties:
+        goldFloorPct:
+          type: number
+          nullable: true
+        goldTargetPct:
+          type: number
+          nullable: true
+        goldTargetDate:
+          type: string
+          format: date
+          nullable: true
+        monthlyContribution:
+          type: number
+          nullable: true
+        macroPosture:
+          type: string
+          nullable: true
+        ipsVersion:
+          type: string
+          nullable: true
+        ipsDate:
+          type: string
+          format: date
+          nullable: true

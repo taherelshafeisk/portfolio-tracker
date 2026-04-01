@@ -5,3 +5,4 @@ export * from "./conversations";
 export * from "./messages";
 export * from "./orderSuggestions";
 export * from "./alerts";
+export * from "./portfolioPolicy";

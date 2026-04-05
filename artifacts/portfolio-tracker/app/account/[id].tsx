@@ -11,21 +11,19 @@ import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
 import { ASSET_TYPES, getAssetType } from '@/constants/assetTypes';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { usePortfolio, apiGet, apiPost, apiPut, apiDelete, apiPatch, Position, Account } from '@/context/PortfolioContext';
+import { computeActions, type Action } from '@/lib/actions';
 import { Card } from '@/components/ui/Card';
 import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
 import { AccountTypeBadge } from '@/components/ui/AccountTypeBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StockLogo } from '@/components/ui/StockLogo';
-import { OrderSuggestion } from '@/components/home/OrderSuggestionsPreview';
-import { SuggestionCard } from '@/components/home/SuggestionCard';
 import {
   Bucket, BUCKET_ORDER, BUCKET_LABELS, BUCKET_COLORS,
-  effectiveBucket, loadAllBucketOverrides, saveBucketOverride, clearBucketOverride,
+  effectiveBucket, loadAllBucketOverrides, saveBucketOverride, clearBucketOverride, CRYPTO_SYMBOLS,
 } from '@/lib/buckets';
 import { AccountMode, defaultMode, loadAccountMode, saveAccountMode } from '@/lib/marketHours';
-import { ActionableNowSection, type ActionableItem } from '@/components/account/ActionableNowSection';
+import { ActionableNowSection } from '@/components/account/ActionableNowSection';
 import { IntradayPositionRow } from '@/components/account/IntradayPositionRow';
 import {
   evaluateConcentration,
@@ -59,16 +57,7 @@ const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
     : `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
   : '/api';
 
-// Must match the server-side sets in routes/positions.ts
-const CRYPTO_SYMBOLS = new Set([
-  'BTC', 'ETH', 'SOL', 'ADA', 'XRP', 'DOGE', 'AVAX', 'DOT', 'MATIC',
-  'LINK', 'UNI', 'ATOM', 'LTC', 'BCH', 'XLM', 'ALGO', 'VET', 'FIL',
-  'TRX', 'SHIB', 'BNB', 'NEAR', 'FTM', 'SAND', 'MANA', 'THETA', 'HBAR',
-  'ICP', 'ETC', 'FLOW', 'CHZ', 'APE', 'CRO', 'GRT', 'ENJ', 'BAT',
-  'ZEC', 'DASH', 'NEO', 'EOS', 'PEPE', 'WIF', 'BONK', 'ARB', 'OP',
-  'SUI', 'APT', 'INJ', 'TIA', 'SEI', 'RUNE', 'CRV', 'AAVE', 'COMP',
-  'MKR', 'SNX', 'YFI', 'SUSHI', 'ZRX',
-]);
+// CRYPTO_SYMBOLS imported from lib/buckets — shared source of truth
 const SYMBOL_OVERRIDES: Record<string, string> = {
   'GC=F': 'GOLD', 'XAUUSD=X': 'GOLD',
   'SI=F': 'SILVER', 'XAGUSD=X': 'SILVER',
@@ -114,7 +103,8 @@ export default function AccountDetailScreen() {
   const accountId = parseInt(id);
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
-  const { accounts, positions: allPositions, refreshAll } = usePortfolio();
+  const { accounts, positions: allPositions, summary, refreshAll } = usePortfolio();
+  const accSummary = summary?.accounts.find(a => a.id === accountId);
 
   const account = accounts.find(a => a.id === accountId);
   const positions = allPositions
@@ -245,44 +235,17 @@ export default function AccountDetailScreen() {
   const positionBuckets = useMemo<Record<number, Bucket>>(() => {
     const result: Record<number, Bucket> = {};
     for (const p of positions) {
-      result[p.id] = effectiveBucket(p.id, p.assetType, bucketOverrides);
+      result[p.id] = effectiveBucket(p.id, p.symbol, p.assetType, bucketOverrides);
     }
     return result;
   }, [positions, bucketOverrides]);
 
-  // Actionable Now items (scored, ranked, capped at 5)
-  const actionableItems = useMemo<ActionableItem[]>(() => {
-    const nav = totalValue;
-    const items: ActionableItem[] = [];
-    for (const p of positions) {
-      const reasons: ActionableItem['reasons'] = [];
-      let score = 0;
-      const ov = resolveOverride(defaultStrategyProfile, { accountId: p.accountId, ticker: p.symbol });
-
-      if (nav > 0) {
-        const conc = evaluateConcentration(p.marketValue / nav, defaultStrategyProfile.concentrationRule, ov);
-        if (conc === 'critical') { score += 15; reasons.push({ label: 'Concentration', isNegative: true }); }
-        else if (conc === 'warning') { score += 5; reasons.push({ label: 'Concentration', isNegative: true }); }
-      }
-
-      const dd = evaluateDrawdown(p.unrealizedPnlPct / 100, defaultStrategyProfile.drawdownRule, ov);
-      if (dd === 'critical') { score += 15; reasons.push({ label: `Drawdown ${p.unrealizedPnlPct.toFixed(1)}%`, isNegative: true }); }
-      else if (dd === 'warning') { score += 5; reasons.push({ label: `Drawdown ${p.unrealizedPnlPct.toFixed(1)}%`, isNegative: true }); }
-
-      const dayPct = Math.abs(p.dayChangePct ?? 0);
-      const dailyDollarNavPct = nav > 0 ? Math.abs((p.dayChange ?? 0) * p.quantity) / nav * 100 : 0;
-      score += dayPct * 0.5 + dailyDollarNavPct * 2;
-      if (dayPct >= 3) {
-        const dir = (p.dayChangePct ?? 0) >= 0 ? '↑' : '↓';
-        reasons.push({ label: `${dir}${dayPct.toFixed(1)}% today`, isNegative: (p.dayChangePct ?? 0) < 0 });
-      }
-
-      if (score >= 2 || reasons.length > 0) {
-        items.push({ id: `pos-${p.id}`, title: p.symbol, score, reasons: reasons.slice(0, 2), positionId: p.id });
-      }
-    }
-    return items.sort((a, b) => b.score - a.score).slice(0, 5);
-  }, [positions, totalValue, bucketOverrides]);
+  // Actionable Now: violations only from computeActions, filtered to this account
+  const actionableItems = useMemo<Action[]>(() => {
+    const navMap = new Map([[accountId, totalValue]]);
+    const acctAccounts = accounts.filter(a => a.id === accountId);
+    return computeActions(acctAccounts, positions, navMap);
+  }, [accounts, positions, accountId, totalValue]);
 
   // Grouped + filtered positions for Intraday mode
   const intradayGroups = useMemo<Record<Bucket, Position[]>>(() => {
@@ -727,61 +690,6 @@ export default function AccountDetailScreen() {
     }
   };
 
-  // ─── Order suggestions for this account ──────────────────────────────────
-  const queryClient = useQueryClient();
-
-  const { data: allSuggestions } = useQuery({
-    queryKey: ['order-suggestions'],
-    queryFn: () => apiGet<OrderSuggestion[]>('/order-suggestions'),
-    staleTime: Infinity,
-    enabled: !!account,
-  });
-
-  const accountSuggestions = (allSuggestions ?? []).filter(
-    s => s.status === 'pending' && s.accountId === accountId,
-  );
-
-  const { mutate: updateSuggestionStatus, isPending: isSuggestionUpdating } = useMutation({
-    mutationFn: ({ id, status }: { id: number; status: 'dismissed' | 'executed' }) =>
-      apiPatch<OrderSuggestion>(`/order-suggestions/${id}`, { status }),
-    onSuccess: (updated) => {
-      queryClient.setQueryData<OrderSuggestion[]>(['order-suggestions'], prev =>
-        (prev ?? []).map(s => s.id === updated.id ? updated : s),
-      );
-    },
-    onError: () => {
-      Alert.alert('Error', 'Failed to update suggestion. Please try again.');
-    },
-  });
-
-  const handleSuggestionDismiss = useCallback((s: OrderSuggestion) => {
-    Alert.alert(
-      'Dismiss suggestion',
-      `Dismiss ${s.side.toUpperCase()} ${s.symbol}?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Dismiss',
-          style: 'destructive',
-          onPress: () => updateSuggestionStatus({ id: s.id, status: 'dismissed' }),
-        },
-      ],
-    );
-  }, [updateSuggestionStatus]);
-
-  const handleSuggestionExecuted = useCallback((s: OrderSuggestion) => {
-    Alert.alert(
-      'Mark as executed',
-      `Mark ${s.side.toUpperCase()} ${s.symbol} as executed?`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Mark Executed',
-          onPress: () => updateSuggestionStatus({ id: s.id, status: 'executed' }),
-        },
-      ],
-    );
-  }, [updateSuggestionStatus]);
 
   // Computed import summary
   const importNav = importPositions.reduce((sum, p) => {
@@ -809,6 +717,15 @@ export default function AccountDetailScreen() {
               <PnlBadge value={totalPnl} percentage={totalPnlPct} size="md" />
               <Text style={styles.posCount}>{positions.length} positions</Text>
             </View>
+            {accSummary != null && (
+              <View style={styles.dayChangeRow}>
+                <Text style={styles.dayChangeLabel}>Today</Text>
+                <Text style={[styles.dayChangeValue, { color: accSummary.dayChangePct >= 0 ? colors.positive : colors.negative }]}>
+                  {accSummary.dayChangePct >= 0 ? '+' : ''}{formatCurrency(Math.abs(accSummary.dayChange))}
+                  {' '}({accSummary.dayChangePct >= 0 ? '+' : ''}{accSummary.dayChangePct.toFixed(2)}%)
+                </Text>
+              </View>
+            )}
             <View style={styles.cashRow}>
               <Text style={styles.cashLabel}>Cash</Text>
               <Text style={[styles.cashValue, cashBalance < 0 && { color: colors.negative }]}>
@@ -828,11 +745,9 @@ export default function AccountDetailScreen() {
 
         {positions.length > 0 && (
           <ActionableNowSection
-            items={actionableItems}
-            leverageRatio={leverageRatio}
-            onPressItem={item => {
-              if (item.positionId != null)
-                router.push({ pathname: '/position/[id]', params: { id: String(item.positionId) } });
+            actions={actionableItems}
+            onPressItem={action => {
+              router.push({ pathname: '/action-detail', params: { actionId: action.id } });
             }}
           />
         )}
@@ -1026,21 +941,6 @@ export default function AccountDetailScreen() {
           })
         )}
 
-        {/* Suggestions for this account */}
-        {accountSuggestions.length > 0 && (
-          <View style={styles.suggestionsSection}>
-            <Text style={styles.suggestionsTitle}>Suggested Orders</Text>
-            {accountSuggestions.map(s => (
-              <SuggestionCard
-                key={s.id}
-                suggestion={s}
-                isUpdating={isSuggestionUpdating}
-                onDismiss={() => handleSuggestionDismiss(s)}
-                onExecuted={() => handleSuggestionExecuted(s)}
-              />
-            ))}
-          </View>
-        )}
       </ScrollView>
 
       {/* ── Confirm Delete Position ────────────────────────────────────────── */}
@@ -1474,6 +1374,9 @@ const styles = StyleSheet.create({
   navValue: { fontFamily: 'Inter_700Bold', fontSize: 36, color: colors.textPrimary },
   pnlRow: { flexDirection: 'row', alignItems: 'center', gap: 12, marginTop: 8 },
   posCount: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted },
+  dayChangeRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginTop: 6 },
+  dayChangeLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted },
+  dayChangeValue: { fontFamily: 'Inter_500Medium', fontSize: 12 },
   cashRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.separator },
   cashLabel: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textSecondary },
   cashValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary },
@@ -1634,6 +1537,4 @@ const styles = StyleSheet.create({
   menuSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
   sortItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.separator },
   sortItemText: { fontFamily: 'Inter_500Medium', fontSize: 15, color: colors.textPrimary },
-  suggestionsSection: { marginTop: 8 },
-  suggestionsTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textPrimary, marginBottom: 10 },
 });

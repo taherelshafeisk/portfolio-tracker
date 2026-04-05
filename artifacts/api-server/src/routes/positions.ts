@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { positionsTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { positionsTable, activitiesTable } from "@workspace/db";
+import { eq, and, desc } from "drizzle-orm";
 import { validate } from "../middlewares/validate";
 import { CreatePositionBody, UpdatePositionBody } from "@workspace/api-zod/schemas";
 
@@ -262,6 +262,41 @@ router.post("/refresh-prices", async (req, res) => {
     res.json({ updated: updates.filter(r => r.status === "fulfilled").length });
   } catch (error) {
     res.status(500).json({ error: "Failed to refresh prices" });
+  }
+});
+
+/** Returns trade history (activities) for a position, newest first. */
+router.get("/:id/history", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const [position] = await db.select().from(positionsTable).where(eq(positionsTable.id, id));
+    if (!position) return res.status(404).json({ error: "Position not found" });
+
+    const activities = await db
+      .select()
+      .from(activitiesTable)
+      .where(
+        and(
+          eq(activitiesTable.accountId, position.accountId),
+          eq(activitiesTable.symbol, position.symbol),
+        )
+      )
+      .orderBy(desc(activitiesTable.tradeDate));
+
+    res.json(activities.map(a => ({
+      id: a.id,
+      accountId: a.accountId,
+      symbol: a.symbol || undefined,
+      activityType: a.activityType,
+      quantity: a.quantity ? parseFloat(a.quantity) : undefined,
+      price: a.price ? parseFloat(a.price) : undefined,
+      totalAmount: a.totalAmount ? parseFloat(a.totalAmount) : undefined,
+      notes: a.notes || undefined,
+      tradeDate: a.tradeDate.toISOString(),
+      createdAt: a.createdAt.toISOString(),
+    })));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch position history" });
   }
 });
 

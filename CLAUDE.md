@@ -95,3 +95,13 @@ Connection via `DATABASE_URL` env var (PostgreSQL).
 - `ANTHROPIC_API_KEY` — Required for AI chat features (Claude)
 - `OPENAI_API_KEY` — Required for screenshot parsing features (GPT-4o Vision)
 - `PORT` — API server port (defaults apply)
+
+## Key Product Decisions (Apr 2026)
+- computeActions() is the single source of truth for all action items. No AI-generated suggestions for violation resolution.
+- Get Suggestions removed entirely. Suggestions are deterministic math.
+- concentrationLimit (default 0.20) and leverageCeiling (default 1.50) live on the account/sleeve record. Always read from record, fall back to default if null.
+- formatCurrency() helper required for all number rendering. No raw number display.
+- Actionable Now = IPS violations only. No movers, no risers.
+- Action navigation: position-level → ActionDetailScreen, sleeve-level → sleeve detail.
+- Trim slider default = concentrationLimit. Three tranches: current price, -3%, -6%. Equal split.
+- Daily change source: Yahoo Finance for stocks, falls back to unrealized P&L with ~ prefix for others.

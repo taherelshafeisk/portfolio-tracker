@@ -12,8 +12,12 @@ These docs help keep implementation aligned with the product direction.
 - Prefer small, focused updates over long speculative writeups.
 
 ## Current priorities
-1. Account Workbench
-2. Recommendation Engine v1
-3. Suggested Orders v1
-4. Market Pulse
-5. Swing Trading Scanner
+## Current build sequence (Apr 2026)
+1. ✅ Action system redesign
+2. Position history tab
+3. Capture layer (universal input, ticker extraction, watchlist, note linking)
+4. IPS-aware screener (Minervini criteria)
+5. Intraday view
+6. Journal evolution
+7. Onboarding / IPS generator
+8. Strategy engine

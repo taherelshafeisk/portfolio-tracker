@@ -17,16 +17,35 @@ interface Props {
 }
 
 export function CrossAccountExposureCard({ symbol, entries }: Props) {
-  if (entries.length < 2) return null;
+  // Group by accountId to avoid duplicate rows when the same account has multiple positions
+  const grouped = React.useMemo(() => {
+    const map = new Map<number, ExposureEntry>();
+    for (const e of entries) {
+      const existing = map.get(e.accountId);
+      if (existing) {
+        map.set(e.accountId, {
+          accountId: e.accountId,
+          accountName: e.accountName,
+          quantity: existing.quantity + e.quantity,
+          marketValue: existing.marketValue + e.marketValue,
+        });
+      } else {
+        map.set(e.accountId, { ...e });
+      }
+    }
+    return Array.from(map.values());
+  }, [entries]);
 
-  const totalQty = entries.reduce((s, e) => s + e.quantity, 0);
-  const totalValue = entries.reduce((s, e) => s + e.marketValue, 0);
+  if (grouped.length < 2) return null;
+
+  const totalQty = grouped.reduce((s, e) => s + e.quantity, 0);
+  const totalValue = grouped.reduce((s, e) => s + e.marketValue, 0);
 
   return (
     <Card style={styles.card}>
       <View style={styles.header}>
         <Text style={styles.title}>Cross-Account Exposure</Text>
-        <Text style={styles.subtitle}>{symbol} held in {entries.length} accounts</Text>
+        <Text style={styles.subtitle}>{symbol} held in {grouped.length} accounts</Text>
       </View>
 
       <View style={styles.totalRow}>
@@ -37,8 +56,8 @@ export function CrossAccountExposureCard({ symbol, entries }: Props) {
         </View>
       </View>
 
-      {entries.map((entry, i) => (
-        <View key={entry.accountId} style={[styles.entryRow, i < entries.length - 1 && styles.entryBorder]}>
+      {grouped.map((entry, i) => (
+        <View key={entry.accountId} style={[styles.entryRow, i < grouped.length - 1 && styles.entryBorder]}>
           <Text style={styles.accountName} numberOfLines={1}>{entry.accountName}</Text>
           <View style={styles.entryRight}>
             <Text style={styles.entryQty}>{entry.quantity.toFixed(4)} sh</Text>

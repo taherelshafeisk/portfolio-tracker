@@ -3,8 +3,14 @@ import { db } from "@workspace/db";
 import { accountsTable, positionsTable, alertsTable } from "@workspace/db";
 import { eq, and, inArray } from "drizzle-orm";
 import { validate } from "../middlewares/validate";
-import { GenerateAlertsBody, UpdateAlertBody } from "@workspace/api-zod/schemas";
+import { GenerateAlertsBody, z } from "@workspace/api-zod/schemas";
 import { generateAlerts } from "../lib/alert-engine";
+
+// Local schema — extends the generated UpdateAlertBody with optional dismissReason
+const PatchAlertBody = z.object({
+  status: z.enum(["acknowledged", "resolved"]),
+  dismissReason: z.string().nullable().optional(),
+});
 
 const router: IRouter = Router();
 
@@ -31,6 +37,7 @@ function formatAlert(row: typeof alertsTable.$inferSelect) {
     status: row.status,
     acknowledgedAt: row.acknowledgedAt ? row.acknowledgedAt.toISOString() : null,
     resolvedAt: row.resolvedAt ? row.resolvedAt.toISOString() : null,
+    dismissReason: row.dismissReason ?? null,
     generatedAt: row.generatedAt.toISOString(),
     createdAt: row.createdAt.toISOString(),
     updatedAt: row.updatedAt.toISOString(),
@@ -238,13 +245,13 @@ router.get("/", async (req, res) => {
 });
 
 // PATCH /alerts/:id
-router.patch("/:id", validate(UpdateAlertBody), async (req, res) => {
+router.patch("/:id", validate(PatchAlertBody), async (req, res) => {
   try {
     const id = parseInt(
       Array.isArray(req.params.id) ? req.params.id[0] : req.params.id,
       10,
     );
-    const { status } = req.body as { status: "acknowledged" | "resolved" };
+    const { status, dismissReason } = req.body as { status: "acknowledged" | "resolved"; dismissReason?: string | null };
 
     const now = new Date();
     const updateFields: Partial<typeof alertsTable.$inferInsert> = {
@@ -253,6 +260,7 @@ router.patch("/:id", validate(UpdateAlertBody), async (req, res) => {
     };
     if (status === "acknowledged") updateFields.acknowledgedAt = now;
     if (status === "resolved") updateFields.resolvedAt = now;
+    if (dismissReason !== undefined) updateFields.dismissReason = dismissReason ?? null;
 
     const [updated] = await db
       .update(alertsTable)

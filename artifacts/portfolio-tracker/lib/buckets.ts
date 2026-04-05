@@ -23,6 +23,28 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export type Bucket = 'long_term' | 'speculative' | 'crypto';
 
+// ─── Symbol lists ─────────────────────────────────────────────────────────────
+
+/** Known crypto base symbols — appended with -USD for Yahoo Finance lookups. */
+export const CRYPTO_SYMBOLS = new Set([
+  'BTC', 'ETH', 'SOL', 'ADA', 'XRP', 'DOGE', 'AVAX', 'DOT', 'MATIC',
+  'LINK', 'UNI', 'ATOM', 'LTC', 'BCH', 'XLM', 'ALGO', 'VET', 'FIL',
+  'TRX', 'SHIB', 'BNB', 'NEAR', 'FTM', 'SAND', 'MANA', 'THETA', 'HBAR',
+  'ICP', 'ETC', 'FLOW', 'CHZ', 'APE', 'CRO', 'GRT', 'ENJ', 'BAT',
+  'ZEC', 'DASH', 'NEO', 'EOS', 'PEPE', 'WIF', 'BONK', 'ARB', 'OP',
+  'SUI', 'APT', 'INJ', 'TIA', 'SEI', 'RUNE', 'CRV', 'AAVE', 'COMP',
+  'MKR', 'SNX', 'YFI', 'SUSHI', 'ZRX',
+]);
+
+/**
+ * Well-known blue-chip / large-cap tickers that classify as long_term
+ * when the assetType is not explicitly set. Extend this list as needed.
+ */
+export const CORE_TICKERS = new Set([
+  'MSFT', 'NVDA', 'GOOGL', 'AAPL', 'AMZN', 'TSLA', 'META', 'TSM', 'AVGO', 'MU',
+  'VOO', 'QQQ', 'SPY', 'GLD', 'GOLD', 'SILVER', 'XLE', 'NLY', 'WMT', 'COST',
+]);
+
 export const BUCKET_ORDER: Bucket[] = ['long_term', 'speculative', 'crypto'];
 
 export const BUCKET_LABELS: Record<Bucket, string> = {
@@ -39,15 +61,23 @@ export const BUCKET_COLORS: Record<Bucket, string> = {
 
 // ─── Auto-classification heuristic ───────────────────────────────────────────
 
-export function autoBucketFromAssetType(assetType?: string | null): Bucket {
-  switch (assetType?.toLowerCase()) {
-    case 'crypto':  return 'crypto';
-    case 'etf':
-    case 'bond':
-    case 'reit':
-    case 'index':   return 'long_term';
-    default:        return 'speculative'; // stock, commodity, forex, null
-  }
+/**
+ * Derives a bucket from symbol + assetType. Rules (first match wins):
+ *  1. assetType === 'crypto'  OR  symbol in CRYPTO_SYMBOLS  → crypto
+ *  2. assetType === 'etf'                                   → long_term
+ *  3. symbol in CORE_TICKERS                                → long_term
+ *  4. everything else                                       → speculative
+ */
+export function autoBucket(
+  symbol: string | null | undefined,
+  assetType: string | null | undefined,
+): Bucket {
+  const upper = symbol?.toUpperCase() ?? '';
+  const type  = assetType?.toLowerCase() ?? '';
+  if (type === 'crypto' || CRYPTO_SYMBOLS.has(upper)) return 'crypto';
+  if (type === 'etf') return 'long_term';
+  if (CORE_TICKERS.has(upper)) return 'long_term';
+  return 'speculative';
 }
 
 // ─── Override storage ─────────────────────────────────────────────────────────
@@ -93,8 +123,9 @@ export async function clearBucketOverride(positionId: number): Promise<void> {
 
 export function effectiveBucket(
   positionId: number,
+  symbol: string | null | undefined,
   assetType: string | null | undefined,
   overrides: Record<number, Bucket>,
 ): Bucket {
-  return overrides[positionId] ?? autoBucketFromAssetType(assetType);
+  return overrides[positionId] ?? autoBucket(symbol, assetType);
 }

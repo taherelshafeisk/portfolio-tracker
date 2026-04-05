@@ -1,50 +1,24 @@
 /**
  * components/account/ActionableNowSection.tsx
  *
- * Displays a short ranked list of positions that deserve attention first,
- * plus an account-level leverage item when applicable.
- *
- * Scoring (computed in parent, passed as pre-ranked items):
- *   policy critical: +15 pts
- *   policy warning:  +5 pts
- *   |dayChangePct|:  × 0.5 pts
- *   dailyDollar/nav: × 2 pts (daily dollar move as % of account NAV)
- *
- * Only items scoring ≥ 2 or with a policy breach are shown, capped at 5.
+ * Displays violations-only actions for a single sleeve.
+ * Items come from computeActions() filtered to this account — violations only
+ * (concentration / drawdown / leverage). No movers, no risers, no neutral items.
  */
 
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '@/constants/colors';
+import type { Action } from '@/lib/actions';
 
-export interface ActionableItem {
-  /** Unique key */
-  id: string;
-  /** Symbol or account-level label */
-  title: string;
-  score: number;
-  reasons: Array<{ label: string; isNegative?: boolean }>;
-  /** If set, tapping navigates to the position */
-  positionId?: number;
+interface Props {
+  actions: Action[];
+  onPressItem: (action: Action) => void;
 }
 
-interface ActionableNowSectionProps {
-  items: ActionableItem[];
-  /** If non-null, shows a leverage account-level item */
-  leverageRatio: number | null;
-  onPressItem: (item: ActionableItem) => void;
-  onPressLeverage?: () => void;
-}
-
-export function ActionableNowSection({
-  items,
-  leverageRatio,
-  onPressItem,
-  onPressLeverage,
-}: ActionableNowSectionProps) {
-  const hasLeverage = leverageRatio !== null;
-  if (items.length === 0 && !hasLeverage) return null;
+export function ActionableNowSection({ actions, onPressItem }: Props) {
+  if (actions.length === 0) return null;
 
   return (
     <View style={styles.container}>
@@ -53,60 +27,39 @@ export function ActionableNowSection({
         <Text style={styles.headerText}>Actionable Now</Text>
       </View>
 
-      {hasLeverage && (
-        <Pressable
-          style={({ pressed }) => [styles.item, pressed && styles.pressed]}
-          onPress={onPressLeverage}
-        >
-          <View style={styles.itemLeft}>
-            <Text style={styles.itemTitle}>Leverage active</Text>
-            <View style={styles.reasons}>
-              <View style={[styles.badge, styles.badgeCritical]}>
-                <Text style={[styles.badgeText, { color: colors.negative }]}>
-                  {leverageRatio!.toFixed(2)}x
-                </Text>
-              </View>
-              <View style={[styles.badge, styles.badgeCritical]}>
-                <Text style={[styles.badgeText, { color: colors.negative }]}>Margin</Text>
+      {actions.map(action => {
+        const barColor = action.severity === 'red' ? colors.negative : '#F59E0B';
+        const typeLabel =
+          action.type === 'concentration'
+            ? 'Concentration'
+            : action.type === 'drawdown'
+            ? 'Drawdown'
+            : 'Leverage';
+
+        return (
+          <Pressable
+            key={action.id}
+            style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+            onPress={() => onPressItem(action)}
+          >
+            <View style={[styles.severityBar, { backgroundColor: barColor }]} />
+            <View style={styles.itemContent}>
+              <Text style={styles.itemTitle} numberOfLines={2}>
+                {action.label}
+              </Text>
+              <View style={styles.typeChip}>
+                <Text style={[styles.typeLabel, { color: barColor }]}>{typeLabel}</Text>
               </View>
             </View>
-          </View>
-          <Feather name="chevron-right" size={14} color={colors.textMuted} />
-        </Pressable>
-      )}
-
-      {items.map(item => (
-        <Pressable
-          key={item.id}
-          style={({ pressed }) => [styles.item, pressed && styles.pressed]}
-          onPress={() => onPressItem(item)}
-        >
-          <View style={styles.itemLeft}>
-            <Text style={styles.itemTitle}>{item.title}</Text>
-            {item.reasons.length > 0 && (
-              <View style={styles.reasons}>
-                {item.reasons.map((r, i) => (
-                  <View
-                    key={i}
-                    style={[styles.badge, r.isNegative ? styles.badgeCritical : styles.badgeNeutral]}
-                  >
-                    <Text style={[
-                      styles.badgeText,
-                      { color: r.isNegative ? colors.negative : colors.textSecondary },
-                    ]}>
-                      {r.label}
-                    </Text>
-                  </View>
-                ))}
-              </View>
-            )}
-          </View>
-          <Feather name="chevron-right" size={14} color={colors.textMuted} />
-        </Pressable>
-      ))}
+            <Feather name="chevron-right" size={14} color={colors.textMuted} />
+          </Pressable>
+        );
+      })}
     </View>
   );
 }
+
+// ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
   container: {
@@ -134,40 +87,36 @@ const styles = StyleSheet.create({
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingVertical: 12,
+    paddingRight: 14,
     borderBottomWidth: 1,
     borderBottomColor: colors.separator + '80',
   },
   pressed: { backgroundColor: colors.surfaceElevated },
-  itemLeft: { flex: 1, gap: 4 },
+  severityBar: {
+    width: 3,
+    alignSelf: 'stretch',
+    borderRadius: 2,
+    marginHorizontal: 12,
+    minHeight: 36,
+  },
+  itemContent: {
+    flex: 1,
+    gap: 4,
+  },
   itemTitle: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 14,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
     color: colors.textPrimary,
+    lineHeight: 18,
   },
-  reasons: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
+  typeChip: {
+    alignSelf: 'flex-start',
   },
-  badge: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 6,
-    borderWidth: 1,
-  },
-  badgeCritical: {
-    backgroundColor: 'rgba(255,59,48,0.10)',
-    borderColor: 'rgba(255,59,48,0.25)',
-  },
-  badgeNeutral: {
-    backgroundColor: colors.surfaceElevated,
-    borderColor: colors.separator,
-  },
-  badgeText: {
+  typeLabel: {
     fontFamily: 'Inter_500Medium',
     fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 0.3,
   },
 });

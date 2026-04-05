@@ -18,6 +18,7 @@ export const alertsTable = pgTable("alerts", {
   status:         text("status").notNull().default("active"),  // 'active' | 'acknowledged' | 'resolved'
   acknowledgedAt: timestamp("acknowledged_at"),
   resolvedAt:     timestamp("resolved_at"),
+  dismissReason:  text("dismiss_reason"),          // logged reason for acknowledged/red items
   generatedAt:    timestamp("generated_at").notNull().defaultNow(),
   createdAt:      timestamp("created_at").notNull().defaultNow(),
   updatedAt:      timestamp("updated_at").notNull().defaultNow(),

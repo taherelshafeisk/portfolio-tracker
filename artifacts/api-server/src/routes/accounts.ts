@@ -20,6 +20,8 @@ function toAccountResponse(a: typeof accountsTable.$inferSelect) {
     sleeveKey: a.sleeveKey ?? null,
     maxLeverageRatio: a.maxLeverageRatio != null ? parseFloat(a.maxLeverageRatio) : null,
     ipsVersion: a.ipsVersion ?? null,
+    concentrationLimit: a.concentrationLimit != null ? parseFloat(a.concentrationLimit) : null,
+    leverageCeiling: a.leverageCeiling != null ? parseFloat(a.leverageCeiling) : null,
     createdAt: a.createdAt.toISOString(),
     updatedAt: a.updatedAt.toISOString(),
   };
@@ -67,7 +69,7 @@ router.get("/:id", async (req, res) => {
 router.put("/:id", validate(UpdateAccountBody), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const { name, broker, accountType, currentBalance, sleeveKey, maxLeverageRatio, ipsVersion } = req.body;
+    const { name, broker, accountType, currentBalance, sleeveKey, maxLeverageRatio, ipsVersion, concentrationLimit, leverageCeiling } = req.body;
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updates.name = name;
     if (broker !== undefined) updates.broker = broker;
@@ -76,6 +78,8 @@ router.put("/:id", validate(UpdateAccountBody), async (req, res) => {
     if (sleeveKey !== undefined) updates.sleeveKey = sleeveKey || null;
     if (maxLeverageRatio !== undefined) updates.maxLeverageRatio = maxLeverageRatio != null ? maxLeverageRatio.toString() : null;
     if (ipsVersion !== undefined) updates.ipsVersion = ipsVersion || null;
+    if (concentrationLimit !== undefined) updates.concentrationLimit = concentrationLimit != null ? concentrationLimit.toString() : null;
+    if (leverageCeiling !== undefined) updates.leverageCeiling = leverageCeiling != null ? leverageCeiling.toString() : null;
     const [account] = await db.update(accountsTable).set(updates).where(eq(accountsTable.id, id)).returning();
     if (!account) return res.status(404).json({ error: "Account not found" });
     res.json(toAccountResponse(account));

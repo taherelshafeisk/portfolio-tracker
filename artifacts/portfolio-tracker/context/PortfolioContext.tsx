@@ -30,7 +30,11 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),
   });
-  if (!res.ok) throw new Error(`API error ${res.status}`);
+  if (!res.ok) {
+    let msg = `API error ${res.status}`;
+    try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
   return res.json();
 }
 
@@ -70,6 +74,8 @@ export interface Account {
   sleeveKey?: string | null;
   maxLeverageRatio?: number | null;
   ipsVersion?: string | null;
+  concentrationLimit?: number | null;
+  leverageCeiling?: number | null;
   createdAt: string;
   updatedAt: string;
 }

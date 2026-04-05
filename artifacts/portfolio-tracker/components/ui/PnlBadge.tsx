@@ -38,10 +38,28 @@ export function formatPnl(value: number): string {
   return `${value >= 0 ? '+' : '-'}$${abs.toFixed(2)}`;
 }
 
-export function formatCurrency(value: number, currency = 'USD'): string {
-  if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(2)}M`;
-  if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(1)}K`;
-  return `$${value.toFixed(2)}`;
+function withCommas(n: number, dec = 2): string {
+  const [int, frac] = n.toFixed(dec).split('.');
+  return int.replace(/\B(?=(\d{3})+(?!\d))/g, ',') + (frac !== undefined ? '.' + frac : '');
+}
+
+/**
+ * Format a dollar value.
+ *
+ * mode 'full'    (default) — $43,484.04, comma-separated, 2 decimal places.
+ * mode 'compact'           — $43.5K / $1.2M, 1 decimal place with K/M suffix.
+ */
+export function formatCurrency(value: number, mode: 'full' | 'compact' = 'full'): string {
+  const abs = Math.abs(value);
+  const sign = value < 0 ? '-' : '';
+  if (mode === 'compact') {
+    if (abs >= 1_000_000) return `${sign}$${(abs / 1_000_000).toFixed(1)}M`;
+    if (abs >= 1_000) return `${sign}$${(abs / 1_000).toFixed(1)}K`;
+    return `${sign}$${abs.toFixed(0)}`;
+  }
+  // 'full'
+  if (abs >= 1_000_000) return `${sign}$${withCommas(abs / 1_000_000, 2)}M`;
+  return `${sign}$${withCommas(abs, 2)}`;
 }
 
 const styles = StyleSheet.create({

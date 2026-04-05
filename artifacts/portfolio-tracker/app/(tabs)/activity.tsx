@@ -9,9 +9,10 @@ import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiPost, apiDelete, TradeActivity } from '@/context/PortfolioContext';
+import { usePortfolio, apiGet, apiPost, apiDelete, TradeActivity } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
+import { AnnotationModal } from '@/components/activity/AnnotationModal';
 
 const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
   ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
@@ -62,8 +63,12 @@ const dateToAPI = (d: string): string =>
 
 export default function ActivityScreen() {
   const insets = useSafeAreaInsets();
-  const { accounts, activities, isLoading, refreshAll } = usePortfolio();
+  const { accounts, activities, positions, isLoading, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+
+  // Annotation state
+  const [annotatedIds, setAnnotatedIds] = useState<Set<number>>(new Set());
+  const [annotationActivity, setAnnotationActivity] = useState<TradeActivity | null>(null);
 
   // Modal step: 'account' → pick account first, then 'manual' or 'review'
   type Step = 'account' | 'manual' | 'review';
@@ -91,6 +96,12 @@ export default function ActivityScreen() {
   const [manualForm, setManualForm] = useState<ParsedTrade>(emptyManual);
 
   useEffect(() => { refreshAll(); }, []);
+
+  useEffect(() => {
+    apiGet<{ activityId: number }[]>('/activities/annotations')
+      .then(rows => setAnnotatedIds(new Set(rows.map(r => r.activityId))))
+      .catch(() => {}); // non-fatal — dots just won't show on initial load
+  }, [activities.length]); // re-check when the list grows
 
   const openModal = () => {
     setStep('account');
@@ -250,6 +261,7 @@ export default function ActivityScreen() {
 
   const renderItem = ({ item }: { item: TradeActivity }) => {
     const cfg = ACTIVITY_ICONS[item.activityType] || ACTIVITY_ICONS.note;
+    const hasAnnotation = annotatedIds.has(item.id);
     return (
       <Card style={styles.activityCard}>
         <View style={styles.activityRow}>
@@ -273,9 +285,23 @@ export default function ActivityScreen() {
             )}
             {item.notes && <Text style={styles.activityNotes}>{item.notes}</Text>}
           </View>
-          <Pressable onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
-            <Feather name="trash-2" size={15} color={colors.textMuted} />
-          </Pressable>
+          <View style={styles.rowActions}>
+            <Pressable
+              onPress={() => setAnnotationActivity(item)}
+              style={styles.journalBtn}
+              hitSlop={8}
+            >
+              <Feather
+                name={hasAnnotation ? 'book-open' : 'book'}
+                size={15}
+                color={hasAnnotation ? colors.primary : colors.textMuted}
+              />
+              {hasAnnotation && <View style={styles.annotationDot} />}
+            </Pressable>
+            <Pressable onPress={() => handleDelete(item.id)} style={styles.deleteBtn}>
+              <Feather name="trash-2" size={15} color={colors.textMuted} />
+            </Pressable>
+          </View>
         </View>
       </Card>
     );
@@ -401,6 +427,17 @@ export default function ActivityScreen() {
           }
         />
       )}
+
+      <AnnotationModal
+        activity={annotationActivity}
+        visible={annotationActivity !== null}
+        positions={positions}
+        onClose={() => setAnnotationActivity(null)}
+        onSaved={(activityId) => {
+          setAnnotatedIds(prev => new Set(prev).add(activityId));
+          setAnnotationActivity(null);
+        }}
+      />
 
       <Modal visible={showAdd} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalOverlay}>
@@ -583,6 +620,9 @@ const styles = StyleSheet.create({
   accountName: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   activityDetails: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textPrimary, marginTop: 2 },
   activityNotes: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted, marginTop: 2 },
+  rowActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  journalBtn: { padding: 4, position: 'relative' },
+  annotationDot: { position: 'absolute', top: 2, right: 2, width: 5, height: 5, borderRadius: 3, backgroundColor: colors.primary },
   deleteBtn: { padding: 4 },
   emptyState: { alignItems: 'center', paddingTop: 100, gap: 12 },
   emptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 18, color: colors.textSecondary },

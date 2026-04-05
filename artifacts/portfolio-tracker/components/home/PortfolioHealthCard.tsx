@@ -66,7 +66,7 @@ export function PortfolioHealthCard({
         </View>
       </View>
 
-      <Text style={styles.nav}>{formatCurrency(totalNav)}</Text>
+      <Text style={styles.nav}>{formatCurrency(totalNav, 'compact')}</Text>
 
       <View style={styles.badgeRow}>
         <PnlBadge value={totalUnrealizedPnl} percentage={totalUnrealizedPnlPct} size="md" />

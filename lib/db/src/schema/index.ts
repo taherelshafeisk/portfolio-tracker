@@ -6,3 +6,5 @@ export * from "./messages";
 export * from "./orderSuggestions";
 export * from "./alerts";
 export * from "./portfolioPolicy";
+export * from "./tradeAnnotations";
+export * from "./policyProposals";

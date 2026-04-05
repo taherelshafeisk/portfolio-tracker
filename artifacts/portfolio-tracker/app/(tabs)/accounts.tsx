@@ -14,12 +14,170 @@ import { AccountTypeBadge } from '@/components/ui/AccountTypeBadge';
 import { formatCurrency } from '@/components/ui/PnlBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
 
+const DEFAULT_CONCENTRATION_LIMIT = 0.20;
+const DEFAULT_LEVERAGE_CEILING = 1.50;
+
 const ACCOUNT_TYPES = [
   { key: 'long_term', label: 'Long Term' },
   { key: 'swing', label: 'Swing Trading' },
   { key: 'day_trading', label: 'Day Trading' },
   { key: 'savings', label: 'Savings / Cash' },
 ];
+
+// ─── Compliance logic ─────────────────────────────────────────────────────────
+
+type ComplianceSeverity = 'green' | 'amber' | 'red';
+
+interface ComplianceIssue {
+  label: string;
+  severity: 'amber' | 'red';
+}
+
+function computeCompliance(
+  account: Account,
+  accountPositions: { symbol: string; marketValue: number }[],
+  nav: number,
+): { dot: ComplianceSeverity; issues: ComplianceIssue[] } {
+  const issues: ComplianceIssue[] = [];
+  const limit = account.concentrationLimit ?? DEFAULT_CONCENTRATION_LIMIT;
+  const ceiling = account.leverageCeiling ?? DEFAULT_LEVERAGE_CEILING;
+
+  if (nav > 0) {
+    for (const p of accountPositions) {
+      const fraction = p.marketValue / nav;
+      if (fraction > 2 * limit) {
+        issues.push({
+          label: `${p.symbol} is ${(fraction * 100).toFixed(1)}% of this sleeve — over 2× the ${(limit * 100).toFixed(0)}% limit`,
+          severity: 'red',
+        });
+      } else if (fraction > limit) {
+        issues.push({
+          label: `${p.symbol} is ${(fraction * 100).toFixed(1)}% of this sleeve — above the ${(limit * 100).toFixed(0)}% limit`,
+          severity: 'amber',
+        });
+      }
+    }
+  }
+
+  if (account.currentBalance < 0) {
+    const borrowed = Math.abs(account.currentBalance);
+    const leverageRatio = nav > 0 ? (nav + borrowed) / nav : 99;
+    if (leverageRatio > ceiling) {
+      issues.push({
+        label: `Leverage ratio ${leverageRatio.toFixed(2)}x exceeds the ${ceiling.toFixed(1)}x ceiling — ${formatCurrency(borrowed)} borrowed`,
+        severity: 'red',
+      });
+    } else {
+      issues.push({
+        label: `Leverage active — ${formatCurrency(borrowed)} borrowed, ratio ${leverageRatio.toFixed(2)}x (within ${ceiling.toFixed(1)}x ceiling)`,
+        severity: 'amber',
+      });
+    }
+  }
+
+  const dot: ComplianceSeverity = issues.some(i => i.severity === 'red')
+    ? 'red'
+    : issues.some(i => i.severity === 'amber')
+      ? 'amber'
+      : 'green';
+
+  return { dot, issues };
+}
+
+// ─── Components ───────────────────────────────────────────────────────────────
+
+interface AccountCardProps {
+  account: Account;
+  nav: number;
+  dayChange: number;
+  dayChangePct: number;
+  positionCount: number;
+  accountPositions: { symbol: string; marketValue: number }[];
+  onLongPress: () => void;
+}
+
+function AccountCard({
+  account,
+  nav,
+  dayChange,
+  dayChangePct,
+  positionCount,
+  accountPositions,
+  onLongPress,
+}: AccountCardProps) {
+  const [expanded, setExpanded] = useState(false);
+  const { dot, issues } = computeCompliance(account, accountPositions, nav);
+  const isDayUp = dayChangePct >= 0;
+
+  const dotColor = dot === 'red' ? colors.negative : dot === 'amber' ? '#F59E0B' : colors.positive;
+
+  return (
+    <Pressable
+      onPress={() => router.push({ pathname: '/account/[id]', params: { id: account.id } })}
+      onLongPress={onLongPress}
+      style={({ pressed }) => [styles.accountCardPressable, pressed && { opacity: 0.85 }]}
+    >
+    <Card
+      style={styles.accountCard}
+    >
+      {/* Row 1: name + type badge — compliance dot */}
+      <View style={styles.cardRow1}>
+        <View style={styles.cardRow1Left}>
+          <Text style={styles.accountName} numberOfLines={1}>{account.name}</Text>
+          <AccountTypeBadge type={account.accountType as any} size="sm" />
+        </View>
+        <Pressable
+          onPress={(e) => {
+            if ('stopPropagation' in e) (e as any).stopPropagation();
+            setExpanded(v => !v);
+          }}
+          hitSlop={8}
+          style={styles.complianceDotBtn}
+        >
+          <View style={[styles.complianceDot, { backgroundColor: dotColor }]} />
+        </Pressable>
+      </View>
+
+      {/* Row 2: total value — daily change */}
+      <View style={styles.cardRow2}>
+        <Text style={styles.navValue}>{formatCurrency(nav, 'compact')}</Text>
+        <View style={styles.dailyChange}>
+          <Text style={[styles.dailyChangeText, { color: isDayUp ? colors.positive : colors.negative }]}>
+            {isDayUp ? '+' : ''}{formatCurrency(Math.abs(dayChange))}
+          </Text>
+          <Text style={[styles.dailyChangePct, { color: isDayUp ? colors.positive : colors.negative }]}>
+            {isDayUp ? '+' : ''}{dayChangePct.toFixed(2)}%
+          </Text>
+        </View>
+      </View>
+
+      {/* Row 3: position count */}
+      <Text style={styles.positionCount}>
+        {positionCount} position{positionCount !== 1 ? 's' : ''}
+      </Text>
+
+      {/* Inline compliance expansion */}
+      {expanded && issues.length > 0 && (
+        <View style={styles.complianceExpanded}>
+          {issues.map((issue, i) => (
+            <View key={i} style={styles.complianceIssueRow}>
+              <View style={[styles.issueDot, { backgroundColor: issue.severity === 'red' ? colors.negative : '#F59E0B' }]} />
+              <Text style={styles.complianceIssueText}>{issue.label}</Text>
+            </View>
+          ))}
+        </View>
+      )}
+      {expanded && issues.length === 0 && (
+        <View style={styles.complianceExpanded}>
+          <Text style={styles.complianceCleanText}>No compliance issues — all thresholds met</Text>
+        </View>
+      )}
+    </Card>
+    </Pressable>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function AccountsScreen() {
   const insets = useSafeAreaInsets();
@@ -75,7 +233,6 @@ export default function AccountsScreen() {
         currency: form.currency,
         initialBalance: parseFloat(form.initialBalance) || 0,
       });
-      // Persist IPS fields if provided (separate PUT since CreateAccountBody is minimal)
       if (form.sleeveKey || form.maxLeverageRatio) {
         await apiPut(`/accounts/${created.id}`, {
           sleeveKey: form.sleeveKey || null,
@@ -139,7 +296,7 @@ export default function AccountsScreen() {
       >
         {isLoading && accounts.length === 0 ? (
           [1, 2, 3].map(i => (
-            <View key={i} style={[styles.accountCard, { marginBottom: 12 }]}>
+            <View key={i} style={[styles.skeletonCard, { marginBottom: 12 }]}>
               <Skeleton height={14} width="30%" />
               <Skeleton height={20} width="50%" style={{ marginTop: 8 }} />
               <Skeleton height={12} width="70%" style={{ marginTop: 8 }} />
@@ -154,46 +311,20 @@ export default function AccountsScreen() {
         ) : (
           accounts.map(account => {
             const accSummary = summary?.accounts.find(a => a.id === account.id);
-            const posCount = positions.filter(p => p.accountId === account.id).length;
-            const pos = (accSummary?.unrealizedPnl ?? 0) >= 0;
+            const accountPositions = positions
+              .filter(p => p.accountId === account.id)
+              .map(p => ({ symbol: p.symbol, marketValue: p.marketValue }));
             return (
-              <Card
+              <AccountCard
                 key={account.id}
-                style={styles.accountCard}
-                onPress={() => router.push({ pathname: '/account/[id]', params: { id: account.id } })}
-              >
-                <View style={styles.accountHeader}>
-                  <AccountTypeBadge type={account.accountType as any} size="sm" />
-                  <Pressable
-                    onPress={(e) => {
-                      if ('stopPropagation' in e) (e as any).stopPropagation();
-                      setMenuAccount({ id: account.id, name: account.name });
-                    }}
-                    hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                  >
-                    <Feather name="more-horizontal" size={18} color={colors.textMuted} />
-                  </Pressable>
-                </View>
-                <Text style={styles.accountName}>{account.name}</Text>
-                <Text style={styles.brokerName}>{account.broker}</Text>
-
-                <View style={styles.statsRow}>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Current Value</Text>
-                    <Text style={styles.statValue}>{formatCurrency(accSummary?.nav ?? account.currentBalance)}</Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Unrealized P&L</Text>
-                    <Text style={[styles.statValue, { color: pos ? colors.positive : colors.negative }]}>
-                      {pos ? '+' : ''}{formatCurrency(accSummary?.unrealizedPnl ?? 0)}
-                    </Text>
-                  </View>
-                  <View style={styles.statItem}>
-                    <Text style={styles.statLabel}>Positions</Text>
-                    <Text style={styles.statValue}>{posCount}</Text>
-                  </View>
-                </View>
-              </Card>
+                account={account}
+                nav={accSummary?.nav ?? account.currentBalance}
+                dayChange={accSummary?.dayChange ?? 0}
+                dayChangePct={accSummary?.dayChangePct ?? 0}
+                positionCount={accountPositions.length}
+                accountPositions={accountPositions}
+                onLongPress={() => setMenuAccount({ id: account.id, name: account.name })}
+              />
             );
           })
         )}
@@ -265,7 +396,7 @@ export default function AccountsScreen() {
             </View>
 
             <View style={styles.modalButtons}>
-              <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
+              <Pressable style={styles.cancelModalBtn} onPress={() => setShowAdd(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
               <Pressable style={[styles.saveBtn, (!canSubmit || isSubmitting) && { opacity: 0.4 }]} onPress={handleAdd} disabled={!canSubmit || isSubmitting}>
@@ -336,25 +467,112 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceElevated,
   },
   addBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
+    width: 36, height: 36, borderRadius: 18,
     backgroundColor: colors.primary,
-    alignItems: 'center',
-    justifyContent: 'center',
+    alignItems: 'center', justifyContent: 'center',
   },
   scroll: { paddingHorizontal: 16 },
-  accountCard: { marginBottom: 12 },
-  accountHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
-  accountName: { fontFamily: 'Inter_700Bold', fontSize: 18, color: colors.textPrimary },
-  brokerName: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textSecondary, marginTop: 2, marginBottom: 12 },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between' },
-  statItem: { flex: 1 },
-  statLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginBottom: 2 },
-  statValue: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.textPrimary },
+  skeletonCard: {
+    backgroundColor: colors.surface,
+    borderRadius: 16,
+    padding: 16,
+    borderWidth: 1,
+    borderColor: colors.separator,
+  },
+  accountCardPressable: { marginBottom: 12 },
+  accountCard: { padding: 16 },
+  // Card rows
+  cardRow1: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  cardRow1Left: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    flex: 1,
+    flexWrap: 'wrap',
+  },
+  accountName: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 16,
+    color: colors.textPrimary,
+  },
+  complianceDotBtn: {
+    padding: 4,
+  },
+  complianceDot: {
+    width: 11,
+    height: 11,
+    borderRadius: 6,
+  },
+  cardRow2: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  navValue: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 22,
+    color: colors.textPrimary,
+  },
+  dailyChange: {
+    alignItems: 'flex-end',
+    gap: 1,
+  },
+  dailyChangeText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+  },
+  dailyChangePct: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+  },
+  positionCount: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  // Compliance expansion
+  complianceExpanded: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: colors.separator,
+    gap: 8,
+  },
+  complianceIssueRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  issueDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
+    marginTop: 5,
+    flexShrink: 0,
+  },
+  complianceIssueText: {
+    flex: 1,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: colors.textSecondary,
+    lineHeight: 17,
+  },
+  complianceCleanText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: colors.positive,
+  },
+  // Empty state
   emptyState: { alignItems: 'center', paddingTop: 80, gap: 12 },
   emptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 18, color: colors.textSecondary },
   emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textMuted, textAlign: 'center', paddingHorizontal: 40 },
+  // Modals
   modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
   modalContainer: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
   modalHandle: { width: 36, height: 4, backgroundColor: colors.separator, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
@@ -382,7 +600,7 @@ const styles = StyleSheet.create({
   typeText: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary },
   typeTextSelected: { color: colors.primary },
   modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  cancelBtn: { flex: 1, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.separator, alignItems: 'center' },
+  cancelModalBtn: { flex: 1, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.separator, alignItems: 'center' },
   cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary },
   saveBtn: { flex: 2, padding: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center' },
   saveText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.background },

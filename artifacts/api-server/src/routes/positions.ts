@@ -171,7 +171,7 @@ router.post("/", validate(CreatePositionBody), async (req, res) => {
     const livePrice = livePriceData?.price ?? null;
     const priceToStore = livePrice ?? parseFloat(avgCost);
 
-    const [position] = await db.insert(positionsTable).values({
+    const values = {
       accountId,
       symbol: upperSymbol,
       name,
@@ -189,7 +189,25 @@ router.post("/", validate(CreatePositionBody), async (req, res) => {
       cutListAddedAt: cutListAddedAt ? new Date(cutListAddedAt) : null,
       policyNote: policyNote || null,
       ipsVersion: ipsVersion || null,
-    }).returning();
+    };
+
+    // Check-then-update/insert so this works before the unique constraint is
+    // applied via db push, and also safely after.
+    const [existing] = await db
+      .select({ id: positionsTable.id })
+      .from(positionsTable)
+      .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.symbol, upperSymbol)));
+
+    let position;
+    if (existing) {
+      [position] = await db
+        .update(positionsTable)
+        .set({ ...values, updatedAt: new Date() })
+        .where(eq(positionsTable.id, existing.id))
+        .returning();
+    } else {
+      [position] = await db.insert(positionsTable).values(values).returning();
+    }
 
     res.status(201).json(toPositionResponse(position, livePrice ?? undefined, livePriceData));
   } catch (error) {
@@ -292,10 +310,10 @@ router.get("/:id/history", async (req, res) => {
       price: a.price ? parseFloat(a.price) : undefined,
       totalAmount: a.totalAmount ? parseFloat(a.totalAmount) : undefined,
       notes: a.notes || undefined,
-      tradeDate: a.tradeDate.toISOString(),
-      createdAt: a.createdAt.toISOString(),
+      tradeDate: a.tradeDate instanceof Date ? a.tradeDate.toISOString() : String(a.tradeDate),
     })));
   } catch (error) {
+    console.error("[positions GET /:id/history] Error:", error);
     res.status(500).json({ error: "Failed to fetch position history" });
   }
 });

@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, text, numeric, timestamp } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, text, numeric, timestamp, uniqueIndex } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -24,7 +24,9 @@ export const positionsTable = pgTable("positions", {
   ipsVersion: text("ips_version"),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
-});
+}, (t) => [
+  uniqueIndex("positions_account_symbol_idx").on(t.accountId, t.symbol),
+]);
 
 export const insertPositionSchema = createInsertSchema(positionsTable).omit({ id: true, createdAt: true, updatedAt: true });
 export type InsertPosition = z.infer<typeof insertPositionSchema>;

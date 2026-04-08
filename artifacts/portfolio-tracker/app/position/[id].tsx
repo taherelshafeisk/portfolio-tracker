@@ -1,6 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, ScrollView, FlatList, Platform, Pressable, ActivityIndicator } from 'react-native';
-import { useLocalSearchParams, useNavigation, router } from 'expo-router';
+import { useLocalSearchParams, useNavigation, router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
@@ -55,11 +55,19 @@ export default function PositionDetailScreen() {
   const [editPolicyVisible, setEditPolicyVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'history'>('overview');
 
-  const { data: historyData, isLoading: historyLoading } = useQuery<HistoryActivity[]>({
+  const { data: historyData, isLoading: historyLoading, isError: historyError, refetch: refetchHistory } = useQuery<HistoryActivity[]>({
     queryKey: ['position-history', posId],
     queryFn: () => apiGet(`/positions/${posId}/history`),
     enabled: activeTab === 'history',
   });
+
+  useFocusEffect(
+    useCallback(() => {
+      if (activeTab === 'history') {
+        refetchHistory();
+      }
+    }, [activeTab, refetchHistory]),
+  );
 
   const position = positions.find(p => p.id === posId);
   const account = position ? accounts.find(a => a.id === position.accountId) : null;
@@ -256,9 +264,13 @@ export default function PositionDetailScreen() {
             <View style={styles.historyEmpty}>
               <ActivityIndicator color={colors.textMuted} />
             </View>
+          ) : historyError ? (
+            <View style={styles.historyEmpty}>
+              <Text style={styles.historyEmptyText}>Could not load history</Text>
+            </View>
           ) : !historyData || historyData.length === 0 ? (
             <View style={styles.historyEmpty}>
-              <Text style={styles.historyEmptyText}>No trade history found</Text>
+              <Text style={styles.historyEmptyText}>No transactions recorded</Text>
             </View>
           ) : (
             <FlatList

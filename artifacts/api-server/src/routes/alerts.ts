@@ -14,12 +14,12 @@ const PatchAlertBody = z.object({
 
 const router: IRouter = Router();
 
-/**
- * How long an acknowledged alert is suppressed before being re-activated if the
- * underlying condition persists. After this window the next generate call will
- * flip it back to 'active'.
- */
-const ACKNOWLEDGE_GRACE_MS = 24 * 60 * 60 * 1000; // 24 hours
+const GRACE_DEFAULT_MS   = 24 * 60 * 60 * 1000;      // 24 hours
+const GRACE_5_DAYS_MS    = 5  * 24 * 60 * 60 * 1000; // 5 days
+
+function gracePeriodMs(dismissReason: string | null): number {
+  return dismissReason === 'Will act within 5 days' ? GRACE_5_DAYS_MS : GRACE_DEFAULT_MS;
+}
 
 function formatAlert(row: typeof alertsTable.$inferSelect) {
   return {
@@ -157,7 +157,7 @@ router.post("/generate", validate(GenerateAlertsBody), async (req, res) => {
       if (existing.status === "acknowledged") {
         const graceExpired =
           existing.acknowledgedAt &&
-          now.getTime() - existing.acknowledgedAt.getTime() >= ACKNOWLEDGE_GRACE_MS;
+          now.getTime() - existing.acknowledgedAt.getTime() >= gracePeriodMs(existing.dismissReason ?? null);
 
         if (graceExpired) {
           // Grace window elapsed — re-activate so the user sees it again
@@ -229,7 +229,14 @@ router.get("/", async (req, res) => {
     let query = db.select().from(alertsTable).$dynamic();
 
     const conditions = [];
-    if (statusParam) conditions.push(eq(alertsTable.status, statusParam));
+    if (statusParam) {
+      const statuses = statusParam.split(',').map(s => s.trim()).filter(Boolean);
+      if (statuses.length === 1) {
+        conditions.push(eq(alertsTable.status, statuses[0]));
+      } else if (statuses.length > 1) {
+        conditions.push(inArray(alertsTable.status, statuses));
+      }
+    }
     if (accountIdParam) conditions.push(eq(alertsTable.accountId, accountIdParam));
     if (positionIdParam) conditions.push(eq(alertsTable.positionId, positionIdParam));
 

@@ -8,7 +8,17 @@ import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { colors } from '@/constants/colors';
 
-const BASE_URL = process.env.EXPO_PUBLIC_DOMAIN ? `https://${process.env.EXPO_PUBLIC_DOMAIN}` : '';
+function resolveBaseUrl(): string {
+  const domain = process.env.EXPO_PUBLIC_DOMAIN;
+  if (domain) {
+    return domain.includes('localhost') ? `http://${domain}` : `https://${domain}`;
+  }
+  if (typeof window !== 'undefined') {
+    return `http://${window.location.hostname}:3001`;
+  }
+  return '';
+}
+const BASE_URL = resolveBaseUrl();
 
 interface Message {
   id: number;
@@ -24,11 +34,11 @@ interface Conversation {
 }
 
 const SUGGESTED_PROMPTS = [
-  "Analyze my portfolio risk level",
-  "What swing trade setups look good today?",
-  "Explain RSI and when to use it",
-  "Best sectors to invest in this quarter?",
-  "How should I size my positions?",
+  "What's violating my IPS right now?",
+  "Which position has the worst risk/reward?",
+  "Am I on track with my cut list?",
+  "What should I do before market open tomorrow?",
+  "Summarize my portfolio in one paragraph",
 ];
 
 export default function AIScreen() {
@@ -57,20 +67,17 @@ export default function AIScreen() {
   };
 
   const createConversation = async (title: string) => {
-    try {
-      const res = await fetch(`${BASE_URL}/api/anthropic/conversations`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ title }),
-      });
-      const conv = await res.json();
-      setConversations(prev => [conv, ...prev]);
-      setActiveConv(conv);
-      setMessages([]);
-      return conv;
-    } catch {
-      return null;
-    }
+    const res = await fetch(`${BASE_URL}/api/anthropic/conversations`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) throw new Error(`Failed to create conversation (${res.status})`);
+    const conv = await res.json();
+    setConversations(prev => [conv, ...prev]);
+    setActiveConv(conv);
+    setMessages([]);
+    return conv;
   };
 
   const loadConversation = async (conv: Conversation) => {
@@ -87,12 +94,7 @@ export default function AIScreen() {
     if (!content || streaming) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    let conv = activeConv;
-    if (!conv) {
-      conv = await createConversation(content.slice(0, 40));
-      if (!conv) return;
-    }
-
+    // Show user message and loading state immediately
     setInput('');
     const userMsg: Message = {
       id: msgIdCounter.current++,
@@ -104,7 +106,12 @@ export default function AIScreen() {
     setStreaming(true);
     setStreamingContent('');
 
+    let conv = activeConv;
     try {
+      if (!conv) {
+        conv = await createConversation(content.slice(0, 40));
+      }
+
       const response = await fetch(`${BASE_URL}/api/anthropic/conversations/${conv.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -116,6 +123,7 @@ export default function AIScreen() {
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let fullContent = '';
+      let serverError: string | null = null;
 
       while (true) {
         const { done, value } = await reader.read();
@@ -126,11 +134,12 @@ export default function AIScreen() {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.content) {
+              if (data.error) {
+                serverError = data.error;
+              } else if (data.content) {
                 fullContent += data.content;
                 setStreamingContent(fullContent);
-              }
-              if (data.done) {
+              } else if (data.done) {
                 const aiMsg: Message = {
                   id: msgIdCounter.current++,
                   role: 'assistant',
@@ -144,11 +153,16 @@ export default function AIScreen() {
           }
         }
       }
-    } catch {
+
+      if (serverError) {
+        throw new Error(serverError);
+      }
+    } catch (err: any) {
+      const errMsg = err?.message || 'Unknown error';
       setMessages(prev => [...prev, {
         id: msgIdCounter.current++,
         role: 'assistant',
-        content: 'Sorry, I encountered an error. Please try again.',
+        content: `Error: ${errMsg}`,
         createdAt: new Date().toISOString(),
       }]);
     } finally {

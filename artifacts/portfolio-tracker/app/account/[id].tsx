@@ -96,6 +96,7 @@ interface ParsedPosition {
   avgCost: string;
   sector: string;
   notes: string;
+  _avgCostMissing?: boolean;
 }
 
 export default function AccountDetailScreen() {
@@ -449,6 +450,7 @@ export default function AccountDetailScreen() {
             avgCost: p.avgCost != null ? String(p.avgCost) : '',
             sector: p.sector || '',
             notes: p.notes || '',
+            _avgCostMissing: !!p._avgCostMissing,
           })));
         }
         if (!hint && data.accountHint) hint = data.accountHint;
@@ -476,6 +478,8 @@ export default function AccountDetailScreen() {
         }
         return merged;
       });
+      // Update cash if found in additional screenshots
+      if (cash != null) setImportCashBalance(cash);
     } else {
       // Deduplicate within the batch (last occurrence wins)
       const symbolMap = new Map<string, ParsedPosition>();
@@ -514,10 +518,14 @@ export default function AccountDetailScreen() {
       const input = (document as any).createElement('input');
       input.type = 'file';
       input.accept = 'image/*,.csv,text/csv';
+      input.multiple = true;
       input.onchange = async (e: any) => {
-        const file = e.target?.files?.[0];
-        if (!file) return;
-        const isCSV = file.name.toLowerCase().endsWith('.csv') || file.type === 'text/csv' || file.type === 'application/vnd.ms-excel';
+        const files: File[] = Array.from(e.target?.files ?? []);
+        if (files.length === 0) return;
+
+        // If first file is CSV, handle as CSV (single file)
+        const firstFile = files[0];
+        const isCSV = firstFile.name.toLowerCase().endsWith('.csv') || firstFile.type === 'text/csv' || firstFile.type === 'application/vnd.ms-excel';
         if (isCSV) {
           const reader = new FileReader();
           reader.onload = (ev: any) => {
@@ -530,18 +538,31 @@ export default function AccountDetailScreen() {
             setImportImageUri(null);
             setShowImport(true);
           };
-          reader.readAsText(file);
-        } else {
-          const reader = new FileReader();
-          reader.onload = async (ev: any) => {
-            const dataUrl = ev.target?.result as string;
-            const base64 = dataUrl.split(',')[1];
-            setImportImageUri(dataUrl);
-            setImportPositions([]);
-            setShowImport(true);
-            await parseAssets([{ base64, mimeType: file.type || 'image/jpeg', uri: dataUrl } as any], false);
-          };
-          reader.readAsDataURL(file);
+          reader.readAsText(firstFile);
+          return;
+        }
+
+        // Image files: read all as base64 then parse together
+        const readFileAsBase64 = (file: File): Promise<{ base64: string; mimeType: string; uri: string }> =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (ev: any) => {
+              const dataUrl = ev.target?.result as string;
+              resolve({ base64: dataUrl.split(',')[1], mimeType: file.type || 'image/jpeg', uri: dataUrl });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+
+        try {
+          const imageFiles = files.filter(f => !f.name.toLowerCase().endsWith('.csv'));
+          const assets = await Promise.all(imageFiles.map(readFileAsBase64));
+          setImportImageUri(assets[0].uri);
+          setImportPositions([]);
+          setShowImport(true);
+          await parseAssets(assets as any[], false);
+        } catch {
+          Alert.alert('Error', 'Failed to read image files.');
         }
       };
       input.click();
@@ -568,10 +589,36 @@ export default function AccountDetailScreen() {
   };
 
   const handleAddMoreScreenshots = async () => {
-    if (Platform.OS !== 'web') {
-      const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
-      if (status !== 'granted') return;
+    if (Platform.OS === 'web') {
+      const input = (document as any).createElement('input');
+      input.type = 'file';
+      input.accept = 'image/*';
+      input.multiple = true;
+      input.onchange = async (e: any) => {
+        const files: File[] = Array.from(e.target?.files ?? []);
+        if (files.length === 0) return;
+        const readFileAsBase64 = (file: File): Promise<{ base64: string; mimeType: string; uri: string }> =>
+          new Promise((resolve, reject) => {
+            const reader = new FileReader();
+            reader.onload = (ev: any) => {
+              const dataUrl = ev.target?.result as string;
+              resolve({ base64: dataUrl.split(',')[1], mimeType: file.type || 'image/jpeg', uri: dataUrl });
+            };
+            reader.onerror = reject;
+            reader.readAsDataURL(file);
+          });
+        try {
+          const assets = await Promise.all(files.map(readFileAsBase64));
+          await parseAssets(assets as any[], true);
+        } catch {
+          Alert.alert('Error', 'Failed to read image files.');
+        }
+      };
+      input.click();
+      return;
     }
+    const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
+    if (status !== 'granted') return;
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
       base64: true,
@@ -583,7 +630,13 @@ export default function AccountDetailScreen() {
   };
 
   const updateImportPos = (key: string, field: keyof ParsedPosition, val: string) => {
-    setImportPositions(ps => ps.map(p => p._key === key ? { ...p, [field]: val } : p));
+    setImportPositions(ps => ps.map(p => {
+      if (p._key !== key) return p;
+      const updated = { ...p, [field]: val };
+      // Clear the missing-avgCost warning once the user fills in a value
+      if (field === 'avgCost' && val.trim()) updated._avgCostMissing = false;
+      return updated;
+    }));
   };
 
   const removeImportPos = (key: string) => {
@@ -915,7 +968,15 @@ export default function AccountDetailScreen() {
           })
         ) : (
           // Intraday mode — grouped compact rows
-          BUCKET_ORDER.map(bucket => {
+          <>
+          <View style={styles.intradayColHeader}>
+            <View style={{ flex: 1 }} />
+            <Text style={[styles.intradayColLabel, { width: 54 }]}>Today</Text>
+            <Text style={[styles.intradayColLabel, { width: 48 }]}>P&L</Text>
+            <Text style={[styles.intradayColLabel, { width: 64 }]}>Value</Text>
+            <View style={{ width: 22 }} />
+          </View>
+          {BUCKET_ORDER.map(bucket => {
             const group = intradayGroups[bucket] ?? [];
             if (group.length === 0) return null;
             return (
@@ -938,7 +999,8 @@ export default function AccountDetailScreen() {
                 ))}
               </View>
             );
-          })
+          })}
+          </>
         )}
 
       </ScrollView>
@@ -1128,18 +1190,25 @@ export default function AccountDetailScreen() {
                 <Text style={styles.reviewLabel}>Review & edit before importing</Text>
 
                 {importPositions.map(p => (
-                  <View key={p._key} style={styles.importCard}>
+                  <View key={p._key} style={[styles.importCard, p._avgCostMissing && !p.avgCost ? styles.importCardWarning : null]}>
                     <View style={styles.importCardHeader}>
                       <Text style={styles.importSymbol}>{p.symbol || 'No symbol'}</Text>
-                      <Pressable onPress={() => removeImportPos(p._key)} style={styles.removeBtn}>
-                        <Feather name="x" size={15} color={colors.negative} />
-                      </Pressable>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                        {p._avgCostMissing && !p.avgCost && (
+                          <View style={styles.importWarningBadge}>
+                            <Text style={styles.importWarningBadgeText}>Avg cost needed</Text>
+                          </View>
+                        )}
+                        <Pressable onPress={() => removeImportPos(p._key)} style={styles.removeBtn}>
+                          <Feather name="x" size={15} color={colors.negative} />
+                        </Pressable>
+                      </View>
                     </View>
                     <TextInput style={styles.importInput} placeholder="Symbol" placeholderTextColor={colors.textMuted} autoCapitalize="characters" value={p.symbol} onChangeText={v => updateImportPos(p._key, 'symbol', v)} />
                     <TextInput style={styles.importInput} placeholder="Company name" placeholderTextColor={colors.textMuted} value={p.name} onChangeText={v => updateImportPos(p._key, 'name', v)} />
                     <View style={styles.importRow}>
                       <TextInput style={[styles.importInput, { flex: 1 }]} placeholder="Quantity" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={p.quantity} onChangeText={v => updateImportPos(p._key, 'quantity', v)} />
-                      <TextInput style={[styles.importInput, { flex: 1, marginLeft: 8 }]} placeholder="Avg cost ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={p.avgCost} onChangeText={v => updateImportPos(p._key, 'avgCost', v)} />
+                      <TextInput style={[styles.importInput, { flex: 1, marginLeft: 8 }, p._avgCostMissing && !p.avgCost ? styles.importInputWarning : null]} placeholder="Avg cost ($)" placeholderTextColor={colors.textMuted} keyboardType="decimal-pad" value={p.avgCost} onChangeText={v => updateImportPos(p._key, 'avgCost', v)} />
                     </View>
                     <TextInput style={styles.importInput} placeholder="Sector (optional)" placeholderTextColor={colors.textMuted} value={p.sector} onChangeText={v => updateImportPos(p._key, 'sector', v)} />
                   </View>
@@ -1451,10 +1520,14 @@ const styles = StyleSheet.create({
   importSummaryDivider: { width: 1, backgroundColor: colors.separator },
   reviewLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, marginBottom: 10 },
   importCard: { backgroundColor: colors.surfaceElevated, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.separator },
+  importCardWarning: { borderColor: '#D97706' },
   importCardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8 },
   importSymbol: { fontFamily: 'Inter_700Bold', fontSize: 15, color: colors.primary },
   removeBtn: { padding: 4 },
+  importWarningBadge: { backgroundColor: '#92400E22', borderRadius: 6, paddingHorizontal: 6, paddingVertical: 2, borderWidth: 1, borderColor: '#D97706' },
+  importWarningBadgeText: { fontFamily: 'Inter_500Medium', fontSize: 11, color: '#D97706' },
   importInput: { backgroundColor: colors.surface, borderRadius: 8, padding: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.separator, marginBottom: 8 },
+  importInputWarning: { borderColor: '#D97706' },
   importRow: { flexDirection: 'row' },
   dupOption: { borderWidth: 1, borderColor: colors.separator, borderRadius: 12, padding: 14, marginBottom: 10 },
   dupOptionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textPrimary, marginBottom: 2 },
@@ -1487,6 +1560,23 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     fontSize: 13,
     color: colors.textPrimary,
+  },
+  // Intraday column header
+  intradayColHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingBottom: 4,
+    paddingTop: 2,
+    gap: 10,
+  },
+  intradayColLabel: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 10,
+    color: colors.textMuted,
+    textAlign: 'right',
+    textTransform: 'uppercase',
+    letterSpacing: 0.4,
   },
   // Intraday bucket groups
   bucketGroupHeader: {

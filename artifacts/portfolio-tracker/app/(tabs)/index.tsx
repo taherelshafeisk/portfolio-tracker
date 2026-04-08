@@ -144,7 +144,7 @@ export default function HomeScreen() {
     refetch: refetchAlerts,
   } = useQuery({
     queryKey: ['alerts', 'all-active'],
-    queryFn: () => apiGet<ApiAlert[]>('/alerts?status=active'),
+    queryFn: () => apiGet<ApiAlert[]>('/alerts?status=active,acknowledged'),
     staleTime: Infinity,
   });
 

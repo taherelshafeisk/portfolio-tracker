@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { activitiesTable, positionsTable, tradeAnnotationsTable } from "@workspace/db";
-import { eq, desc, and, asc, isNotNull, ne } from "drizzle-orm";
+import { eq, desc, and, asc, isNotNull, ne, inArray } from "drizzle-orm";
 import { validate } from "../middlewares/validate";
 import { CreateActivityBody, z } from "@workspace/api-zod/schemas";
 
@@ -79,12 +79,22 @@ async function reconcilePosition(
     }
   }
 
-  if (currentQty > 0) {
-    const [existing] = await db
-      .select()
-      .from(positionsTable)
-      .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.symbol, symbol)));
+  // Find ALL rows for this (accountId, symbol) pair. More than one means a
+  // duplicate crept in (e.g. screenshot import ran twice before the unique
+  // constraint existed). Delete the extras, keeping only the canonical row.
+  const allExisting = await db
+    .select()
+    .from(positionsTable)
+    .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.symbol, symbol)));
 
+  if (allExisting.length > 1) {
+    const [, ...dupes] = allExisting; // keep first, delete the rest
+    await db.delete(positionsTable).where(inArray(positionsTable.id, dupes.map(r => r.id)));
+  }
+
+  const existing = allExisting[0] ?? null;
+
+  if (currentQty > 0) {
     if (existing) {
       await db
         .update(positionsTable)

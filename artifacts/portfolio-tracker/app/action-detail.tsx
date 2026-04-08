@@ -240,7 +240,7 @@ export default function ActionDetailScreen() {
 
   const { data: dbAlerts, refetch: refetchAlerts } = useQuery({
     queryKey: ['alerts', 'all-active'],
-    queryFn: () => apiGet<ApiAlert[]>('/alerts?status=active'),
+    queryFn: () => apiGet<ApiAlert[]>('/alerts?status=active,acknowledged'),
     staleTime: Infinity,
     enabled: !!action,
   });

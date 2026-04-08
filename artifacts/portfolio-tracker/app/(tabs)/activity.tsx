@@ -33,10 +33,18 @@ const ACTIVITY_TYPES = ['buy', 'sell', 'dividend', 'deposit', 'withdrawal', 'not
 
 interface ParsedTrade {
   _key: string;
+  /** Which file this trade came from (e.g. "File 1") — shown in review UI */
+  _source?: string;
+  /** True when price was derived from totalAmount/quantity rather than extracted directly */
+  _priceWasDerived?: boolean;
+  /** True when the ticker could not be resolved confidently — needs manual review */
+  _symbolUncertain?: boolean;
   activityType: string;
   symbol: string;
   quantity: string;
   price: string;
+  /** Raw transaction amount (negative = cash out, positive = cash in). Used for price derivation. */
+  totalAmount?: string;
   notes: string;
   tradeDate: string;
 }
@@ -76,6 +84,7 @@ export default function ActivityScreen() {
   const [step, setStep] = useState<Step>('account');
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [isParsing, setIsParsing] = useState(false);
+  const [parseProgress, setParseProgress] = useState<{ current: number; total: number } | null>(null);
   const [previewUri, setPreviewUri] = useState<string | null>(null);
   const [detectedAccount, setDetectedAccount] = useState<string | null>(null);
 
@@ -110,6 +119,7 @@ export default function ActivityScreen() {
     setManualForm(emptyManual);
     setPreviewUri(null);
     setDetectedAccount(null);
+    setParseProgress(null);
     setShowAdd(true);
   };
 
@@ -117,7 +127,15 @@ export default function ActivityScreen() {
     setShowAdd(false);
   };
 
-  const handlePickImage = async () => {
+  /**
+   * Parse one or more screenshots and merge their trades into a single review
+   * session. Handles mixed success gracefully: good rows still come through
+   * even if other files have errors or no trades.
+   *
+   * @param appendToExisting  When true, deduplicates against already-parsed trades
+   *                          (used by the "Add More Screenshots" button in review step).
+   */
+  const handlePickImages = async (appendToExisting = false) => {
     if (Platform.OS !== 'web') {
       const { status } = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (status !== 'granted') {
@@ -127,72 +145,138 @@ export default function ActivityScreen() {
     }
     const result = await ImagePicker.launchImageLibraryAsync({
       mediaTypes: ['images'],
+      allowsMultipleSelection: true,
       base64: true,
       quality: 0.7,
     });
-    if (result.canceled || !result.assets[0]) return;
-    const asset = result.assets[0];
-    if (!asset.base64) return;
+    if (result.canceled || result.assets.length === 0) return;
 
+    const assets = result.assets;
     setIsParsing(true);
-    setPreviewUri(asset.uri);
-    setStep('review');
+    setParseProgress({ current: 0, total: assets.length });
+    if (!appendToExisting) {
+      setPreviewUri(assets[0].uri);
+      setStep('review');
+    }
 
-    try {
-      const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          imageBase64: asset.base64,
-          mediaType: asset.mimeType || 'image/jpeg',
-          parseType: 'activities',
-        }),
-      });
-      const data = await resp.json();
+    const allNewTrades: ParsedTrade[] = [];
+    let detectedHint: string | null = null;
+    let fileIdx = appendToExisting ? (parsedTrades.length > 0 ? 1 : 0) : 0;
 
-      if (!resp.ok) {
-        Alert.alert('Error', data.error || 'Failed to parse screenshot.');
-        setStep('account');
-        setPreviewUri(null);
-        return;
+    for (let i = 0; i < assets.length; i++) {
+      const asset = assets[i];
+      setParseProgress({ current: i + 1, total: assets.length });
+      const sourceLabel = assets.length > 1 ? `File ${fileIdx + i + 1}` : undefined;
+
+      if (!asset.base64) continue;
+
+      try {
+        const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            imageBase64: asset.base64,
+            mediaType: asset.mimeType || 'image/jpeg',
+            parseType: 'activities',
+          }),
+        });
+        if (!resp.ok) {
+          // Non-fatal: skip this file and continue with the batch
+          console.warn(`[import] File ${i + 1} failed: HTTP ${resp.status}`);
+          continue;
+        }
+        const data = await resp.json();
+        const trades: any[] = data.trades || [];
+
+        if (!detectedHint && data.accountHint) {
+          detectedHint = data.accountHint;
+        }
+
+        const mapped: ParsedTrade[] = trades.map((t: any, j: number) => {
+          // Client-side price derivation fallback (belt-and-suspenders in case
+          // the server didn't derive it — e.g. for older API versions)
+          let price = t.price != null ? String(t.price) : '';
+          if (!price && t.quantity != null && t.totalAmount != null) {
+            const absQty = Math.abs(Number(t.quantity));
+            const absAmt = Math.abs(Number(t.totalAmount));
+            if (absQty > 0 && absAmt > 0) {
+              price = String(parseFloat((absAmt / absQty).toFixed(6)));
+            }
+          }
+
+          return {
+            _key: `f${i}_t${j}_${Date.now()}`,
+            _source: sourceLabel,
+            _priceWasDerived: t._priceWasDerived === true || (t.price == null && price !== ''),
+            _symbolUncertain: t._symbolConfident === false,
+            activityType: t.activityType || 'buy',
+            symbol: t.symbol || '',
+            quantity: t.quantity != null ? String(t.quantity) : '',
+            price,
+            totalAmount: t.totalAmount != null ? String(t.totalAmount) : undefined,
+            notes: t.notes || '',
+            tradeDate: parseDateSafe(t.tradeDate),
+          };
+        });
+
+        allNewTrades.push(...mapped);
+      } catch (err) {
+        console.warn(`[import] File ${i + 1} threw:`, err);
+        // Non-fatal: continue with remaining files
       }
+    }
 
-      const trades: any[] = data.trades || [];
-      const hint: string | null = data.accountHint || null;
-      setDetectedAccount(hint);
-
-      // If account hint matches one of the accounts, auto-select it
-      if (hint && !selectedAccountId) {
+    // Auto-select account from hint
+    if (detectedHint) {
+      setDetectedAccount(detectedHint);
+      if (!selectedAccountId) {
         const match = accounts.find(a =>
-          a.name.toLowerCase().includes(hint.toLowerCase()) ||
-          hint.toLowerCase().includes(a.name.toLowerCase()) ||
-          (a.broker && a.broker.toLowerCase().includes(hint.toLowerCase()))
+          a.name.toLowerCase().includes(detectedHint!.toLowerCase()) ||
+          detectedHint!.toLowerCase().includes(a.name.toLowerCase()) ||
+          (a.broker && a.broker.toLowerCase().includes(detectedHint!.toLowerCase()))
         );
         if (match) setSelectedAccountId(match.id.toString());
       }
+    }
 
-      if (trades.length === 0) {
-        Alert.alert('No trades found', 'Claude could not detect trades in this image. Try a clearer screenshot or enter manually.');
-        setStep('account');
-        setPreviewUri(null);
-      } else {
-        setParsedTrades(trades.map((t: any, i: number) => ({
-          _key: `t${i}_${Date.now()}`,
-          activityType: t.activityType || 'buy',
-          symbol: t.symbol || '',
-          quantity: t.quantity != null ? String(t.quantity) : '',
-          price: t.price != null ? String(t.price) : '',
-          notes: t.notes || '',
-          tradeDate: parseDateSafe(t.tradeDate),
-        })));
-      }
-    } catch {
-      Alert.alert('Error', 'Failed to parse screenshot.');
+    if (allNewTrades.length === 0 && !appendToExisting) {
+      Alert.alert(
+        'No trades found',
+        assets.length > 1
+          ? 'Claude could not detect trades in any of the selected images. Try clearer screenshots or enter manually.'
+          : 'Claude could not detect trades in this image. Try a clearer screenshot or enter manually.',
+      );
       setStep('account');
       setPreviewUri(null);
-    } finally {
-      setIsParsing(false);
+    } else {
+      // Dedup: combine with existing (if appending) and deduplicate by key
+      const combined = appendToExisting ? [...parsedTrades, ...allNewTrades] : allNewTrades;
+      const deduped = deduplicateParsedTrades(combined);
+      setParsedTrades(deduped);
     }
+
+    setIsParsing(false);
+    setParseProgress(null);
+  };
+
+  /**
+   * Deduplicate ParsedTrade list by symbol|date|activityType|absQty composite key.
+   * First occurrence wins (conservative).
+   */
+  const deduplicateParsedTrades = (trades: ParsedTrade[]): ParsedTrade[] => {
+    const seen = new Map<string, ParsedTrade>();
+    for (const t of trades) {
+      const rawQty = t.quantity ? Number(t.quantity) : NaN;
+      const absQty = isNaN(rawQty) ? '' : String(Math.abs(rawQty));
+      const key = [
+        t.symbol.toUpperCase().trim(),
+        t.tradeDate.split('T')[0].trim(),
+        t.activityType.toLowerCase().trim(),
+        absQty,
+      ].join('|');
+      if (!seen.has(key)) seen.set(key, t);
+    }
+    return Array.from(seen.values());
   };
 
   const updateParsedTrade = (key: string, field: keyof ParsedTrade, val: string) => {
@@ -309,7 +393,7 @@ export default function ActivityScreen() {
 
   // ─── Render parsed trade card (editable) ────────────────────────────────────
   const renderTradeCard = (t: ParsedTrade) => (
-    <View key={t._key} style={styles.tradeCard}>
+    <View key={t._key} style={[styles.tradeCard, t._symbolUncertain && styles.tradeCardWarning]}>
       <View style={styles.tradeCardHeader}>
         <View style={styles.typeRow}>
           {ACTIVITY_TYPES.map(type => (
@@ -328,11 +412,35 @@ export default function ActivityScreen() {
           <Feather name="x" size={16} color={colors.negative} />
         </Pressable>
       </View>
+
+      {/* Source / warning badges */}
+      {(t._source || t._symbolUncertain || t._priceWasDerived) && (
+        <View style={styles.tradeBadgeRow}>
+          {t._source && (
+            <View style={styles.tradeBadge}>
+              <Text style={styles.tradeBadgeText}>{t._source}</Text>
+            </View>
+          )}
+          {t._symbolUncertain && (
+            <View style={[styles.tradeBadge, styles.tradeBadgeWarn]}>
+              <Feather name="alert-triangle" size={10} color={colors.swing} />
+              <Text style={[styles.tradeBadgeText, { color: colors.swing }]}> Ticker needs review</Text>
+            </View>
+          )}
+          {t._priceWasDerived && (
+            <View style={[styles.tradeBadge, styles.tradeBadgeDerived]}>
+              <Feather name="zap" size={10} color={colors.primary} />
+              <Text style={[styles.tradeBadgeText, { color: colors.primary }]}> Price derived</Text>
+            </View>
+          )}
+        </View>
+      )}
+
       <View style={styles.tradeInputRow}>
         <TextInput
-          style={[styles.tradeInput, { flex: 1 }]}
-          placeholder="Symbol"
-          placeholderTextColor={colors.textMuted}
+          style={[styles.tradeInput, { flex: 1 }, t._symbolUncertain && styles.tradeInputWarn]}
+          placeholder="Symbol (required)"
+          placeholderTextColor={t._symbolUncertain ? colors.swing : colors.textMuted}
           autoCapitalize="characters"
           value={t.symbol}
           onChangeText={v => updateParsedTrade(t._key, 'symbol', v)}
@@ -356,7 +464,7 @@ export default function ActivityScreen() {
         />
         <TextInput
           style={[styles.tradeInput, { flex: 1, marginLeft: 8 }]}
-          placeholder="Price $"
+          placeholder="Price"
           placeholderTextColor={colors.textMuted}
           keyboardType="decimal-pad"
           value={t.price}
@@ -466,7 +574,7 @@ export default function ActivityScreen() {
                   </Pressable>
                   <Pressable
                     style={[styles.actionBtn, styles.actionBtnPrimary]}
-                    onPress={handlePickImage}
+                    onPress={() => handlePickImages(false)}
                   >
                     <Feather name="camera" size={18} color={colors.background} />
                     <Text style={styles.actionBtnPrimaryText}>Scan Screenshot</Text>
@@ -547,7 +655,11 @@ export default function ActivityScreen() {
                   <View style={styles.parsingState}>
                     {previewUri && <Image source={{ uri: previewUri }} style={styles.parsingThumb} />}
                     <ActivityIndicator size="large" color={colors.primary} style={{ marginTop: 20 }} />
-                    <Text style={styles.parsingText}>Claude is reading your screenshot…</Text>
+                    <Text style={styles.parsingText}>
+                      {parseProgress && parseProgress.total > 1
+                        ? `Scanning file ${parseProgress.current} of ${parseProgress.total}…`
+                        : 'Claude is reading your screenshot…'}
+                    </Text>
                   </View>
                 ) : (
                   <ScrollView showsVerticalScrollIndicator={false} keyboardShouldPersistTaps="handled">
@@ -570,13 +682,22 @@ export default function ActivityScreen() {
                     <Text style={styles.fieldLabel}>Review & Edit Trades</Text>
                     {parsedTrades.map(t => renderTradeCard(t))}
 
-                    <Pressable
-                      style={styles.addTradeBtn}
-                      onPress={() => setParsedTrades(ts => [...ts, { ...emptyManual, _key: `new_${Date.now()}` }])}
-                    >
-                      <Feather name="plus" size={14} color={colors.primary} />
-                      <Text style={styles.addTradeBtnText}>Add another trade</Text>
-                    </Pressable>
+                    <View style={styles.reviewActions}>
+                      <Pressable
+                        style={styles.addTradeBtn}
+                        onPress={() => setParsedTrades(ts => [...ts, { ...emptyManual, _key: `new_${Date.now()}` }])}
+                      >
+                        <Feather name="plus" size={14} color={colors.primary} />
+                        <Text style={styles.addTradeBtnText}>Add manually</Text>
+                      </Pressable>
+                      <Pressable
+                        style={styles.addTradeBtn}
+                        onPress={() => handlePickImages(true)}
+                      >
+                        <Feather name="camera" size={14} color={colors.primary} />
+                        <Text style={styles.addTradeBtnText}>Add more screenshots</Text>
+                      </Pressable>
+                    </View>
 
                     <View style={styles.modalButtons}>
                       <Pressable style={styles.cancelBtn} onPress={() => { setStep('account'); setPreviewUri(null); }}>
@@ -659,6 +780,7 @@ const styles = StyleSheet.create({
   previewLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
   // Trade review cards
   tradeCard: { backgroundColor: colors.surfaceElevated, borderRadius: 12, padding: 12, marginBottom: 10, borderWidth: 1, borderColor: colors.separator },
+  tradeCardWarning: { borderColor: colors.swing, borderWidth: 1.5 },
   tradeCardHeader: { flexDirection: 'row', alignItems: 'flex-start', marginBottom: 8 },
   typeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, flex: 1 },
   typeChip: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 16, borderWidth: 1, borderColor: colors.separator },
@@ -666,9 +788,16 @@ const styles = StyleSheet.create({
   typeChipText: { fontFamily: 'Inter_500Medium', fontSize: 11, color: colors.textMuted },
   typeChipTextSelected: { color: colors.primary },
   tradeDeleteBtn: { padding: 4, marginLeft: 4 },
+  tradeBadgeRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, marginBottom: 8 },
+  tradeBadge: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 8, backgroundColor: colors.surface },
+  tradeBadgeWarn: { backgroundColor: 'rgba(255,170,0,0.12)' },
+  tradeBadgeDerived: { backgroundColor: 'rgba(0,212,255,0.10)' },
+  tradeBadgeText: { fontFamily: 'Inter_400Regular', fontSize: 10, color: colors.textMuted },
   tradeInputRow: { flexDirection: 'row', marginBottom: 8 },
   tradeInput: { backgroundColor: colors.surface, borderRadius: 8, padding: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14, borderWidth: 1, borderColor: colors.separator, marginBottom: 8 },
-  addTradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', paddingVertical: 10, marginBottom: 12 },
+  tradeInputWarn: { borderColor: colors.swing },
+  reviewActions: { flexDirection: 'row', gap: 8, justifyContent: 'center', marginBottom: 4 },
+  addTradeBtn: { flexDirection: 'row', alignItems: 'center', gap: 6, justifyContent: 'center', paddingVertical: 10 },
   addTradeBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.primary },
   // Manual form
   fieldLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, marginBottom: 8, marginTop: 4 },

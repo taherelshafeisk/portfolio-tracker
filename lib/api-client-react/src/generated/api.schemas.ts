@@ -572,6 +572,244 @@ export interface UpdatePortfolioPolicyBody {
   ipsDate?: string | null;
 }
 
+export type PositionHistoryEntryStatus =
+  (typeof PositionHistoryEntryStatus)[keyof typeof PositionHistoryEntryStatus];
+
+export const PositionHistoryEntryStatus = {
+  open: "open",
+  closed: "closed",
+} as const;
+
+export interface PositionHistoryEntry {
+  positionId: number;
+  ticker: string;
+  status: PositionHistoryEntryStatus;
+  totalShares: number;
+  avgCostBasis: number;
+  totalInvested: number;
+  realizedPnl: number;
+  firstEntryDate?: string | null;
+  lastActivityDate?: string | null;
+  holdDurationDays: number;
+}
+
+export interface PositionHistorySleeve {
+  accountId: number;
+  accountName: string;
+  sleeve?: string | null;
+  totalRealizedPnl: number;
+  totalPositions: number;
+  closedPositions: number;
+  openPositions: number;
+  winRate: number;
+  positions: PositionHistoryEntry[];
+}
+
+export interface PositionHistoryTransaction {
+  id: number;
+  activityType: string;
+  quantity?: number | null;
+  price?: number | null;
+  totalAmount?: number | null;
+  tradeDate: string;
+  notes?: string | null;
+}
+
+export type PositionHistoryDetailStatus =
+  (typeof PositionHistoryDetailStatus)[keyof typeof PositionHistoryDetailStatus];
+
+export const PositionHistoryDetailStatus = {
+  open: "open",
+  closed: "closed",
+} as const;
+
+export type PositionHistoryDetailExitReason =
+  | (typeof PositionHistoryDetailExitReason)[keyof typeof PositionHistoryDetailExitReason]
+  | null;
+
+export const PositionHistoryDetailExitReason = {
+  IPS_RULE: "IPS_RULE",
+  STOP_LOSS: "STOP_LOSS",
+  ALERT_TRIGGERED: "ALERT_TRIGGERED",
+  MANUAL: "MANUAL",
+  CUT_LIST: "CUT_LIST",
+} as const;
+
+export interface PositionHistoryDetail {
+  positionId: number;
+  ticker: string;
+  accountId: number;
+  accountName?: string | null;
+  sleeve?: string | null;
+  status: PositionHistoryDetailStatus;
+  totalShares: number;
+  avgCostBasis: number;
+  totalInvested: number;
+  realizedPnl: number;
+  unrealizedPnl?: number | null;
+  currentPrice?: number | null;
+  firstEntryDate?: string | null;
+  lastActivityDate?: string | null;
+  holdDurationDays: number;
+  exitReason?: PositionHistoryDetailExitReason;
+  transactions: PositionHistoryTransaction[];
+}
+
+export interface ConvictionAttachment {
+  id: string;
+  convictionId: string;
+  storagePath: string;
+  mimeType: string;
+  displayOrder: number;
+  createdAt: string;
+}
+
+export type ClaudeAffectedTickerSuggestedAction =
+  (typeof ClaudeAffectedTickerSuggestedAction)[keyof typeof ClaudeAffectedTickerSuggestedAction];
+
+export const ClaudeAffectedTickerSuggestedAction = {
+  ADD: "ADD",
+  TRIM: "TRIM",
+  HOLD: "HOLD",
+  EXIT: "EXIT",
+  WATCH: "WATCH",
+  NO_POSITION: "NO_POSITION",
+} as const;
+
+export interface ClaudeAffectedTicker {
+  ticker: string;
+  current_position: string;
+  suggested_action: ClaudeAffectedTickerSuggestedAction;
+  rationale: string;
+  ips_compatible: boolean;
+  ips_conflict: string | null;
+}
+
+export type ClaudeProposalRelevance =
+  (typeof ClaudeProposalRelevance)[keyof typeof ClaudeProposalRelevance];
+
+export const ClaudeProposalRelevance = {
+  HIGH: "HIGH",
+  MEDIUM: "MEDIUM",
+  LOW: "LOW",
+} as const;
+
+export type ClaudeProposalConfidence =
+  (typeof ClaudeProposalConfidence)[keyof typeof ClaudeProposalConfidence];
+
+export const ClaudeProposalConfidence = {
+  HIGH: "HIGH",
+  MEDIUM: "MEDIUM",
+  SPECULATIVE: "SPECULATIVE",
+} as const;
+
+export type ClaudeProposalProposedActionType =
+  (typeof ClaudeProposalProposedActionType)[keyof typeof ClaudeProposalProposedActionType];
+
+export const ClaudeProposalProposedActionType = {
+  TRADE: "TRADE",
+  IPS_UPDATE: "IPS_UPDATE",
+  WATCH: "WATCH",
+  NO_ACTION: "NO_ACTION",
+} as const;
+
+export interface ClaudeProposal {
+  summary?: string;
+  relevance?: ClaudeProposalRelevance;
+  affected_tickers?: ClaudeAffectedTicker[];
+  macro_themes?: string[];
+  ips_change_suggested?: boolean;
+  ips_change_rationale?: string | null;
+  confidence?: ClaudeProposalConfidence;
+  proposed_action_type?: ClaudeProposalProposedActionType;
+  raw?: string;
+  parse_error?: boolean;
+}
+
+export type ConvictionWithAttachmentsSourceType =
+  (typeof ConvictionWithAttachmentsSourceType)[keyof typeof ConvictionWithAttachmentsSourceType];
+
+export const ConvictionWithAttachmentsSourceType = {
+  NEWS: "NEWS",
+  VIDEO: "VIDEO",
+  PERSON: "PERSON",
+  OWN_THESIS: "OWN_THESIS",
+} as const;
+
+export type ConvictionWithAttachmentsFetchStatus =
+  (typeof ConvictionWithAttachmentsFetchStatus)[keyof typeof ConvictionWithAttachmentsFetchStatus];
+
+export const ConvictionWithAttachmentsFetchStatus = {
+  PENDING: "PENDING",
+  SUCCESS: "SUCCESS",
+  FAILED: "FAILED",
+  SKIPPED: "SKIPPED",
+} as const;
+
+export type ConvictionWithAttachmentsProposalStatus =
+  (typeof ConvictionWithAttachmentsProposalStatus)[keyof typeof ConvictionWithAttachmentsProposalStatus];
+
+export const ConvictionWithAttachmentsProposalStatus = {
+  PROCESSING: "PROCESSING",
+  PENDING_REVIEW: "PENDING_REVIEW",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+} as const;
+
+export interface ConvictionWithAttachments {
+  id: string;
+  userId?: string | null;
+  sourceType: ConvictionWithAttachmentsSourceType;
+  sourceUrl?: string | null;
+  sourceName?: string | null;
+  rawNote?: string | null;
+  fetchedContent?: string | null;
+  fetchStatus: ConvictionWithAttachmentsFetchStatus;
+  tickers: string[];
+  themes: string[];
+  claudeProposal?: ClaudeProposal | null;
+  proposalStatus: ConvictionWithAttachmentsProposalStatus;
+  rejectionReason?: string | null;
+  actionId?: number | null;
+  createdAt: string;
+  updatedAt: string;
+  attachments: ConvictionAttachment[];
+}
+
+export type ConvictionStatusProposalStatus =
+  (typeof ConvictionStatusProposalStatus)[keyof typeof ConvictionStatusProposalStatus];
+
+export const ConvictionStatusProposalStatus = {
+  PROCESSING: "PROCESSING",
+  PENDING_REVIEW: "PENDING_REVIEW",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+} as const;
+
+export interface ConvictionStatus {
+  id: string;
+  proposalStatus: ConvictionStatusProposalStatus;
+  claudeProposal?: ClaudeProposal | null;
+}
+
+export type GetPositionHistoryParams = {
+  accountId?: number;
+  status?: GetPositionHistoryStatus;
+};
+
+export type GetPositionHistoryStatus =
+  (typeof GetPositionHistoryStatus)[keyof typeof GetPositionHistoryStatus];
+
+export const GetPositionHistoryStatus = {
+  open: "open",
+  closed: "closed",
+  all: "all",
+} as const;
+
+export type GetPositionHistoryByTickerParams = {
+  accountId: number;
+};
+
 export type ListActivitiesParams = {
   accountId?: number;
   limit?: number;
@@ -617,3 +855,53 @@ export const ListAlertsStatus = {
   acknowledged: "acknowledged",
   resolved: "resolved",
 } as const;
+
+export type ListConvictionsParams = {
+  proposal_status?: ListConvictionsProposalStatus;
+  ticker?: string;
+};
+
+export type ListConvictionsProposalStatus =
+  (typeof ListConvictionsProposalStatus)[keyof typeof ListConvictionsProposalStatus];
+
+export const ListConvictionsProposalStatus = {
+  PROCESSING: "PROCESSING",
+  PENDING_REVIEW: "PENDING_REVIEW",
+  APPROVED: "APPROVED",
+  REJECTED: "REJECTED",
+} as const;
+
+export type CreateConvictionBodySourceType =
+  (typeof CreateConvictionBodySourceType)[keyof typeof CreateConvictionBodySourceType];
+
+export const CreateConvictionBodySourceType = {
+  NEWS: "NEWS",
+  VIDEO: "VIDEO",
+  PERSON: "PERSON",
+  OWN_THESIS: "OWN_THESIS",
+} as const;
+
+export type CreateConvictionBody = {
+  source_type: CreateConvictionBodySourceType;
+  source_url?: string;
+  source_name?: string;
+  raw_note?: string;
+  /** JSON array string e.g. '["AAPL","TSLA"]' */
+  tickers?: string;
+  /** JSON array string e.g. '["macro","rates"]' */
+  themes?: string;
+  screenshots?: Blob[];
+};
+
+export type ApproveConviction200 = {
+  conviction?: ConvictionWithAttachments;
+  actionId?: number | null;
+};
+
+export type RejectConvictionBody = {
+  rejection_reason?: string;
+};
+
+export type DeleteConvictionAttachment200 = {
+  success?: boolean;
+};

@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { router } from 'expo-router';
+import { Feather } from '@expo/vector-icons';
 import { colors } from '@/constants/colors';
 import { formatCurrency } from '@/components/ui/PnlBadge';
 
@@ -39,7 +40,16 @@ export function SleeveSection({ sleeves }: Props) {
                 router.push({ pathname: '/account/[id]', params: { id: sleeve.id.toString() } })
               }
             >
-              <Text style={styles.name} numberOfLines={1}>{sleeve.name}</Text>
+              <View style={styles.cardHeader}>
+                <Text style={styles.name} numberOfLines={1}>{sleeve.name}</Text>
+                <Pressable
+                  onPress={() => router.push({ pathname: '/sleeve-history/[accountId]', params: { accountId: sleeve.id.toString() } })}
+                  hitSlop={6}
+                  style={styles.historyIcon}
+                >
+                  <Feather name="clock" size={14} color={colors.textMuted} />
+                </Pressable>
+              </View>
               <Text style={styles.nav}>{formatCurrency(sleeve.nav, 'compact')}</Text>
               <Text style={[styles.day, { color: isDayUp ? colors.positive : colors.negative }]}>
                 {isDayUp ? '+' : ''}{formatCurrency(Math.abs(sleeve.dayChange))} ({isDayUp ? '+' : ''}{sleeve.dayChangePct.toFixed(2)}%)
@@ -76,10 +86,19 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 4,
   },
+  cardHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  historyIcon: {
+    padding: 2,
+  },
   name: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: 13,
     color: colors.textPrimary,
+    flex: 1,
   },
   nav: {
     fontFamily: 'Inter_700Bold',

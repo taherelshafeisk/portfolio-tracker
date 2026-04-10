@@ -24,23 +24,34 @@ import type {
   AnthropicError,
   AnthropicMessage,
   ApiError,
+  ApproveConviction200,
   ChartData,
+  ConvictionStatus,
+  ConvictionWithAttachments,
   CreateAccountBody,
   CreateActivityBody,
   CreateAnthropicConversationBody,
+  CreateConvictionBody,
   CreatePositionBody,
+  DeleteConvictionAttachment200,
   GenerateAlertsBody,
   GenerateOrderSuggestionsBody,
   GetMarketChartParams,
+  GetPositionHistoryByTickerParams,
+  GetPositionHistoryParams,
   HealthStatus,
   ListActivitiesParams,
   ListAlertsParams,
+  ListConvictionsParams,
   ListOrderSuggestionsParams,
   MarketQuote,
   OrderSuggestion,
   PortfolioPolicy,
   PortfolioSummary,
   Position,
+  PositionHistoryDetail,
+  PositionHistorySleeve,
+  RejectConvictionBody,
   ScreenStocksParams,
   ScreenerResult,
   SendAnthropicMessageBody,
@@ -636,6 +647,227 @@ export function useListAccountPositions<
   },
 ): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
   const queryOptions = getListAccountPositionsQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Sleeve-level position history aggregation
+ */
+export const getGetPositionHistoryUrl = (params?: GetPositionHistoryParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/positions/history?${stringifiedParams}`
+    : `/api/positions/history`;
+};
+
+export const getPositionHistory = async (
+  params?: GetPositionHistoryParams,
+  options?: RequestInit,
+): Promise<PositionHistorySleeve[]> => {
+  return customFetch<PositionHistorySleeve[]>(
+    getGetPositionHistoryUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetPositionHistoryQueryKey = (
+  params?: GetPositionHistoryParams,
+) => {
+  return [`/api/positions/history`, ...(params ? [params] : [])] as const;
+};
+
+export const getGetPositionHistoryQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPositionHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetPositionHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPositionHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ?? getGetPositionHistoryQueryKey(params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPositionHistory>>
+  > = ({ signal }) => getPositionHistory(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPositionHistory>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPositionHistoryQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPositionHistory>>
+>;
+export type GetPositionHistoryQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Sleeve-level position history aggregation
+ */
+
+export function useGetPositionHistory<
+  TData = Awaited<ReturnType<typeof getPositionHistory>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: GetPositionHistoryParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPositionHistory>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPositionHistoryQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Position-level history detail for a ticker in an account
+ */
+export const getGetPositionHistoryByTickerUrl = (
+  ticker: string,
+  params: GetPositionHistoryByTickerParams,
+) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/positions/history/${ticker}?${stringifiedParams}`
+    : `/api/positions/history/${ticker}`;
+};
+
+export const getPositionHistoryByTicker = async (
+  ticker: string,
+  params: GetPositionHistoryByTickerParams,
+  options?: RequestInit,
+): Promise<PositionHistoryDetail> => {
+  return customFetch<PositionHistoryDetail>(
+    getGetPositionHistoryByTickerUrl(ticker, params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getGetPositionHistoryByTickerQueryKey = (
+  ticker: string,
+  params?: GetPositionHistoryByTickerParams,
+) => {
+  return [
+    `/api/positions/history/${ticker}`,
+    ...(params ? [params] : []),
+  ] as const;
+};
+
+export const getGetPositionHistoryByTickerQueryOptions = <
+  TData = Awaited<ReturnType<typeof getPositionHistoryByTicker>>,
+  TError = ErrorType<void>,
+>(
+  ticker: string,
+  params: GetPositionHistoryByTickerParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPositionHistoryByTicker>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey =
+    queryOptions?.queryKey ??
+    getGetPositionHistoryByTickerQueryKey(ticker, params);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getPositionHistoryByTicker>>
+  > = ({ signal }) =>
+    getPositionHistoryByTicker(ticker, params, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!ticker,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getPositionHistoryByTicker>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetPositionHistoryByTickerQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getPositionHistoryByTicker>>
+>;
+export type GetPositionHistoryByTickerQueryError = ErrorType<void>;
+
+/**
+ * @summary Position-level history detail for a ticker in an account
+ */
+
+export function useGetPositionHistoryByTicker<
+  TData = Awaited<ReturnType<typeof getPositionHistoryByTicker>>,
+  TError = ErrorType<void>,
+>(
+  ticker: string,
+  params: GetPositionHistoryByTickerParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getPositionHistoryByTicker>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetPositionHistoryByTickerQueryOptions(
+    ticker,
+    params,
+    options,
+  );
 
   const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
     queryKey: QueryKey;
@@ -2829,4 +3061,645 @@ export const useUpdateAlert = <
   TContext
 > => {
   return useMutation(getUpdateAlertMutationOptions(options));
+};
+
+/**
+ * @summary List convictions
+ */
+export const getListConvictionsUrl = (params?: ListConvictionsParams) => {
+  const normalizedParams = new URLSearchParams();
+
+  Object.entries(params || {}).forEach(([key, value]) => {
+    if (value !== undefined) {
+      normalizedParams.append(key, value === null ? "null" : value.toString());
+    }
+  });
+
+  const stringifiedParams = normalizedParams.toString();
+
+  return stringifiedParams.length > 0
+    ? `/api/convictions?${stringifiedParams}`
+    : `/api/convictions`;
+};
+
+export const listConvictions = async (
+  params?: ListConvictionsParams,
+  options?: RequestInit,
+): Promise<ConvictionWithAttachments[]> => {
+  return customFetch<ConvictionWithAttachments[]>(
+    getListConvictionsUrl(params),
+    {
+      ...options,
+      method: "GET",
+    },
+  );
+};
+
+export const getListConvictionsQueryKey = (params?: ListConvictionsParams) => {
+  return [`/api/convictions`, ...(params ? [params] : [])] as const;
+};
+
+export const getListConvictionsQueryOptions = <
+  TData = Awaited<ReturnType<typeof listConvictions>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListConvictionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listConvictions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getListConvictionsQueryKey(params);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof listConvictions>>> = ({
+    signal,
+  }) => listConvictions(params, { signal, ...requestOptions });
+
+  return { queryKey, queryFn, ...queryOptions } as UseQueryOptions<
+    Awaited<ReturnType<typeof listConvictions>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type ListConvictionsQueryResult = NonNullable<
+  Awaited<ReturnType<typeof listConvictions>>
+>;
+export type ListConvictionsQueryError = ErrorType<unknown>;
+
+/**
+ * @summary List convictions
+ */
+
+export function useListConvictions<
+  TData = Awaited<ReturnType<typeof listConvictions>>,
+  TError = ErrorType<unknown>,
+>(
+  params?: ListConvictionsParams,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof listConvictions>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getListConvictionsQueryOptions(params, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Create conviction (multipart/form-data)
+ */
+export const getCreateConvictionUrl = () => {
+  return `/api/convictions`;
+};
+
+export const createConviction = async (
+  createConvictionBody: CreateConvictionBody,
+  options?: RequestInit,
+): Promise<ConvictionWithAttachments> => {
+  const formData = new FormData();
+  formData.append(`source_type`, createConvictionBody.source_type);
+  if (createConvictionBody.source_url !== undefined) {
+    formData.append(`source_url`, createConvictionBody.source_url);
+  }
+  if (createConvictionBody.source_name !== undefined) {
+    formData.append(`source_name`, createConvictionBody.source_name);
+  }
+  if (createConvictionBody.raw_note !== undefined) {
+    formData.append(`raw_note`, createConvictionBody.raw_note);
+  }
+  if (createConvictionBody.tickers !== undefined) {
+    formData.append(`tickers`, createConvictionBody.tickers);
+  }
+  if (createConvictionBody.themes !== undefined) {
+    formData.append(`themes`, createConvictionBody.themes);
+  }
+  if (createConvictionBody.screenshots !== undefined) {
+    createConvictionBody.screenshots.forEach((value) =>
+      formData.append(`screenshots`, value),
+    );
+  }
+
+  return customFetch<ConvictionWithAttachments>(getCreateConvictionUrl(), {
+    ...options,
+    method: "POST",
+    body: formData,
+  });
+};
+
+export const getCreateConvictionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createConviction>>,
+    TError,
+    { data: BodyType<CreateConvictionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof createConviction>>,
+  TError,
+  { data: BodyType<CreateConvictionBody> },
+  TContext
+> => {
+  const mutationKey = ["createConviction"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof createConviction>>,
+    { data: BodyType<CreateConvictionBody> }
+  > = (props) => {
+    const { data } = props ?? {};
+
+    return createConviction(data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type CreateConvictionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof createConviction>>
+>;
+export type CreateConvictionMutationBody = BodyType<CreateConvictionBody>;
+export type CreateConvictionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Create conviction (multipart/form-data)
+ */
+export const useCreateConviction = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof createConviction>>,
+    TError,
+    { data: BodyType<CreateConvictionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof createConviction>>,
+  TError,
+  { data: BodyType<CreateConvictionBody> },
+  TContext
+> => {
+  return useMutation(getCreateConvictionMutationOptions(options));
+};
+
+/**
+ * @summary Get conviction by ID
+ */
+export const getGetConvictionUrl = (id: string) => {
+  return `/api/convictions/${id}`;
+};
+
+export const getConviction = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ConvictionWithAttachments> => {
+  return customFetch<ConvictionWithAttachments>(getGetConvictionUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetConvictionQueryKey = (id: string) => {
+  return [`/api/convictions/${id}`] as const;
+};
+
+export const getGetConvictionQueryOptions = <
+  TData = Awaited<ReturnType<typeof getConviction>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getConviction>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetConvictionQueryKey(id);
+
+  const queryFn: QueryFunction<Awaited<ReturnType<typeof getConviction>>> = ({
+    signal,
+  }) => getConviction(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getConviction>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetConvictionQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getConviction>>
+>;
+export type GetConvictionQueryError = ErrorType<void>;
+
+/**
+ * @summary Get conviction by ID
+ */
+
+export function useGetConviction<
+  TData = Awaited<ReturnType<typeof getConviction>>,
+  TError = ErrorType<void>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getConviction>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetConvictionQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Poll conviction processing status
+ */
+export const getGetConvictionStatusUrl = (id: string) => {
+  return `/api/convictions/${id}/status`;
+};
+
+export const getConvictionStatus = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ConvictionStatus> => {
+  return customFetch<ConvictionStatus>(getGetConvictionStatusUrl(id), {
+    ...options,
+    method: "GET",
+  });
+};
+
+export const getGetConvictionStatusQueryKey = (id: string) => {
+  return [`/api/convictions/${id}/status`] as const;
+};
+
+export const getGetConvictionStatusQueryOptions = <
+  TData = Awaited<ReturnType<typeof getConvictionStatus>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getConvictionStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+) => {
+  const { query: queryOptions, request: requestOptions } = options ?? {};
+
+  const queryKey = queryOptions?.queryKey ?? getGetConvictionStatusQueryKey(id);
+
+  const queryFn: QueryFunction<
+    Awaited<ReturnType<typeof getConvictionStatus>>
+  > = ({ signal }) => getConvictionStatus(id, { signal, ...requestOptions });
+
+  return {
+    queryKey,
+    queryFn,
+    enabled: !!id,
+    ...queryOptions,
+  } as UseQueryOptions<
+    Awaited<ReturnType<typeof getConvictionStatus>>,
+    TError,
+    TData
+  > & { queryKey: QueryKey };
+};
+
+export type GetConvictionStatusQueryResult = NonNullable<
+  Awaited<ReturnType<typeof getConvictionStatus>>
+>;
+export type GetConvictionStatusQueryError = ErrorType<unknown>;
+
+/**
+ * @summary Poll conviction processing status
+ */
+
+export function useGetConvictionStatus<
+  TData = Awaited<ReturnType<typeof getConvictionStatus>>,
+  TError = ErrorType<unknown>,
+>(
+  id: string,
+  options?: {
+    query?: UseQueryOptions<
+      Awaited<ReturnType<typeof getConvictionStatus>>,
+      TError,
+      TData
+    >;
+    request?: SecondParameter<typeof customFetch>;
+  },
+): UseQueryResult<TData, TError> & { queryKey: QueryKey } {
+  const queryOptions = getGetConvictionStatusQueryOptions(id, options);
+
+  const query = useQuery(queryOptions) as UseQueryResult<TData, TError> & {
+    queryKey: QueryKey;
+  };
+
+  return { ...query, queryKey: queryOptions.queryKey };
+}
+
+/**
+ * @summary Approve conviction
+ */
+export const getApproveConvictionUrl = (id: string) => {
+  return `/api/convictions/${id}/approve`;
+};
+
+export const approveConviction = async (
+  id: string,
+  options?: RequestInit,
+): Promise<ApproveConviction200> => {
+  return customFetch<ApproveConviction200>(getApproveConvictionUrl(id), {
+    ...options,
+    method: "PATCH",
+  });
+};
+
+export const getApproveConvictionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof approveConviction>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof approveConviction>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  const mutationKey = ["approveConviction"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof approveConviction>>,
+    { id: string }
+  > = (props) => {
+    const { id } = props ?? {};
+
+    return approveConviction(id, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type ApproveConvictionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof approveConviction>>
+>;
+
+export type ApproveConvictionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Approve conviction
+ */
+export const useApproveConviction = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof approveConviction>>,
+    TError,
+    { id: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof approveConviction>>,
+  TError,
+  { id: string },
+  TContext
+> => {
+  return useMutation(getApproveConvictionMutationOptions(options));
+};
+
+/**
+ * @summary Reject conviction
+ */
+export const getRejectConvictionUrl = (id: string) => {
+  return `/api/convictions/${id}/reject`;
+};
+
+export const rejectConviction = async (
+  id: string,
+  rejectConvictionBody: RejectConvictionBody,
+  options?: RequestInit,
+): Promise<ConvictionWithAttachments> => {
+  return customFetch<ConvictionWithAttachments>(getRejectConvictionUrl(id), {
+    ...options,
+    method: "PATCH",
+    headers: { "Content-Type": "application/json", ...options?.headers },
+    body: JSON.stringify(rejectConvictionBody),
+  });
+};
+
+export const getRejectConvictionMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectConviction>>,
+    TError,
+    { id: string; data: BodyType<RejectConvictionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof rejectConviction>>,
+  TError,
+  { id: string; data: BodyType<RejectConvictionBody> },
+  TContext
+> => {
+  const mutationKey = ["rejectConviction"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof rejectConviction>>,
+    { id: string; data: BodyType<RejectConvictionBody> }
+  > = (props) => {
+    const { id, data } = props ?? {};
+
+    return rejectConviction(id, data, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type RejectConvictionMutationResult = NonNullable<
+  Awaited<ReturnType<typeof rejectConviction>>
+>;
+export type RejectConvictionMutationBody = BodyType<RejectConvictionBody>;
+export type RejectConvictionMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Reject conviction
+ */
+export const useRejectConviction = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof rejectConviction>>,
+    TError,
+    { id: string; data: BodyType<RejectConvictionBody> },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof rejectConviction>>,
+  TError,
+  { id: string; data: BodyType<RejectConvictionBody> },
+  TContext
+> => {
+  return useMutation(getRejectConvictionMutationOptions(options));
+};
+
+/**
+ * @summary Delete attachment
+ */
+export const getDeleteConvictionAttachmentUrl = (
+  id: string,
+  attachmentId: string,
+) => {
+  return `/api/convictions/${id}/attachments/${attachmentId}`;
+};
+
+export const deleteConvictionAttachment = async (
+  id: string,
+  attachmentId: string,
+  options?: RequestInit,
+): Promise<DeleteConvictionAttachment200> => {
+  return customFetch<DeleteConvictionAttachment200>(
+    getDeleteConvictionAttachmentUrl(id, attachmentId),
+    {
+      ...options,
+      method: "DELETE",
+    },
+  );
+};
+
+export const getDeleteConvictionAttachmentMutationOptions = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteConvictionAttachment>>,
+    TError,
+    { id: string; attachmentId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationOptions<
+  Awaited<ReturnType<typeof deleteConvictionAttachment>>,
+  TError,
+  { id: string; attachmentId: string },
+  TContext
+> => {
+  const mutationKey = ["deleteConvictionAttachment"];
+  const { mutation: mutationOptions, request: requestOptions } = options
+    ? options.mutation &&
+      "mutationKey" in options.mutation &&
+      options.mutation.mutationKey
+      ? options
+      : { ...options, mutation: { ...options.mutation, mutationKey } }
+    : { mutation: { mutationKey }, request: undefined };
+
+  const mutationFn: MutationFunction<
+    Awaited<ReturnType<typeof deleteConvictionAttachment>>,
+    { id: string; attachmentId: string }
+  > = (props) => {
+    const { id, attachmentId } = props ?? {};
+
+    return deleteConvictionAttachment(id, attachmentId, requestOptions);
+  };
+
+  return { mutationFn, ...mutationOptions };
+};
+
+export type DeleteConvictionAttachmentMutationResult = NonNullable<
+  Awaited<ReturnType<typeof deleteConvictionAttachment>>
+>;
+
+export type DeleteConvictionAttachmentMutationError = ErrorType<unknown>;
+
+/**
+ * @summary Delete attachment
+ */
+export const useDeleteConvictionAttachment = <
+  TError = ErrorType<unknown>,
+  TContext = unknown,
+>(options?: {
+  mutation?: UseMutationOptions<
+    Awaited<ReturnType<typeof deleteConvictionAttachment>>,
+    TError,
+    { id: string; attachmentId: string },
+    TContext
+  >;
+  request?: SecondParameter<typeof customFetch>;
+}): UseMutationResult<
+  Awaited<ReturnType<typeof deleteConvictionAttachment>>,
+  TError,
+  { id: string; attachmentId: string },
+  TContext
+> => {
+  return useMutation(getDeleteConvictionAttachmentMutationOptions(options));
 };

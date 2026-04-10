@@ -71,6 +71,13 @@ export default function TabLayout() {
         }}
       />
       <Tabs.Screen
+        name="feed"
+        options={{
+          title: "Signals",
+          tabBarIcon: ({ color }) => <Feather name="rss" size={22} color={color} />,
+        }}
+      />
+      <Tabs.Screen
         name="ai"
         options={{
           title: "AI",

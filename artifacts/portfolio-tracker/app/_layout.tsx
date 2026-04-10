@@ -79,6 +79,30 @@ function RootLayoutNav() {
           presentation: 'card',
         }}
       />
+      <Stack.Screen
+        name="sleeve-history/[accountId]"
+        options={{
+          headerShown: true,
+          headerStyle: { backgroundColor: '#0A0E1A' },
+          headerTintColor: '#F0F4FF',
+          headerBackTitle: 'Back',
+          presentation: 'card',
+        }}
+      />
+      <Stack.Screen
+        name="conviction-capture"
+        options={{
+          headerShown: false,
+          presentation: 'card',
+        }}
+      />
+      <Stack.Screen
+        name="conviction/[id]"
+        options={{
+          headerShown: false,
+          presentation: 'card',
+        }}
+      />
     </Stack>
   );
 }

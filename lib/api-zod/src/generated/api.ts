@@ -162,6 +162,89 @@ export const ListAccountPositionsResponse = zod.array(
 );
 
 /**
+ * @summary Sleeve-level position history aggregation
+ */
+export const getPositionHistoryQueryStatusDefault = `all`;
+
+export const GetPositionHistoryQueryParams = zod.object({
+  accountId: zod.coerce.number().optional(),
+  status: zod
+    .enum(["open", "closed", "all"])
+    .default(getPositionHistoryQueryStatusDefault),
+});
+
+export const GetPositionHistoryResponseItem = zod.object({
+  accountId: zod.number(),
+  accountName: zod.string(),
+  sleeve: zod.string().nullish(),
+  totalRealizedPnl: zod.number(),
+  totalPositions: zod.number(),
+  closedPositions: zod.number(),
+  openPositions: zod.number(),
+  winRate: zod.number(),
+  positions: zod.array(
+    zod.object({
+      positionId: zod.number(),
+      ticker: zod.string(),
+      status: zod.enum(["open", "closed"]),
+      totalShares: zod.number(),
+      avgCostBasis: zod.number(),
+      totalInvested: zod.number(),
+      realizedPnl: zod.number(),
+      firstEntryDate: zod.date().nullish(),
+      lastActivityDate: zod.date().nullish(),
+      holdDurationDays: zod.number(),
+    }),
+  ),
+});
+export const GetPositionHistoryResponse = zod.array(
+  GetPositionHistoryResponseItem,
+);
+
+/**
+ * @summary Position-level history detail for a ticker in an account
+ */
+export const GetPositionHistoryByTickerParams = zod.object({
+  ticker: zod.coerce.string(),
+});
+
+export const GetPositionHistoryByTickerQueryParams = zod.object({
+  accountId: zod.coerce.number(),
+});
+
+export const GetPositionHistoryByTickerResponse = zod.object({
+  positionId: zod.number(),
+  ticker: zod.string(),
+  accountId: zod.number(),
+  accountName: zod.string().nullish(),
+  sleeve: zod.string().nullish(),
+  status: zod.enum(["open", "closed"]),
+  totalShares: zod.number(),
+  avgCostBasis: zod.number(),
+  totalInvested: zod.number(),
+  realizedPnl: zod.number(),
+  unrealizedPnl: zod.number().nullish(),
+  currentPrice: zod.number().nullish(),
+  firstEntryDate: zod.date().nullish(),
+  lastActivityDate: zod.date().nullish(),
+  holdDurationDays: zod.number(),
+  exitReason: zod
+    .enum(["IPS_RULE", "STOP_LOSS", "ALERT_TRIGGERED", "MANUAL", "CUT_LIST"])
+    .nullish(),
+  transactions: zod.array(
+    zod.object({
+      id: zod.number(),
+      activityType: zod.string(),
+      quantity: zod.number().nullish(),
+      price: zod.number().nullish(),
+      totalAmount: zod.number().nullish(),
+      tradeDate: zod.date(),
+      notes: zod.string().nullish(),
+    }),
+  ),
+});
+
+/**
  * @summary Create a new position
  */
 export const CreatePositionBody = zod.object({
@@ -790,4 +873,395 @@ export const UpdateAlertResponse = zod.object({
   generatedAt: zod.date(),
   createdAt: zod.date(),
   updatedAt: zod.date(),
+});
+
+/**
+ * @summary List convictions
+ */
+export const ListConvictionsQueryParams = zod.object({
+  proposal_status: zod
+    .enum(["PROCESSING", "PENDING_REVIEW", "APPROVED", "REJECTED"])
+    .optional(),
+  ticker: zod.coerce.string().optional(),
+});
+
+export const ListConvictionsResponseItem = zod.object({
+  id: zod.string(),
+  userId: zod.string().nullish(),
+  sourceType: zod.enum(["NEWS", "VIDEO", "PERSON", "OWN_THESIS"]),
+  sourceUrl: zod.string().nullish(),
+  sourceName: zod.string().nullish(),
+  rawNote: zod.string().nullish(),
+  fetchedContent: zod.string().nullish(),
+  fetchStatus: zod.enum(["PENDING", "SUCCESS", "FAILED", "SKIPPED"]),
+  tickers: zod.array(zod.string()),
+  themes: zod.array(zod.string()),
+  claudeProposal: zod
+    .object({
+      summary: zod.string().optional(),
+      relevance: zod.enum(["HIGH", "MEDIUM", "LOW"]).optional(),
+      affected_tickers: zod
+        .array(
+          zod.object({
+            ticker: zod.string(),
+            current_position: zod.string(),
+            suggested_action: zod.enum([
+              "ADD",
+              "TRIM",
+              "HOLD",
+              "EXIT",
+              "WATCH",
+              "NO_POSITION",
+            ]),
+            rationale: zod.string(),
+            ips_compatible: zod.boolean(),
+            ips_conflict: zod.string().nullable(),
+          }),
+        )
+        .optional(),
+      macro_themes: zod.array(zod.string()).optional(),
+      ips_change_suggested: zod.boolean().optional(),
+      ips_change_rationale: zod.string().nullish(),
+      confidence: zod.enum(["HIGH", "MEDIUM", "SPECULATIVE"]).optional(),
+      proposed_action_type: zod
+        .enum(["TRADE", "IPS_UPDATE", "WATCH", "NO_ACTION"])
+        .optional(),
+      raw: zod.string().optional(),
+      parse_error: zod.boolean().optional(),
+    })
+    .nullish(),
+  proposalStatus: zod.enum([
+    "PROCESSING",
+    "PENDING_REVIEW",
+    "APPROVED",
+    "REJECTED",
+  ]),
+  rejectionReason: zod.string().nullish(),
+  actionId: zod.number().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+  attachments: zod.array(
+    zod.object({
+      id: zod.string(),
+      convictionId: zod.string(),
+      storagePath: zod.string(),
+      mimeType: zod.string(),
+      displayOrder: zod.number(),
+      createdAt: zod.date(),
+    }),
+  ),
+});
+export const ListConvictionsResponse = zod.array(ListConvictionsResponseItem);
+
+/**
+ * @summary Create conviction (multipart/form-data)
+ */
+export const CreateConvictionBody = zod.object({
+  source_type: zod.enum(["NEWS", "VIDEO", "PERSON", "OWN_THESIS"]),
+  source_url: zod.string().optional(),
+  source_name: zod.string().optional(),
+  raw_note: zod.string().optional(),
+  tickers: zod
+    .string()
+    .optional()
+    .describe('JSON array string e.g. \'[\"AAPL\",\"TSLA\"]\''),
+  themes: zod
+    .string()
+    .optional()
+    .describe('JSON array string e.g. \'[\"macro\",\"rates\"]\''),
+  screenshots: zod.array(zod.instanceof(File)).optional(),
+});
+
+/**
+ * @summary Get conviction by ID
+ */
+export const GetConvictionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetConvictionResponse = zod.object({
+  id: zod.string(),
+  userId: zod.string().nullish(),
+  sourceType: zod.enum(["NEWS", "VIDEO", "PERSON", "OWN_THESIS"]),
+  sourceUrl: zod.string().nullish(),
+  sourceName: zod.string().nullish(),
+  rawNote: zod.string().nullish(),
+  fetchedContent: zod.string().nullish(),
+  fetchStatus: zod.enum(["PENDING", "SUCCESS", "FAILED", "SKIPPED"]),
+  tickers: zod.array(zod.string()),
+  themes: zod.array(zod.string()),
+  claudeProposal: zod
+    .object({
+      summary: zod.string().optional(),
+      relevance: zod.enum(["HIGH", "MEDIUM", "LOW"]).optional(),
+      affected_tickers: zod
+        .array(
+          zod.object({
+            ticker: zod.string(),
+            current_position: zod.string(),
+            suggested_action: zod.enum([
+              "ADD",
+              "TRIM",
+              "HOLD",
+              "EXIT",
+              "WATCH",
+              "NO_POSITION",
+            ]),
+            rationale: zod.string(),
+            ips_compatible: zod.boolean(),
+            ips_conflict: zod.string().nullable(),
+          }),
+        )
+        .optional(),
+      macro_themes: zod.array(zod.string()).optional(),
+      ips_change_suggested: zod.boolean().optional(),
+      ips_change_rationale: zod.string().nullish(),
+      confidence: zod.enum(["HIGH", "MEDIUM", "SPECULATIVE"]).optional(),
+      proposed_action_type: zod
+        .enum(["TRADE", "IPS_UPDATE", "WATCH", "NO_ACTION"])
+        .optional(),
+      raw: zod.string().optional(),
+      parse_error: zod.boolean().optional(),
+    })
+    .nullish(),
+  proposalStatus: zod.enum([
+    "PROCESSING",
+    "PENDING_REVIEW",
+    "APPROVED",
+    "REJECTED",
+  ]),
+  rejectionReason: zod.string().nullish(),
+  actionId: zod.number().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+  attachments: zod.array(
+    zod.object({
+      id: zod.string(),
+      convictionId: zod.string(),
+      storagePath: zod.string(),
+      mimeType: zod.string(),
+      displayOrder: zod.number(),
+      createdAt: zod.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Poll conviction processing status
+ */
+export const GetConvictionStatusParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const GetConvictionStatusResponse = zod.object({
+  id: zod.string(),
+  proposalStatus: zod.enum([
+    "PROCESSING",
+    "PENDING_REVIEW",
+    "APPROVED",
+    "REJECTED",
+  ]),
+  claudeProposal: zod
+    .object({
+      summary: zod.string().optional(),
+      relevance: zod.enum(["HIGH", "MEDIUM", "LOW"]).optional(),
+      affected_tickers: zod
+        .array(
+          zod.object({
+            ticker: zod.string(),
+            current_position: zod.string(),
+            suggested_action: zod.enum([
+              "ADD",
+              "TRIM",
+              "HOLD",
+              "EXIT",
+              "WATCH",
+              "NO_POSITION",
+            ]),
+            rationale: zod.string(),
+            ips_compatible: zod.boolean(),
+            ips_conflict: zod.string().nullable(),
+          }),
+        )
+        .optional(),
+      macro_themes: zod.array(zod.string()).optional(),
+      ips_change_suggested: zod.boolean().optional(),
+      ips_change_rationale: zod.string().nullish(),
+      confidence: zod.enum(["HIGH", "MEDIUM", "SPECULATIVE"]).optional(),
+      proposed_action_type: zod
+        .enum(["TRADE", "IPS_UPDATE", "WATCH", "NO_ACTION"])
+        .optional(),
+      raw: zod.string().optional(),
+      parse_error: zod.boolean().optional(),
+    })
+    .nullish(),
+});
+
+/**
+ * @summary Approve conviction
+ */
+export const ApproveConvictionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const ApproveConvictionResponse = zod.object({
+  conviction: zod
+    .object({
+      id: zod.string(),
+      userId: zod.string().nullish(),
+      sourceType: zod.enum(["NEWS", "VIDEO", "PERSON", "OWN_THESIS"]),
+      sourceUrl: zod.string().nullish(),
+      sourceName: zod.string().nullish(),
+      rawNote: zod.string().nullish(),
+      fetchedContent: zod.string().nullish(),
+      fetchStatus: zod.enum(["PENDING", "SUCCESS", "FAILED", "SKIPPED"]),
+      tickers: zod.array(zod.string()),
+      themes: zod.array(zod.string()),
+      claudeProposal: zod
+        .object({
+          summary: zod.string().optional(),
+          relevance: zod.enum(["HIGH", "MEDIUM", "LOW"]).optional(),
+          affected_tickers: zod
+            .array(
+              zod.object({
+                ticker: zod.string(),
+                current_position: zod.string(),
+                suggested_action: zod.enum([
+                  "ADD",
+                  "TRIM",
+                  "HOLD",
+                  "EXIT",
+                  "WATCH",
+                  "NO_POSITION",
+                ]),
+                rationale: zod.string(),
+                ips_compatible: zod.boolean(),
+                ips_conflict: zod.string().nullable(),
+              }),
+            )
+            .optional(),
+          macro_themes: zod.array(zod.string()).optional(),
+          ips_change_suggested: zod.boolean().optional(),
+          ips_change_rationale: zod.string().nullish(),
+          confidence: zod.enum(["HIGH", "MEDIUM", "SPECULATIVE"]).optional(),
+          proposed_action_type: zod
+            .enum(["TRADE", "IPS_UPDATE", "WATCH", "NO_ACTION"])
+            .optional(),
+          raw: zod.string().optional(),
+          parse_error: zod.boolean().optional(),
+        })
+        .nullish(),
+      proposalStatus: zod.enum([
+        "PROCESSING",
+        "PENDING_REVIEW",
+        "APPROVED",
+        "REJECTED",
+      ]),
+      rejectionReason: zod.string().nullish(),
+      actionId: zod.number().nullish(),
+      createdAt: zod.date(),
+      updatedAt: zod.date(),
+      attachments: zod.array(
+        zod.object({
+          id: zod.string(),
+          convictionId: zod.string(),
+          storagePath: zod.string(),
+          mimeType: zod.string(),
+          displayOrder: zod.number(),
+          createdAt: zod.date(),
+        }),
+      ),
+    })
+    .optional(),
+  actionId: zod.number().nullish(),
+});
+
+/**
+ * @summary Reject conviction
+ */
+export const RejectConvictionParams = zod.object({
+  id: zod.coerce.string(),
+});
+
+export const RejectConvictionBody = zod.object({
+  rejection_reason: zod.string().optional(),
+});
+
+export const RejectConvictionResponse = zod.object({
+  id: zod.string(),
+  userId: zod.string().nullish(),
+  sourceType: zod.enum(["NEWS", "VIDEO", "PERSON", "OWN_THESIS"]),
+  sourceUrl: zod.string().nullish(),
+  sourceName: zod.string().nullish(),
+  rawNote: zod.string().nullish(),
+  fetchedContent: zod.string().nullish(),
+  fetchStatus: zod.enum(["PENDING", "SUCCESS", "FAILED", "SKIPPED"]),
+  tickers: zod.array(zod.string()),
+  themes: zod.array(zod.string()),
+  claudeProposal: zod
+    .object({
+      summary: zod.string().optional(),
+      relevance: zod.enum(["HIGH", "MEDIUM", "LOW"]).optional(),
+      affected_tickers: zod
+        .array(
+          zod.object({
+            ticker: zod.string(),
+            current_position: zod.string(),
+            suggested_action: zod.enum([
+              "ADD",
+              "TRIM",
+              "HOLD",
+              "EXIT",
+              "WATCH",
+              "NO_POSITION",
+            ]),
+            rationale: zod.string(),
+            ips_compatible: zod.boolean(),
+            ips_conflict: zod.string().nullable(),
+          }),
+        )
+        .optional(),
+      macro_themes: zod.array(zod.string()).optional(),
+      ips_change_suggested: zod.boolean().optional(),
+      ips_change_rationale: zod.string().nullish(),
+      confidence: zod.enum(["HIGH", "MEDIUM", "SPECULATIVE"]).optional(),
+      proposed_action_type: zod
+        .enum(["TRADE", "IPS_UPDATE", "WATCH", "NO_ACTION"])
+        .optional(),
+      raw: zod.string().optional(),
+      parse_error: zod.boolean().optional(),
+    })
+    .nullish(),
+  proposalStatus: zod.enum([
+    "PROCESSING",
+    "PENDING_REVIEW",
+    "APPROVED",
+    "REJECTED",
+  ]),
+  rejectionReason: zod.string().nullish(),
+  actionId: zod.number().nullish(),
+  createdAt: zod.date(),
+  updatedAt: zod.date(),
+  attachments: zod.array(
+    zod.object({
+      id: zod.string(),
+      convictionId: zod.string(),
+      storagePath: zod.string(),
+      mimeType: zod.string(),
+      displayOrder: zod.number(),
+      createdAt: zod.date(),
+    }),
+  ),
+});
+
+/**
+ * @summary Delete attachment
+ */
+export const DeleteConvictionAttachmentParams = zod.object({
+  id: zod.coerce.string(),
+  attachmentId: zod.coerce.string(),
+});
+
+export const DeleteConvictionAttachmentResponse = zod.object({
+  success: zod.boolean().optional(),
 });

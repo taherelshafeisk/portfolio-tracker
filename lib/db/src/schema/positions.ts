@@ -22,6 +22,7 @@ export const positionsTable = pgTable("positions", {
   cutListAddedAt: timestamp("cut_list_added_at"),
   policyNote: text("policy_note"),
   ipsVersion: text("ips_version"),
+  exitReason: text("exit_reason"),   // 'IPS_RULE'|'STOP_LOSS'|'ALERT_TRIGGERED'|'MANUAL'|'CUT_LIST'
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [

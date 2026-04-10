@@ -25,6 +25,8 @@ tags:
     description: Persisted risk alert operations
   - name: portfolio-policy
     description: Portfolio-level IPS policy snapshot
+  - name: convictions
+    description: Conviction feed — signal capture, Claude analysis, approval
 paths:
   /healthz:
     get:
@@ -153,6 +155,60 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/Position"
+
+  /positions/history:
+    get:
+      operationId: getPositionHistory
+      tags: [positions]
+      summary: Sleeve-level position history aggregation
+      parameters:
+        - name: accountId
+          in: query
+          schema:
+            type: integer
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [open, closed, all]
+            default: all
+      responses:
+        "200":
+          description: Sleeve-level history summaries
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/PositionHistorySleeve"
+
+  /positions/history/{ticker}:
+    get:
+      operationId: getPositionHistoryByTicker
+      tags: [positions]
+      summary: Position-level history detail for a ticker in an account
+      parameters:
+        - name: ticker
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: accountId
+          in: query
+          required: true
+          schema:
+            type: integer
+      responses:
+        "200":
+          description: Position history detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PositionHistoryDetail"
+        "400":
+          description: Missing accountId
+        "404":
+          description: Position not found
 
   /positions:
     post:
@@ -681,6 +737,198 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/ApiError"
+
+
+  /convictions:
+    get:
+      tags:
+        - convictions
+      summary: List convictions
+      operationId: listConvictions
+      parameters:
+        - name: proposal_status
+          in: query
+          schema:
+            type: string
+            enum: [PROCESSING, PENDING_REVIEW, APPROVED, REJECTED]
+        - name: ticker
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: List of convictions with attachments
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ConvictionWithAttachments"
+    post:
+      tags:
+        - convictions
+      summary: Create conviction (multipart/form-data)
+      operationId: createConviction
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required:
+                - source_type
+              properties:
+                source_type:
+                  type: string
+                  enum: [NEWS, VIDEO, PERSON, OWN_THESIS]
+                source_url:
+                  type: string
+                source_name:
+                  type: string
+                raw_note:
+                  type: string
+                tickers:
+                  type: string
+                  description: JSON array string e.g. '["AAPL","TSLA"]'
+                themes:
+                  type: string
+                  description: JSON array string e.g. '["macro","rates"]'
+                screenshots:
+                  type: array
+                  items:
+                    type: string
+                    format: binary
+      responses:
+        "201":
+          description: Conviction created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConvictionWithAttachments"
+
+  /convictions/{id}:
+    get:
+      tags:
+        - convictions
+      summary: Get conviction by ID
+      operationId: getConviction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Conviction detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConvictionWithAttachments"
+        "404":
+          description: Not found
+
+  /convictions/{id}/status:
+    get:
+      tags:
+        - convictions
+      summary: Poll conviction processing status
+      operationId: getConvictionStatus
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Status snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConvictionStatus"
+
+  /convictions/{id}/approve:
+    patch:
+      tags:
+        - convictions
+      summary: Approve conviction
+      operationId: approveConviction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Approved
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  conviction:
+                    $ref: "#/components/schemas/ConvictionWithAttachments"
+                  actionId:
+                    type: integer
+                    nullable: true
+
+  /convictions/{id}/reject:
+    patch:
+      tags:
+        - convictions
+      summary: Reject conviction
+      operationId: rejectConviction
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                rejection_reason:
+                  type: string
+      responses:
+        "200":
+          description: Rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ConvictionWithAttachments"
+
+  /convictions/{id}/attachments/{attachmentId}:
+    delete:
+      tags:
+        - convictions
+      summary: Delete attachment
+      operationId: deleteConvictionAttachment
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: attachmentId
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Deleted
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success:
+                    type: boolean
 
 components:
   schemas:
@@ -1495,3 +1743,329 @@ components:
           type: string
           format: date
           nullable: true
+
+    PositionHistoryEntry:
+      type: object
+      properties:
+        positionId:
+          type: integer
+        ticker:
+          type: string
+        status:
+          type: string
+          enum: [open, closed]
+        totalShares:
+          type: number
+        avgCostBasis:
+          type: number
+        totalInvested:
+          type: number
+        realizedPnl:
+          type: number
+        firstEntryDate:
+          type: string
+          format: date-time
+          nullable: true
+        lastActivityDate:
+          type: string
+          format: date-time
+          nullable: true
+        holdDurationDays:
+          type: integer
+      required:
+        - positionId
+        - ticker
+        - status
+        - totalShares
+        - avgCostBasis
+        - totalInvested
+        - realizedPnl
+        - holdDurationDays
+
+    PositionHistorySleeve:
+      type: object
+      properties:
+        accountId:
+          type: integer
+        accountName:
+          type: string
+        sleeve:
+          type: string
+          nullable: true
+        totalRealizedPnl:
+          type: number
+        totalPositions:
+          type: integer
+        closedPositions:
+          type: integer
+        openPositions:
+          type: integer
+        winRate:
+          type: number
+        positions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PositionHistoryEntry"
+      required:
+        - accountId
+        - accountName
+        - totalRealizedPnl
+        - totalPositions
+        - closedPositions
+        - openPositions
+        - winRate
+        - positions
+
+    PositionHistoryTransaction:
+      type: object
+      properties:
+        id:
+          type: integer
+        activityType:
+          type: string
+        quantity:
+          type: number
+          nullable: true
+        price:
+          type: number
+          nullable: true
+        totalAmount:
+          type: number
+          nullable: true
+        tradeDate:
+          type: string
+          format: date-time
+        notes:
+          type: string
+          nullable: true
+      required:
+        - id
+        - activityType
+        - tradeDate
+
+    PositionHistoryDetail:
+      type: object
+      properties:
+        positionId:
+          type: integer
+        ticker:
+          type: string
+        accountId:
+          type: integer
+        accountName:
+          type: string
+          nullable: true
+        sleeve:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [open, closed]
+        totalShares:
+          type: number
+        avgCostBasis:
+          type: number
+        totalInvested:
+          type: number
+        realizedPnl:
+          type: number
+        unrealizedPnl:
+          type: number
+          nullable: true
+        currentPrice:
+          type: number
+          nullable: true
+        firstEntryDate:
+          type: string
+          format: date-time
+          nullable: true
+        lastActivityDate:
+          type: string
+          format: date-time
+          nullable: true
+        holdDurationDays:
+          type: integer
+        exitReason:
+          type: string
+          nullable: true
+          enum: [IPS_RULE, STOP_LOSS, ALERT_TRIGGERED, MANUAL, CUT_LIST]
+        transactions:
+          type: array
+          items:
+            $ref: "#/components/schemas/PositionHistoryTransaction"
+      required:
+        - positionId
+        - ticker
+        - accountId
+        - status
+        - totalShares
+        - avgCostBasis
+        - totalInvested
+        - realizedPnl
+        - holdDurationDays
+        - transactions
+
+    ConvictionAttachment:
+      type: object
+      properties:
+        id:
+          type: string
+        convictionId:
+          type: string
+        storagePath:
+          type: string
+        mimeType:
+          type: string
+        displayOrder:
+          type: integer
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - id
+        - convictionId
+        - storagePath
+        - mimeType
+        - displayOrder
+        - createdAt
+
+    ClaudeAffectedTicker:
+      type: object
+      properties:
+        ticker:
+          type: string
+        current_position:
+          type: string
+        suggested_action:
+          type: string
+          enum: [ADD, TRIM, HOLD, EXIT, WATCH, NO_POSITION]
+        rationale:
+          type: string
+        ips_compatible:
+          type: boolean
+        ips_conflict:
+          type: string
+          nullable: true
+      required:
+        - ticker
+        - current_position
+        - suggested_action
+        - rationale
+        - ips_compatible
+        - ips_conflict
+
+    ClaudeProposal:
+      type: object
+      properties:
+        summary:
+          type: string
+        relevance:
+          type: string
+          enum: [HIGH, MEDIUM, LOW]
+        affected_tickers:
+          type: array
+          items:
+            $ref: "#/components/schemas/ClaudeAffectedTicker"
+        macro_themes:
+          type: array
+          items:
+            type: string
+        ips_change_suggested:
+          type: boolean
+        ips_change_rationale:
+          type: string
+          nullable: true
+        confidence:
+          type: string
+          enum: [HIGH, MEDIUM, SPECULATIVE]
+        proposed_action_type:
+          type: string
+          enum: [TRADE, IPS_UPDATE, WATCH, NO_ACTION]
+        raw:
+          type: string
+        parse_error:
+          type: boolean
+
+    ConvictionWithAttachments:
+      type: object
+      properties:
+        id:
+          type: string
+        userId:
+          type: string
+          nullable: true
+        sourceType:
+          type: string
+          enum: [NEWS, VIDEO, PERSON, OWN_THESIS]
+        sourceUrl:
+          type: string
+          nullable: true
+        sourceName:
+          type: string
+          nullable: true
+        rawNote:
+          type: string
+          nullable: true
+        fetchedContent:
+          type: string
+          nullable: true
+        fetchStatus:
+          type: string
+          enum: [PENDING, SUCCESS, FAILED, SKIPPED]
+        tickers:
+          type: array
+          items:
+            type: string
+        themes:
+          type: array
+          items:
+            type: string
+        claudeProposal:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/ClaudeProposal"
+        proposalStatus:
+          type: string
+          enum: [PROCESSING, PENDING_REVIEW, APPROVED, REJECTED]
+        rejectionReason:
+          type: string
+          nullable: true
+        actionId:
+          type: integer
+          nullable: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        attachments:
+          type: array
+          items:
+            $ref: "#/components/schemas/ConvictionAttachment"
+      required:
+        - id
+        - sourceType
+        - fetchStatus
+        - tickers
+        - themes
+        - proposalStatus
+        - createdAt
+        - updatedAt
+        - attachments
+
+    ConvictionStatus:
+      type: object
+      properties:
+        id:
+          type: string
+        proposalStatus:
+          type: string
+          enum: [PROCESSING, PENDING_REVIEW, APPROVED, REJECTED]
+        claudeProposal:
+          nullable: true
+          allOf:
+            - $ref: "#/components/schemas/ClaudeProposal"
+      required:
+        - id
+        - proposalStatus

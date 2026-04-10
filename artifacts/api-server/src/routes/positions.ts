@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { positionsTable, activitiesTable } from "@workspace/db";
-import { eq, and, desc } from "drizzle-orm";
+import { positionsTable, activitiesTable, accountsTable } from "@workspace/db";
+import { eq, and, desc, asc, inArray, or } from "drizzle-orm";
 import { validate } from "../middlewares/validate";
 import { CreatePositionBody, UpdatePositionBody } from "@workspace/api-zod/schemas";
 
@@ -155,10 +155,276 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
     cutListAddedAt: p.cutListAddedAt ? p.cutListAddedAt.toISOString() : null,
     policyNote: p.policyNote ?? null,
     ipsVersion: p.ipsVersion ?? null,
+    exitReason: p.exitReason ?? null,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };
 }
+
+// ─── Helpers for position history aggregation ─────────────────────────────────
+
+interface ActivityRow {
+  id: number;
+  activityType: string;
+  quantity: string | null;
+  price: string | null;
+  totalAmount: string | null;
+  tradeDate: Date;
+  notes: string | null;
+}
+
+interface PositionAggregation {
+  positionId: number;
+  ticker: string;
+  accountId: number;
+  status: 'open' | 'closed';
+  totalShares: number;
+  avgCostBasis: number;
+  totalInvested: number;
+  realizedPnl: number;
+  firstEntryDate: string | null;
+  lastActivityDate: string | null;
+  holdDurationDays: number;
+  transactions: Array<{
+    id: number;
+    activityType: string;
+    quantity: number | null;
+    price: number | null;
+    totalAmount: number | null;
+    tradeDate: string;
+    notes: string | null;
+  }>;
+}
+
+function computePositionAggregation(
+  posId: number,
+  ticker: string,
+  acctId: number,
+  activities: ActivityRow[],
+  today: Date,
+): PositionAggregation {
+  // Sort chronologically for running avg cost calculation
+  const sorted = [...activities].sort((a, b) => a.tradeDate.getTime() - b.tradeDate.getTime());
+
+  let runningQty = 0;
+  let runningAvgCost = 0;
+  let totalInvested = 0;
+  let realizedPnl = 0;
+  let firstEntryDate: Date | null = null;
+  let lastActivityDate: Date | null = null;
+
+  for (const act of sorted) {
+    const qty = act.quantity ? parseFloat(act.quantity) : 0;
+    const price = act.price ? parseFloat(act.price) : 0;
+    const total = act.totalAmount ? Math.abs(parseFloat(act.totalAmount)) : 0;
+
+    if (act.activityType === 'buy' && qty > 0) {
+      const effectivePrice = price > 0 ? price : (qty > 0 ? total / qty : 0);
+      // Weighted average cost
+      runningAvgCost = (runningAvgCost * runningQty + effectivePrice * qty) / (runningQty + qty);
+      runningQty += qty;
+      totalInvested += effectivePrice * qty;
+      if (!firstEntryDate) firstEntryDate = act.tradeDate;
+    } else if (act.activityType === 'sell' && qty > 0) {
+      const effectivePrice = price > 0 ? price : (qty > 0 ? total / qty : 0);
+      realizedPnl += (effectivePrice - runningAvgCost) * qty;
+      runningQty = Math.max(0, runningQty - qty);
+    }
+
+    if (act.activityType === 'buy' || act.activityType === 'sell') {
+      lastActivityDate = act.tradeDate;
+    }
+  }
+
+  const status: 'open' | 'closed' = runningQty > 0.000001 ? 'open' : 'closed';
+
+  // Hold duration: first entry → last activity (closed) or today (open)
+  const endDate = status === 'closed' ? (lastActivityDate ?? today) : today;
+  const holdDurationDays = firstEntryDate
+    ? Math.max(0, Math.floor((endDate.getTime() - firstEntryDate.getTime()) / (1000 * 60 * 60 * 24)))
+    : 0;
+
+  const transactions = [...activities]
+    .sort((a, b) => b.tradeDate.getTime() - a.tradeDate.getTime())
+    .map(a => ({
+      id: a.id,
+      activityType: a.activityType,
+      quantity: a.quantity ? parseFloat(a.quantity) : null,
+      price: a.price ? parseFloat(a.price) : null,
+      totalAmount: a.totalAmount ? parseFloat(a.totalAmount) : null,
+      tradeDate: a.tradeDate instanceof Date ? a.tradeDate.toISOString() : String(a.tradeDate),
+      notes: a.notes ?? null,
+    }));
+
+  return {
+    positionId: posId,
+    ticker,
+    accountId: acctId,
+    status,
+    totalShares: runningQty,
+    avgCostBasis: runningAvgCost,
+    totalInvested,
+    realizedPnl,
+    firstEntryDate: firstEntryDate ? firstEntryDate.toISOString() : null,
+    lastActivityDate: lastActivityDate ? lastActivityDate.toISOString() : null,
+    holdDurationDays,
+    transactions,
+  };
+}
+
+// ─── GET /history — sleeve-level aggregation (literal, must precede /:id) ─────
+router.get("/history", async (req, res) => {
+  try {
+    const accountIdFilter = req.query.accountId ? parseInt(req.query.accountId as string) : null;
+    const statusFilter = (req.query.status as string) || 'all';
+    const today = new Date();
+
+    // Load accounts (for names)
+    const accounts = accountIdFilter
+      ? await db.select().from(accountsTable).where(eq(accountsTable.id, accountIdFilter))
+      : await db.select().from(accountsTable);
+
+    const accountIds = accounts.map(a => a.id);
+    if (accountIds.length === 0) return res.json([]);
+
+    // Load all positions for these accounts
+    const positions = accountIds.length === 1
+      ? await db.select().from(positionsTable).where(eq(positionsTable.accountId, accountIds[0]))
+      : await db.select().from(positionsTable).where(inArray(positionsTable.accountId, accountIds));
+
+    if (positions.length === 0) return res.json([]);
+
+    // Load all relevant activities (buy/sell only for aggregation)
+    const buyOrSell = or(eq(activitiesTable.activityType, 'buy'), eq(activitiesTable.activityType, 'sell'));
+    const activities = accountIds.length === 1
+      ? await db.select().from(activitiesTable)
+          .where(and(eq(activitiesTable.accountId, accountIds[0]), buyOrSell))
+          .orderBy(asc(activitiesTable.tradeDate))
+      : await db.select().from(activitiesTable)
+          .where(and(inArray(activitiesTable.accountId, accountIds), buyOrSell))
+          .orderBy(asc(activitiesTable.tradeDate));
+
+    // Group activities by accountId+symbol
+    const actMap = new Map<string, ActivityRow[]>();
+    for (const act of activities) {
+      if (!act.symbol) continue;
+      const key = `${act.accountId}:${act.symbol.toUpperCase()}`;
+      if (!actMap.has(key)) actMap.set(key, []);
+      actMap.get(key)!.push(act as ActivityRow);
+    }
+
+    // Aggregate per account
+    const sleeves = accounts.map(account => {
+      const acctPositions = positions.filter(p => p.accountId === account.id);
+      const positionAggs = acctPositions.map(p => {
+        const key = `${account.id}:${p.symbol.toUpperCase()}`;
+        const acts = actMap.get(key) ?? [];
+        return computePositionAggregation(p.id, p.symbol, account.id, acts as ActivityRow[], today);
+      });
+
+      const filtered = statusFilter === 'all'
+        ? positionAggs
+        : positionAggs.filter(p => p.status === statusFilter);
+
+      const closedWithPnl = positionAggs.filter(p => p.status === 'closed');
+      const winningClosed = closedWithPnl.filter(p => p.realizedPnl > 0);
+      const winRate = closedWithPnl.length > 0
+        ? (winningClosed.length / closedWithPnl.length) * 100
+        : 0;
+
+      return {
+        accountId: account.id,
+        accountName: account.name,
+        sleeve: account.sleeveKey ?? account.name,
+        totalRealizedPnl: closedWithPnl.reduce((s, p) => s + p.realizedPnl, 0),
+        totalPositions: positionAggs.length,
+        closedPositions: positionAggs.filter(p => p.status === 'closed').length,
+        openPositions: positionAggs.filter(p => p.status === 'open').length,
+        winRate,
+        positions: filtered.map(p => ({
+          positionId: p.positionId,
+          ticker: p.ticker,
+          status: p.status,
+          totalShares: p.totalShares,
+          avgCostBasis: p.avgCostBasis,
+          totalInvested: p.totalInvested,
+          realizedPnl: p.realizedPnl,
+          firstEntryDate: p.firstEntryDate,
+          lastActivityDate: p.lastActivityDate,
+          holdDurationDays: p.holdDurationDays,
+        })),
+      };
+    });
+
+    res.json(sleeves);
+  } catch (error) {
+    console.error("[positions GET /history] Error:", error);
+    res.status(500).json({ error: "Failed to fetch position history" });
+  }
+});
+
+// ─── GET /history/:ticker — position-level detail (literal prefix, before /:id) ─
+router.get("/history/:ticker", async (req, res) => {
+  try {
+    const ticker = req.params.ticker.toUpperCase();
+    const accountId = req.query.accountId ? parseInt(req.query.accountId as string) : null;
+    if (!accountId) return res.status(400).json({ error: "accountId query param is required" });
+
+    const today = new Date();
+
+    // Find the position record
+    const [position] = await db
+      .select()
+      .from(positionsTable)
+      .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.symbol, ticker)));
+    if (!position) return res.status(404).json({ error: "Position not found" });
+
+    // Load account info
+    const [account] = await db.select().from(accountsTable).where(eq(accountsTable.id, accountId));
+
+    // Load all activities for this ticker+account
+    const activities = await db
+      .select()
+      .from(activitiesTable)
+      .where(and(eq(activitiesTable.accountId, accountId), eq(activitiesTable.symbol, ticker)))
+      .orderBy(asc(activitiesTable.tradeDate));
+
+    const agg = computePositionAggregation(position.id, ticker, accountId, activities as ActivityRow[], today);
+
+    // Unrealized P&L: use cached live price if open
+    let unrealizedPnl: number | null = null;
+    let currentPrice: number | null = null;
+    if (agg.status === 'open' && agg.totalShares > 0) {
+      const cached = _priceCache.get(ticker);
+      const livePrice = cached && (Date.now() - cached.ts < CACHE_TTL_MS) ? cached.data.price : null;
+      currentPrice = livePrice ?? parseFloat(position.currentPrice);
+      unrealizedPnl = (currentPrice - agg.avgCostBasis) * agg.totalShares;
+    }
+
+    res.json({
+      positionId: position.id,
+      ticker,
+      accountId,
+      accountName: account?.name ?? null,
+      sleeve: account?.sleeveKey ?? account?.name ?? null,
+      status: agg.status,
+      totalShares: agg.totalShares,
+      avgCostBasis: agg.avgCostBasis,
+      totalInvested: agg.totalInvested,
+      realizedPnl: agg.realizedPnl,
+      unrealizedPnl,
+      currentPrice,
+      firstEntryDate: agg.firstEntryDate,
+      lastActivityDate: agg.lastActivityDate,
+      holdDurationDays: agg.holdDurationDays,
+      exitReason: position.exitReason ?? null,
+      transactions: agg.transactions,
+    });
+  } catch (error) {
+    console.error("[positions GET /history/:ticker] Error:", error);
+    res.status(500).json({ error: "Failed to fetch position detail" });
+  }
+});
 
 router.post("/", validate(CreatePositionBody), async (req, res) => {
   try {
@@ -221,7 +487,7 @@ router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
     const id = parseInt(req.params.id);
     const { quantity, avgCost, currentPrice, assetType, notes,
             positionBucket, ipsAction, stopPrice, addZoneLow, addZoneHigh,
-            cutListAddedAt, policyNote, ipsVersion } = req.body;
+            cutListAddedAt, policyNote, ipsVersion, exitReason } = req.body;
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (quantity !== undefined) updates.quantity = quantity.toString();
     if (avgCost !== undefined) updates.avgCost = avgCost.toString();
@@ -236,6 +502,7 @@ router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
     if (cutListAddedAt !== undefined) updates.cutListAddedAt = cutListAddedAt ? new Date(cutListAddedAt) : null;
     if (policyNote !== undefined) updates.policyNote = policyNote || null;
     if (ipsVersion !== undefined) updates.ipsVersion = ipsVersion || null;
+    if (exitReason !== undefined) updates.exitReason = exitReason || null;
     const [position] = await db.update(positionsTable).set(updates).where(eq(positionsTable.id, id)).returning();
     if (!position) return res.status(404).json({ error: "Position not found" });
     res.json(toPositionResponse(position));

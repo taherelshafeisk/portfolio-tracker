@@ -1,11 +1,11 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, ScrollView, FlatList, Platform, Pressable, ActivityIndicator } from 'react-native';
+import { View, Text, StyleSheet, ScrollView, FlatList, Platform, Pressable, ActivityIndicator, Modal } from 'react-native';
 import { useLocalSearchParams, useNavigation, router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { useQueryClient, useQuery } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
-import { usePortfolio, Position } from '@/context/PortfolioContext';
+import { usePortfolio, Position, apiPut } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
 import { defaultStrategyProfile } from '@workspace/portfolio-policy';
@@ -35,6 +35,26 @@ function actionColor(action: string): string {
   }
 }
 
+const EXIT_REASONS = [
+  { key: 'IPS_RULE',        label: 'IPS Rule'        },
+  { key: 'STOP_LOSS',       label: 'Stop Loss'        },
+  { key: 'ALERT_TRIGGERED', label: 'Alert Triggered'  },
+  { key: 'MANUAL',          label: 'Manual'           },
+  { key: 'CUT_LIST',        label: 'Cut List'         },
+] as const;
+
+type ExitReason = typeof EXIT_REASONS[number]['key'];
+
+function exitReasonColor(reason: ExitReason): string {
+  switch (reason) {
+    case 'IPS_RULE':        return '#9B59B6';
+    case 'STOP_LOSS':       return colors.negative;
+    case 'ALERT_TRIGGERED': return '#F5A623';
+    case 'MANUAL':          return colors.textMuted;
+    case 'CUT_LIST':        return colors.negative;
+  }
+}
+
 interface HistoryActivity {
   id: number;
   activityType: string;
@@ -43,6 +63,24 @@ interface HistoryActivity {
   totalAmount?: number;
   notes?: string;
   tradeDate: string;
+}
+
+interface PositionHistoryDetail {
+  positionId: number;
+  ticker: string;
+  accountId: number;
+  status: 'open' | 'closed';
+  totalShares: number;
+  avgCostBasis: number;
+  totalInvested: number;
+  realizedPnl: number;
+  unrealizedPnl: number | null;
+  currentPrice: number | null;
+  firstEntryDate: string | null;
+  lastActivityDate: string | null;
+  holdDurationDays: number;
+  exitReason: string | null;
+  transactions: HistoryActivity[];
 }
 
 export default function PositionDetailScreen() {
@@ -54,11 +92,27 @@ export default function PositionDetailScreen() {
   const queryClient = useQueryClient();
   const [editPolicyVisible, setEditPolicyVisible] = useState(false);
   const [activeTab, setActiveTab] = useState<'overview' | 'history'>('overview');
+  const [exitReasonPickerVisible, setExitReasonPickerVisible] = useState(false);
+  const [savingExitReason, setSavingExitReason] = useState(false);
 
+  const position = positions.find(p => p.id === posId);
+  const account = position ? accounts.find(a => a.id === position.accountId) : null;
+
+  // History detail from aggregation endpoint
+  const { data: historyDetail, isLoading: historyDetailLoading, refetch: refetchHistoryDetail } = useQuery<PositionHistoryDetail>({
+    queryKey: ['position-history-detail', posId],
+    queryFn: () => {
+      if (!position) throw new Error('No position');
+      return apiGet(`/positions/history/${position.symbol}?accountId=${position.accountId}`);
+    },
+    enabled: !!position,
+  });
+
+  // Transaction list (from the historyDetail or fallback to old endpoint)
   const { data: historyData, isLoading: historyLoading, isError: historyError, refetch: refetchHistory } = useQuery<HistoryActivity[]>({
     queryKey: ['position-history', posId],
     queryFn: () => apiGet(`/positions/${posId}/history`),
-    enabled: activeTab === 'history',
+    enabled: activeTab === 'history' && !historyDetail,
   });
 
   useFocusEffect(
@@ -69,16 +123,12 @@ export default function PositionDetailScreen() {
     }, [activeTab, refetchHistory]),
   );
 
-  const position = positions.find(p => p.id === posId);
-  const account = position ? accounts.find(a => a.id === position.accountId) : null;
-
   React.useEffect(() => {
     if (position) navigation.setOptions({ title: position.symbol });
   }, [position]);
 
   // ── Derived metrics ──────────────────────────────────────────────────────────
 
-  // Account NAV = sum of all positions in this account + cash balance
   const accountNAV = React.useMemo(() => {
     if (!position || !account) return 0;
     const positionsValue = positions
@@ -91,7 +141,6 @@ export default function PositionDetailScreen() {
     ? (position.marketValue / accountNAV) * 100
     : 0;
 
-  // Cross-account: same symbol held in multiple accounts
   const crossAccountEntries: ExposureEntry[] = React.useMemo(() => {
     if (!position) return [];
     return positions
@@ -107,15 +156,36 @@ export default function PositionDetailScreen() {
       });
   }, [positions, accounts, position]);
 
-  // TriggerLevelsCard: always show since it provides useful policy context
   const showTriggerLevels = true;
 
-  // Policy thresholds as display percentages
   const { concentrationRule, drawdownRule } = defaultStrategyProfile;
-  const concWarnPct  = concentrationRule.warningPct  * 100;   // 20
-  const concCritPct  = concentrationRule.criticalPct * 100;   // 30
-  const ddWarnPct    = drawdownRule.warningPct  * 100;        // -15
-  const ddCritPct    = drawdownRule.criticalPct * 100;        // -25
+  const concWarnPct  = concentrationRule.warningPct  * 100;
+  const concCritPct  = concentrationRule.criticalPct * 100;
+  const ddWarnPct    = drawdownRule.warningPct  * 100;
+  const ddCritPct    = drawdownRule.criticalPct * 100;
+
+  // Status from aggregation
+  const positionStatus = historyDetail?.status ?? 'open';
+  const isOpen = positionStatus === 'open';
+
+  // Exit reason (from historyDetail, optimistically updated)
+  const [localExitReason, setLocalExitReason] = React.useState<string | null>(null);
+  const exitReason = localExitReason !== null ? localExitReason : (historyDetail?.exitReason ?? null);
+
+  const handleSaveExitReason = async (reason: ExitReason | null) => {
+    if (!position) return;
+    setSavingExitReason(true);
+    setLocalExitReason(reason);
+    setExitReasonPickerVisible(false);
+    try {
+      await apiPut(`/positions/${position.id}`, { exitReason: reason });
+      queryClient.invalidateQueries({ queryKey: ['position-history-detail', posId] });
+    } catch {
+      setLocalExitReason(null); // revert on failure
+    } finally {
+      setSavingExitReason(false);
+    }
+  };
 
   if (!position) {
     return (
@@ -124,6 +194,9 @@ export default function PositionDetailScreen() {
       </View>
     );
   }
+
+  // Transactions to display: prefer historyDetail.transactions, fallback to historyData
+  const transactions: HistoryActivity[] = historyDetail?.transactions ?? historyData ?? [];
 
   return (
     <View style={styles.container}>
@@ -152,7 +225,15 @@ export default function PositionDetailScreen() {
           <Card style={styles.headerCard}>
             <View style={styles.headerTop}>
               <View style={styles.headerTitles}>
-                <Text style={styles.symbol}>{position.symbol}</Text>
+                <View style={styles.symbolRow}>
+                  <Text style={styles.symbol}>{position.symbol}</Text>
+                  {/* Status badge */}
+                  <View style={[styles.statusBadge, isOpen ? styles.statusOpen : styles.statusClosed]}>
+                    <Text style={[styles.statusText, isOpen ? styles.statusTextOpen : styles.statusTextClosed]}>
+                      {isOpen ? 'OPEN' : 'CLOSED'}
+                    </Text>
+                  </View>
+                </View>
                 <Text style={styles.name}>{position.name}</Text>
                 {account && <Text style={styles.account}>in {account.name}</Text>}
               </View>
@@ -182,12 +263,102 @@ export default function PositionDetailScreen() {
                 )}
               </View>
             </View>
-            <Text style={styles.marketValue}>{formatCurrency(position.marketValue)}</Text>
-            <PnlBadge value={position.unrealizedPnl} percentage={position.unrealizedPnlPct} size="md" />
+            {isOpen ? (
+              <>
+                <Text style={styles.marketValue}>{formatCurrency(position.marketValue)}</Text>
+                <PnlBadge value={position.unrealizedPnl} percentage={position.unrealizedPnlPct} size="md" />
+              </>
+            ) : (
+              <Text style={styles.marketValue}>{formatCurrency(0)}</Text>
+            )}
           </Card>
 
-          {/* 2. Trigger Levels */}
-          {showTriggerLevels && (
+          {/* 2. Position Summary Card */}
+          <Card style={styles.summaryCard}>
+            <Text style={styles.cardSectionLabel}>Position Summary</Text>
+            <View style={styles.summaryGrid}>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Avg Cost Basis</Text>
+                <Text style={styles.summaryValue}>
+                  {historyDetailLoading ? '...' : formatCurrency(historyDetail?.avgCostBasis ?? position.avgCost)}
+                </Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Total Shares</Text>
+                <Text style={styles.summaryValue}>
+                  {historyDetail?.totalShares.toFixed(4) ?? position.quantity.toFixed(4)}
+                </Text>
+              </View>
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Total Invested</Text>
+                <Text style={styles.summaryValue}>
+                  {historyDetailLoading ? '...' : formatCurrency(historyDetail?.totalInvested ?? position.quantity * position.avgCost)}
+                </Text>
+              </View>
+              {historyDetail && (
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryLabel}>Realized P&L</Text>
+                  <Text style={[styles.summaryValue, { color: historyDetail.realizedPnl >= 0 ? colors.positive : colors.negative }]}>
+                    {formatCurrency(historyDetail.realizedPnl)}
+                  </Text>
+                </View>
+              )}
+              {isOpen && historyDetail?.unrealizedPnl != null && (
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryLabel}>Unrealized P&L</Text>
+                  <Text style={[styles.summaryValue, { color: historyDetail.unrealizedPnl >= 0 ? colors.positive : colors.negative }]}>
+                    {formatCurrency(historyDetail.unrealizedPnl)}
+                  </Text>
+                </View>
+              )}
+              <View style={styles.summaryItem}>
+                <Text style={styles.summaryLabel}>Hold Duration</Text>
+                <Text style={styles.summaryValue}>
+                  {historyDetailLoading ? '...' : `${historyDetail?.holdDurationDays ?? 0} days`}
+                </Text>
+              </View>
+              {!isOpen && historyDetail && (
+                <View style={styles.summaryItem}>
+                  <Text style={styles.summaryLabel}>Result</Text>
+                  <Text style={[styles.summaryValue, { color: historyDetail.realizedPnl >= 0 ? colors.positive : colors.negative }]}>
+                    {historyDetail.realizedPnl >= 0 ? 'Win' : 'Loss'}
+                  </Text>
+                </View>
+              )}
+            </View>
+          </Card>
+
+          {/* 3. Exit Reason (if closed) */}
+          {!isOpen && (
+            <Card style={styles.exitReasonCard}>
+              <View style={styles.exitReasonRow}>
+                <Text style={styles.exitReasonLabel}>Exit Reason</Text>
+                {exitReason ? (
+                  <View style={[styles.exitReasonBadge, { backgroundColor: exitReasonColor(exitReason as ExitReason) + '22', borderColor: exitReasonColor(exitReason as ExitReason) + '66' }]}>
+                    <Text style={[styles.exitReasonBadgeText, { color: exitReasonColor(exitReason as ExitReason) }]}>
+                      {EXIT_REASONS.find(r => r.key === exitReason)?.label ?? exitReason}
+                    </Text>
+                  </View>
+                ) : (
+                  <Text style={styles.exitReasonEmpty}>Not set</Text>
+                )}
+                <Pressable
+                  style={styles.exitReasonEditBtn}
+                  onPress={() => setExitReasonPickerVisible(true)}
+                  disabled={savingExitReason}
+                  hitSlop={8}
+                >
+                  {savingExitReason
+                    ? <ActivityIndicator size="small" color={colors.textMuted} />
+                    : <Feather name="edit-2" size={14} color={colors.textMuted} />
+                  }
+                </Pressable>
+              </View>
+            </Card>
+          )}
+
+          {/* 4. Trigger Levels */}
+          {showTriggerLevels && isOpen && (
             <TriggerLevelsCard
               concentrationPct={concentrationPct}
               drawdownPct={position.unrealizedPnlPct}
@@ -203,13 +374,13 @@ export default function PositionDetailScreen() {
             />
           )}
 
-          {/* 3. Cross-Account Exposure — only when symbol held in 2+ accounts */}
+          {/* 5. Cross-Account Exposure */}
           <CrossAccountExposureCard
             symbol={position.symbol}
             entries={crossAccountEntries}
           />
 
-          {/* 4. Reference stats */}
+          {/* 6. Reference stats */}
           <View style={styles.statsGrid}>
             <Card style={styles.statCard}>
               <Text style={styles.statLabel}>Quantity</Text>
@@ -217,11 +388,11 @@ export default function PositionDetailScreen() {
             </Card>
             <Card style={styles.statCard}>
               <Text style={styles.statLabel}>Avg Cost</Text>
-              <Text style={styles.statValue}>${position.avgCost.toFixed(2)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(position.avgCost)}</Text>
             </Card>
             <Card style={styles.statCard}>
               <Text style={styles.statLabel}>Current Price</Text>
-              <Text style={styles.statValue}>${position.currentPrice.toFixed(2)}</Text>
+              <Text style={styles.statValue}>{formatCurrency(position.currentPrice)}</Text>
             </Card>
             <Card style={styles.statCard}>
               <Text style={styles.statLabel}>Cost Basis</Text>
@@ -250,33 +421,41 @@ export default function PositionDetailScreen() {
             </Card>
           )}
 
-          <Pressable
-            style={styles.chartBtn}
-            onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: position.symbol, avgCost: String(position.avgCost), accountId: String(position.accountId) } })}
-          >
-            <Feather name="trending-up" size={18} color={colors.background} />
-            <Text style={styles.chartBtnText}>View Chart</Text>
-          </Pressable>
+          {isOpen && (
+            <Pressable
+              style={styles.chartBtn}
+              onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: position.symbol, avgCost: String(position.avgCost), accountId: String(position.accountId) } })}
+            >
+              <Feather name="trending-up" size={18} color={colors.background} />
+              <Text style={styles.chartBtnText}>View Chart</Text>
+            </Pressable>
+          )}
         </ScrollView>
       ) : (
         <View style={{ flex: 1, paddingBottom: Platform.OS === 'web' ? 40 : insets.bottom }}>
-          {historyLoading ? (
+          {(historyLoading && !historyDetail) ? (
             <View style={styles.historyEmpty}>
               <ActivityIndicator color={colors.textMuted} />
             </View>
-          ) : historyError ? (
+          ) : historyError && !historyDetail ? (
             <View style={styles.historyEmpty}>
               <Text style={styles.historyEmptyText}>Could not load history</Text>
+              <Pressable onPress={() => refetchHistory()} style={styles.retryBtn}>
+                <Text style={styles.retryText}>Retry</Text>
+              </Pressable>
             </View>
-          ) : !historyData || historyData.length === 0 ? (
+          ) : transactions.length === 0 ? (
             <View style={styles.historyEmpty}>
               <Text style={styles.historyEmptyText}>No transactions recorded</Text>
             </View>
           ) : (
             <FlatList
-              data={historyData}
+              data={transactions}
               keyExtractor={item => String(item.id)}
               contentContainerStyle={styles.historyList}
+              ListHeaderComponent={
+                <Text style={styles.historyHeader}>Transactions</Text>
+              }
               renderItem={({ item }) => {
                 const isBuy = item.activityType === 'buy';
                 const isSell = item.activityType === 'sell';
@@ -299,7 +478,7 @@ export default function PositionDetailScreen() {
                         )}
                         {item.totalAmount != null && (
                           <Text style={[styles.historyTotal, { color: isSell ? colors.positive : colors.textPrimary }]}>
-                            {isSell ? '+' : '−'}{formatCurrency(item.totalAmount)}
+                            {isSell ? '+' : '−'}{formatCurrency(Math.abs(item.totalAmount))}
                           </Text>
                         )}
                       </View>
@@ -322,6 +501,38 @@ export default function PositionDetailScreen() {
           queryClient.invalidateQueries({ queryKey: ['positions'] });
         }}
       />
+
+      {/* Exit Reason Picker Modal */}
+      <Modal visible={exitReasonPickerVisible} animationType="slide" presentationStyle="pageSheet" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 16 }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Exit Reason</Text>
+            <Text style={styles.modalSub}>Why was this position closed?</Text>
+            {EXIT_REASONS.map(reason => (
+              <Pressable
+                key={reason.key}
+                style={[styles.reasonRow, exitReason === reason.key && styles.reasonRowSelected]}
+                onPress={() => handleSaveExitReason(reason.key)}
+              >
+                <View style={[styles.reasonDot, { backgroundColor: exitReasonColor(reason.key) }]} />
+                <Text style={[styles.reasonText, exitReason === reason.key && styles.reasonTextSelected]}>
+                  {reason.label}
+                </Text>
+                {exitReason === reason.key && <Feather name="check" size={16} color={colors.primary} />}
+              </Pressable>
+            ))}
+            {exitReason && (
+              <Pressable style={styles.clearBtn} onPress={() => handleSaveExitReason(null)}>
+                <Text style={styles.clearText}>Clear exit reason</Text>
+              </Pressable>
+            )}
+            <Pressable style={styles.cancelBtn} onPress={() => setExitReasonPickerVisible(false)}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -354,8 +565,16 @@ const styles = StyleSheet.create({
   },
   scroll: { padding: 16, gap: 12 },
   historyList: { padding: 16, gap: 10 },
-  historyEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  historyEmpty: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: 12 },
   historyEmptyText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textMuted },
+  historyHeader: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 15,
+    color: colors.textPrimary,
+    marginBottom: 12,
+  },
+  retryBtn: { paddingHorizontal: 16, paddingVertical: 8, borderRadius: 8, backgroundColor: colors.surface },
+  retryText: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.primary },
   historyRow: { flexDirection: 'row', gap: 12, alignItems: 'flex-start' },
   historyTypeBadge: { borderWidth: 1, borderRadius: 6, paddingHorizontal: 8, paddingVertical: 4, marginTop: 2 },
   historyTypeText: { fontFamily: 'Inter_700Bold', fontSize: 11, letterSpacing: 0.5 },
@@ -369,6 +588,13 @@ const styles = StyleSheet.create({
   headerCard: { marginBottom: 4, gap: 4 },
   headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
   headerTitles: { flex: 1 },
+  symbolRow: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 2 },
+  statusBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
+  statusOpen: { backgroundColor: colors.positive + '22', borderColor: colors.positive + '66' },
+  statusClosed: { backgroundColor: colors.textMuted + '22', borderColor: colors.textMuted + '44' },
+  statusText: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 0.5 },
+  statusTextOpen: { color: colors.positive },
+  statusTextClosed: { color: colors.textMuted },
   policyBadges: { flexDirection: 'column', alignItems: 'flex-end', gap: 4, marginLeft: 8, marginTop: 4 },
   bucketBadge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
   bucketBadgeText: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 0.5 },
@@ -381,6 +607,21 @@ const styles = StyleSheet.create({
   name: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary },
   account: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted, marginBottom: 8 },
   marketValue: { fontFamily: 'Inter_700Bold', fontSize: 28, color: colors.textPrimary, marginBottom: 4 },
+  // Summary card
+  summaryCard: { gap: 12 },
+  cardSectionLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textMuted, letterSpacing: 0.3 },
+  summaryGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 12 },
+  summaryItem: { minWidth: '45%' },
+  summaryLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginBottom: 2 },
+  summaryValue: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textPrimary },
+  // Exit reason
+  exitReasonCard: {},
+  exitReasonRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  exitReasonLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, flex: 1 },
+  exitReasonBadge: { paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6, borderWidth: 1 },
+  exitReasonBadgeText: { fontFamily: 'Inter_600SemiBold', fontSize: 12 },
+  exitReasonEmpty: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted, fontStyle: 'italic' },
+  exitReasonEditBtn: { padding: 4 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   statCard: { flex: 1, minWidth: '45%' },
   statLabel: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginBottom: 4 },
@@ -391,4 +632,84 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary, borderRadius: 14, padding: 16, marginTop: 8,
   },
   chartBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: colors.background },
+  // Exit reason modal
+  modalOverlay: {
+    flex: 1,
+    justifyContent: 'flex-end',
+    backgroundColor: 'rgba(0,0,0,0.6)',
+  },
+  modalSheet: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: 24,
+    borderTopRightRadius: 24,
+    padding: 20,
+  },
+  modalHandle: {
+    width: 36,
+    height: 4,
+    backgroundColor: colors.separator,
+    borderRadius: 2,
+    alignSelf: 'center',
+    marginBottom: 16,
+  },
+  modalTitle: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 18,
+    color: colors.textPrimary,
+    marginBottom: 4,
+  },
+  modalSub: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: colors.textSecondary,
+    marginBottom: 16,
+  },
+  reasonRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.separator,
+  },
+  reasonRowSelected: {
+    backgroundColor: colors.primary + '11',
+  },
+  reasonDot: { width: 8, height: 8, borderRadius: 4 },
+  reasonText: {
+    flex: 1,
+    fontFamily: 'Inter_500Medium',
+    fontSize: 15,
+    color: colors.textPrimary,
+  },
+  reasonTextSelected: {
+    color: colors.primary,
+    fontFamily: 'Inter_600SemiBold',
+  },
+  clearBtn: {
+    marginTop: 12,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.negative + '44',
+    alignItems: 'center',
+  },
+  clearText: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 14,
+    color: colors.negative,
+  },
+  cancelBtn: {
+    marginTop: 8,
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: colors.separator,
+    alignItems: 'center',
+  },
+  cancelText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 15,
+    color: colors.textSecondary,
+  },
 });

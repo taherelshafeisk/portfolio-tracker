@@ -10,6 +10,7 @@ import orderSuggestionsRouter from "./orderSuggestions";
 import alertsRouter from "./alerts";
 import portfolioPolicyRouter from "./portfolioPolicy";
 import ipsRouter from "./ips";
+import convictionsRouter from "./convictions";
 
 const router: IRouter = Router();
 
@@ -24,5 +25,6 @@ router.use("/order-suggestions", orderSuggestionsRouter);
 router.use("/alerts", alertsRouter);
 router.use("/portfolio-policy", portfolioPolicyRouter);
 router.use("/ips", ipsRouter);
+router.use("/convictions", convictionsRouter);
 
 export default router;

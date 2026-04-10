@@ -8,3 +8,5 @@ export * from "./alerts";
 export * from "./portfolioPolicy";
 export * from "./tradeAnnotations";
 export * from "./policyProposals";
+export * from "./convictions";
+export * from "./convictionAttachments";

@@ -8,9 +8,11 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
+import { router } from 'expo-router';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiGet, apiPost, apiDelete, TradeActivity } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
+import { formatCurrency } from '@/components/ui/PnlBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { AnnotationModal } from '@/components/activity/AnnotationModal';
 
@@ -346,6 +348,10 @@ export default function ActivityScreen() {
   const renderItem = ({ item }: { item: TradeActivity }) => {
     const cfg = ACTIVITY_ICONS[item.activityType] || ACTIVITY_ICONS.note;
     const hasAnnotation = annotatedIds.has(item.id);
+    // Find position ID for "View Position" link
+    const linkedPosition = item.symbol
+      ? positions.find(p => p.accountId === item.accountId && p.symbol === item.symbol)
+      : null;
     return (
       <Card style={styles.activityCard}>
         <View style={styles.activityRow}>
@@ -355,7 +361,15 @@ export default function ActivityScreen() {
           <View style={styles.activityInfo}>
             <View style={styles.activityTopRow}>
               <Text style={styles.activityType}>{item.activityType.toUpperCase()}</Text>
-              {item.symbol && <Text style={styles.activitySymbol}>{item.symbol}</Text>}
+              {item.symbol && (
+                linkedPosition ? (
+                  <Pressable onPress={() => router.push({ pathname: '/position/[id]', params: { id: String(linkedPosition.id) } })} hitSlop={4}>
+                    <Text style={styles.activitySymbolLink}>{item.symbol}</Text>
+                  </Pressable>
+                ) : (
+                  <Text style={styles.activitySymbol}>{item.symbol}</Text>
+                )
+              )}
               <Text style={styles.activityDate}>{formatDate(item.tradeDate)}</Text>
             </View>
             <Text style={styles.accountName}>{getAccountName(item.accountId)}</Text>
@@ -363,11 +377,20 @@ export default function ActivityScreen() {
               <Text style={styles.activityDetails}>
                 {item.quantity && `${item.quantity} shares`}
                 {item.quantity && item.price && ' @ '}
-                {item.price && `$${item.price.toFixed(2)}`}
-                {item.totalAmount && ` = $${item.totalAmount.toFixed(2)}`}
+                {item.price && formatCurrency(item.price)}
+                {item.totalAmount && ` = ${formatCurrency(Math.abs(item.totalAmount))}`}
               </Text>
             )}
             {item.notes && <Text style={styles.activityNotes}>{item.notes}</Text>}
+            {linkedPosition && (
+              <Pressable
+                onPress={() => router.push({ pathname: '/position/[id]', params: { id: String(linkedPosition.id) } })}
+                style={styles.viewPositionLink}
+              >
+                <Text style={styles.viewPositionText}>View Position</Text>
+                <Feather name="chevron-right" size={11} color={colors.primary} />
+              </Pressable>
+            )}
           </View>
           <View style={styles.rowActions}>
             <Pressable
@@ -737,6 +760,9 @@ const styles = StyleSheet.create({
   activityTopRow: { flexDirection: 'row', alignItems: 'center', gap: 8, flexWrap: 'wrap' },
   activityType: { fontFamily: 'Inter_700Bold', fontSize: 12, color: colors.textPrimary, letterSpacing: 0.5 },
   activitySymbol: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.primary },
+  activitySymbolLink: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.primary, textDecorationLine: 'underline' },
+  viewPositionLink: { flexDirection: 'row', alignItems: 'center', gap: 2, marginTop: 4 },
+  viewPositionText: { fontFamily: 'Inter_500Medium', fontSize: 11, color: colors.primary },
   activityDate: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted },
   accountName: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary, marginTop: 2 },
   activityDetails: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textPrimary, marginTop: 2 },

@@ -1,0 +1,6 @@
+[build]
+builder = "RAILPACK"
+buildCommand = "pnpm install --no-frozen-lockfile && pnpm --filter @workspace/api-server run build"
+
+[deploy]
+startCommand = "node artifacts/api-server/dist/index.cjs"

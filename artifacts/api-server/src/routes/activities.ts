@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { activitiesTable, positionsTable, tradeAnnotationsTable } from "@workspace/db";
-import { eq, desc, and, asc, isNotNull, ne, inArray } from "drizzle-orm";
+import { eq, desc, and, asc, isNotNull, inArray } from "drizzle-orm";
 import { validate } from "../middlewares/validate";
 import { CreateActivityBody, z } from "@workspace/api-zod/schemas";
 
@@ -188,46 +188,6 @@ router.post("/", validate(CreateActivityBodyHttp), async (req, res) => {
     if (!activity) return res.status(200).json({ skipped: true });
 
     if (upperSymbol) {
-      // First buy into a seeded position: hasBuys would flip to true, causing reconcilePosition
-      // to skip the seed-baseline block and start the walk from 0 — erasing the seeded qty.
-      // Fix: before reconciling, check whether this is the first buy ever recorded for this
-      // (accountId, symbol). If so and a seeded position exists, insert a synthetic import-buy
-      // activity dated 2000-01-01 so the full opening balance is part of the activity log.
-      // This makes reconcilePosition correct and idempotent for all future calls.
-      if (activityType === "buy") {
-        const priorBuys = await db
-          .select({ id: activitiesTable.id })
-          .from(activitiesTable)
-          .where(
-            and(
-              eq(activitiesTable.accountId, accountId),
-              eq(activitiesTable.symbol, upperSymbol),
-              eq(activitiesTable.activityType, "buy"),
-              ne(activitiesTable.id, activity.id),
-            ),
-          );
-
-        if (priorBuys.length === 0) {
-          const [seededPos] = await db
-            .select()
-            .from(positionsTable)
-            .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.symbol, upperSymbol)));
-
-          if (seededPos && parseFloat(seededPos.quantity) > 0) {
-            await db.insert(activitiesTable).values({
-              accountId,
-              symbol: upperSymbol,
-              activityType: "buy",
-              quantity: seededPos.quantity,
-              price: seededPos.avgCost,
-              totalAmount: (parseFloat(seededPos.quantity) * parseFloat(seededPos.avgCost)).toFixed(4),
-              notes: "Imported position baseline",
-              tradeDate: new Date("2000-01-01"),
-            });
-          }
-        }
-      }
-
       await reconcilePosition(accountId, upperSymbol);
     }
 

@@ -202,6 +202,7 @@ function computePositionAggregation(
   acctId: number,
   activities: ActivityRow[],
   today: Date,
+  positionQty: number = 0,
 ): PositionAggregation {
   // Sort chronologically for running avg cost calculation
   const sorted = [...activities].sort((a, b) => a.tradeDate.getTime() - b.tradeDate.getTime());
@@ -236,7 +237,10 @@ function computePositionAggregation(
     }
   }
 
-  const status: 'open' | 'closed' = runningQty > 0.000001 ? 'open' : 'closed';
+  // If no activities drove runningQty above threshold, fall back to the stored position quantity.
+  // This handles seeded/imported positions that have no activity records yet.
+  const effectiveQty = Math.abs(runningQty) < 0.0001 && positionQty > 0.0001 ? positionQty : runningQty;
+  const status: 'open' | 'closed' = Math.abs(effectiveQty) < 0.0001 ? 'closed' : 'open';
 
   // Hold duration: first entry → last activity (closed) or today (open)
   const endDate = status === 'closed' ? (lastActivityDate ?? today) : today;
@@ -261,7 +265,7 @@ function computePositionAggregation(
     ticker,
     accountId: acctId,
     status,
-    totalShares: runningQty,
+    totalShares: effectiveQty,
     avgCostBasis: runningAvgCost,
     totalInvested,
     realizedPnl,
@@ -319,7 +323,7 @@ router.get("/history", async (req, res) => {
       const positionAggs = acctPositions.map(p => {
         const key = `${account.id}:${p.symbol.toUpperCase()}`;
         const acts = actMap.get(key) ?? [];
-        return computePositionAggregation(p.id, p.symbol, account.id, acts as ActivityRow[], today);
+        return computePositionAggregation(p.id, p.symbol, account.id, acts as ActivityRow[], today, parseFloat(p.quantity));
       });
 
       const filtered = statusFilter === 'all'
@@ -389,7 +393,7 @@ router.get("/history/:ticker", async (req, res) => {
       .where(and(eq(activitiesTable.accountId, accountId), eq(activitiesTable.symbol, ticker)))
       .orderBy(asc(activitiesTable.tradeDate));
 
-    const agg = computePositionAggregation(position.id, ticker, accountId, activities as ActivityRow[], today);
+    const agg = computePositionAggregation(position.id, ticker, accountId, activities as ActivityRow[], today, parseFloat(position.quantity));
 
     // Unrealized P&L: use cached live price if open
     let unrealizedPnl: number | null = null;

@@ -1,6 +1,6 @@
 [build]
-builder = "NIXPACKS"
-buildCommand = "corepack enable && corepack prepare pnpm@latest --activate && pnpm install --frozen-lockfile && pnpm run build"
+builder = "RAILPACK"
+buildCommand = "pnpm run build"
 
 [deploy]
 startCommand = "node dist/index.cjs"

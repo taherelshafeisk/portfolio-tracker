@@ -1,6 +1,6 @@
 [build]
 builder = "NIXPACKS"
-buildCommand = "npm install -g pnpm && $(npm root -g)/.bin/pnpm install --frozen-lockfile && $(npm root -g)/.bin/pnpm run build"
+buildCommand = "corepack enable && corepack prepare pnpm@latest --activate && pnpm install --frozen-lockfile && pnpm run build"
 
 [deploy]
 startCommand = "node dist/index.cjs"

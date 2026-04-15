@@ -13,7 +13,6 @@ COPY lib/api-client-react/package.json ./lib/api-client-react/
 COPY lib/api-spec/package.json ./lib/api-spec/
 COPY lib/api-zod/package.json ./lib/api-zod/
 COPY lib/db/package.json ./lib/db/
-COPY lib/integrations/package.json ./lib/integrations/ 2>/dev/null || true
 COPY lib/integrations-anthropic-ai/package.json ./lib/integrations-anthropic-ai/
 COPY lib/integrations-openai/package.json ./lib/integrations-openai/
 COPY lib/portfolio-policy/package.json ./lib/portfolio-policy/

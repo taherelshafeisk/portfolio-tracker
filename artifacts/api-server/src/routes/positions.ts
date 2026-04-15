@@ -203,6 +203,7 @@ function computePositionAggregation(
   activities: ActivityRow[],
   today: Date,
   positionQty: number = 0,
+  seededAvgCost: number = 0,
 ): PositionAggregation {
   // Sort chronologically for running avg cost calculation
   const sorted = [...activities].sort((a, b) => a.tradeDate.getTime() - b.tradeDate.getTime());
@@ -237,9 +238,12 @@ function computePositionAggregation(
     }
   }
 
-  // If no activities drove runningQty above threshold, fall back to the stored position quantity.
+  // If no activities drove runningQty above threshold, fall back to the stored position values.
   // This handles seeded/imported positions that have no activity records yet.
-  const effectiveQty = Math.abs(runningQty) < 0.0001 && positionQty > 0.0001 ? positionQty : runningQty;
+  const noActivityData = Math.abs(runningQty) < 0.0001 && positionQty > 0.0001;
+  const effectiveQty = noActivityData ? positionQty : runningQty;
+  const effectiveAvgCost = noActivityData ? seededAvgCost : runningAvgCost;
+  const effectiveTotalInvested = noActivityData ? positionQty * seededAvgCost : totalInvested;
   const status: 'open' | 'closed' = Math.abs(effectiveQty) < 0.0001 ? 'closed' : 'open';
 
   // Hold duration: first entry → last activity (closed) or today (open)
@@ -266,8 +270,8 @@ function computePositionAggregation(
     accountId: acctId,
     status,
     totalShares: effectiveQty,
-    avgCostBasis: runningAvgCost,
-    totalInvested,
+    avgCostBasis: effectiveAvgCost,
+    totalInvested: effectiveTotalInvested,
     realizedPnl,
     firstEntryDate: firstEntryDate ? firstEntryDate.toISOString() : null,
     lastActivityDate: lastActivityDate ? lastActivityDate.toISOString() : null,
@@ -323,7 +327,7 @@ router.get("/history", async (req, res) => {
       const positionAggs = acctPositions.map(p => {
         const key = `${account.id}:${p.symbol.toUpperCase()}`;
         const acts = actMap.get(key) ?? [];
-        return computePositionAggregation(p.id, p.symbol, account.id, acts as ActivityRow[], today, parseFloat(p.quantity));
+        return computePositionAggregation(p.id, p.symbol, account.id, acts as ActivityRow[], today, parseFloat(p.quantity), parseFloat(p.avgCost));
       });
 
       const filtered = statusFilter === 'all'
@@ -393,7 +397,7 @@ router.get("/history/:ticker", async (req, res) => {
       .where(and(eq(activitiesTable.accountId, accountId), eq(activitiesTable.symbol, ticker)))
       .orderBy(asc(activitiesTable.tradeDate));
 
-    const agg = computePositionAggregation(position.id, ticker, accountId, activities as ActivityRow[], today, parseFloat(position.quantity));
+    const agg = computePositionAggregation(position.id, ticker, accountId, activities as ActivityRow[], today, parseFloat(position.quantity), parseFloat(position.avgCost));
 
     // Unrealized P&L: use cached live price if open
     let unrealizedPnl: number | null = null;

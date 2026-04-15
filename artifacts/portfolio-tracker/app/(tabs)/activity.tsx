@@ -363,7 +363,7 @@ export default function ActivityScreen() {
               <Text style={styles.activityType}>{item.activityType.toUpperCase()}</Text>
               {item.symbol && (
                 linkedPosition ? (
-                  <Pressable onPress={() => router.push({ pathname: '/position/[id]', params: { id: String(linkedPosition.id) } })} hitSlop={4}>
+                  <Pressable onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: linkedPosition.symbol, accountId: String(linkedPosition.accountId) } })} hitSlop={4}>
                     <Text style={styles.activitySymbolLink}>{item.symbol}</Text>
                   </Pressable>
                 ) : (
@@ -384,7 +384,7 @@ export default function ActivityScreen() {
             {item.notes && <Text style={styles.activityNotes}>{item.notes}</Text>}
             {linkedPosition && (
               <Pressable
-                onPress={() => router.push({ pathname: '/position/[id]', params: { id: String(linkedPosition.id) } })}
+                onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: linkedPosition.symbol, accountId: String(linkedPosition.accountId) } })}
                 style={styles.viewPositionLink}
               >
                 <Text style={styles.viewPositionText}>View Position</Text>

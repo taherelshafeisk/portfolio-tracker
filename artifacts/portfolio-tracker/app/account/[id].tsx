@@ -993,7 +993,7 @@ export default function AccountDetailScreen() {
                     bucket={positionBuckets[pos.id] ?? 'speculative'}
                     concentrationSeverity={positionSeverities[pos.id]?.conc}
                     drawdownSeverity={positionSeverities[pos.id]?.dd}
-                    onPress={() => router.push({ pathname: '/position/[id]', params: { id: String(pos.id) } })}
+                    onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: pos.symbol, accountId: String(pos.accountId) } })}
                     onMenuPress={() => setMenuPos(pos)}
                   />
                 ))}

@@ -35,12 +35,9 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
-        name="position/[id]"
+        name="position/[ticker]"
         options={{
-          headerShown: true,
-          headerStyle: { backgroundColor: '#0A0E1A' },
-          headerTintColor: '#F0F4FF',
-          headerBackTitle: 'Back',
+          headerShown: false,
           presentation: 'card',
         }}
       />

@@ -97,7 +97,7 @@ export default function SleeveHistoryScreen() {
     return (
       <Pressable
         style={({ pressed }) => [styles.positionRow, { opacity: pressed ? 0.7 : 1 }]}
-        onPress={() => router.push({ pathname: '/position/[id]', params: { id: String(item.positionId) } })}
+        onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: item.ticker, accountId: String(accountId) } })}
       >
         <View style={styles.positionLeft}>
           <View style={styles.positionTopRow}>

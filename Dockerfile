@@ -27,3 +27,4 @@ RUN pnpm --filter @workspace/api-server run build
 EXPOSE 3001
 
 CMD ["node", "artifacts/api-server/dist/index.cjs"]
+

@@ -22,6 +22,7 @@ interface ScreenerResult {
   rsi?: number;
   swingScore: number;
   marketCap?: number;
+  alreadyOwned: boolean;
 }
 
 function SwingScoreMeter({ score }: { score: number }) {
@@ -71,11 +72,18 @@ export default function ScreenerScreen() {
     return (
       <Card
         style={styles.resultCard}
-        onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: item.symbol } })}
+        onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: item.symbol } })}
       >
         <View style={styles.resultHeader}>
           <View>
-            <Text style={styles.symbol}>{item.symbol}</Text>
+            <View style={styles.symbolRow}>
+              <Text style={styles.symbol}>{item.symbol}</Text>
+              {item.alreadyOwned && (
+                <View style={styles.ownedBadge}>
+                  <Text style={styles.ownedBadgeText}>Owned</Text>
+                </View>
+              )}
+            </View>
             <Text style={styles.companyName} numberOfLines={1}>{item.name}</Text>
           </View>
           <View style={styles.priceBlock}>
@@ -223,4 +231,7 @@ const styles = StyleSheet.create({
   swingLabel: { fontFamily: 'Inter_500Medium', fontSize: 12, color: colors.textSecondary, width: 80 },
   emptyState: { alignItems: 'center', paddingTop: 80, gap: 16 },
   emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textMuted },
+  symbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  ownedBadge: { backgroundColor: colors.surfaceElevated, borderRadius: 4, paddingHorizontal: 5, paddingVertical: 2, borderWidth: 1, borderColor: colors.separator },
+  ownedBadgeText: { fontFamily: 'Inter_500Medium', fontSize: 10, color: colors.textSecondary },
 });

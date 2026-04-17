@@ -99,6 +99,7 @@ export interface Position {
   positionBucket?: string | null;
   ipsAction?: string | null;
   stopPrice?: number | null;
+  targetPrice?: number | null;
   addZoneLow?: number | null;
   addZoneHigh?: number | null;
   cutListAddedAt?: string | null;

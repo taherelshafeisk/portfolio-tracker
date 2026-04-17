@@ -8,6 +8,8 @@ import type { Position } from '@/context/PortfolioContext';
 interface IntradayPositionRowProps {
   position: Position;
   bucket: Bucket;
+  /** Today's unrealized $ change (shares × day change $) */
+  todayPnlAmt: number;
   /** Optional severity badges pre-computed by parent */
   concentrationSeverity?: 'warning' | 'critical' | null;
   drawdownSeverity?: 'warning' | 'critical' | null;
@@ -24,15 +26,18 @@ function formatCompact(val: number): string {
 export function IntradayPositionRow({
   position: pos,
   bucket,
+  todayPnlAmt,
   concentrationSeverity,
   drawdownSeverity,
   onPress,
   onMenuPress,
 }: IntradayPositionRowProps) {
-  const isDayPos   = (pos.dayChangePct ?? 0) >= 0;
-  const isPnlPos   = pos.unrealizedPnlPct >= 0;
-  const dayColor   = isDayPos ? colors.positive : colors.negative;
-  const pnlColor   = isPnlPos ? colors.positive : colors.negative;
+  const isDayPos    = (pos.dayChangePct ?? 0) >= 0;
+  const isPnlPos    = pos.unrealizedPnlPct >= 0;
+  const isTodayPos  = todayPnlAmt >= 0;
+  const dayColor    = isDayPos ? colors.positive : colors.negative;
+  const pnlColor    = isPnlPos ? colors.positive : colors.negative;
+  const todayColor  = isTodayPos ? colors.positive : colors.negative;
   const bucketColor = BUCKET_COLORS[bucket];
 
   const hasConcBadge = concentrationSeverity != null;
@@ -58,13 +63,16 @@ export function IntradayPositionRow({
         )}
       </View>
 
-      {/* Right: today%, P&L%, value, menu */}
+      {/* Right: today%, P&L%, todayPnl$, value, menu */}
       <View style={styles.right}>
         <Text style={[styles.dayPct, { color: dayColor }]}>
           {isDayPos ? '+' : ''}{(pos.dayChangePct ?? 0).toFixed(1)}%
         </Text>
         <Text style={[styles.pnlPct, { color: pnlColor }]}>
           {isPnlPos ? '+' : ''}{pos.unrealizedPnlPct.toFixed(1)}%
+        </Text>
+        <Text style={[styles.todayPnl, { color: todayColor }]}>
+          {isTodayPos ? '+' : ''}{formatCompact(todayPnlAmt)}
         </Text>
         <Text style={styles.mktVal}>{formatCompact(pos.marketValue)}</Text>
         <Pressable
@@ -131,26 +139,32 @@ const styles = StyleSheet.create({
   right: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
+    gap: 8,
   },
   dayPct: {
     fontFamily: 'Inter_600SemiBold',
-    fontSize: 13,
-    width: 54,
+    fontSize: 12,
+    width: 44,
     textAlign: 'right',
   },
   pnlPct: {
     fontFamily: 'Inter_500Medium',
-    fontSize: 12,
+    fontSize: 11,
     color: colors.textSecondary,
-    width: 48,
+    width: 50,
+    textAlign: 'right',
+  },
+  todayPnl: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    width: 50,
     textAlign: 'right',
   },
   mktVal: {
     fontFamily: 'Inter_600SemiBold',
-    fontSize: 13,
+    fontSize: 12,
     color: colors.textPrimary,
-    width: 64,
+    width: 56,
     textAlign: 'right',
   },
   menuBtn: { padding: 4 },

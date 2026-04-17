@@ -136,6 +136,7 @@ export interface Position {
   positionBucket?: PositionPositionBucket;
   ipsAction?: PositionIpsAction;
   stopPrice?: number | null;
+  targetPrice?: number | null;
   addZoneLow?: number | null;
   addZoneHigh?: number | null;
   cutListAddedAt?: string | null;
@@ -251,6 +252,7 @@ export interface UpdatePositionBody {
   positionBucket?: UpdatePositionBodyPositionBucket;
   ipsAction?: UpdatePositionBodyIpsAction;
   stopPrice?: number | null;
+  targetPrice?: number | null;
   addZoneLow?: number | null;
   addZoneHigh?: number | null;
   cutListAddedAt?: string | null;

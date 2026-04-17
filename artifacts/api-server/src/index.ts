@@ -1,7 +1,9 @@
 import app from "./app";
 import { logger } from "./lib/logger";
 import { reconcileAll } from "./routes/activities";
+import { captureSnapshot } from "./lib/snapshotService";
 import { db, activitiesTable, positionsTable } from "@workspace/db";
+import cron from "node-cron";
 
 const rawPort = process.env["PORT"];
 
@@ -106,4 +108,18 @@ app.listen(port, async () => {
       logger.error(err, "reconcileAll failed on startup");
     }
   }
+
+  // Daily portfolio snapshot at 20:00 UTC = 4 PM EDT (market close).
+  // For EST (winter) move to "0 21 * * 1-5".
+  cron.schedule("0 20 * * 1-5", async () => {
+    logger.info("cron: starting daily portfolio snapshot");
+    try {
+      const result = await captureSnapshot();
+      logger.info(result, "cron: snapshot complete");
+    } catch (err) {
+      logger.error(err, "cron: snapshot failed");
+    }
+  }, { timezone: "UTC" });
+
+  logger.info("Daily snapshot cron scheduled at 20:00 UTC (Mon–Fri)");
 });

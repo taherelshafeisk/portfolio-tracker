@@ -150,6 +150,7 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
     positionBucket: p.positionBucket ?? null,
     ipsAction: p.ipsAction ?? null,
     stopPrice: p.stopPrice != null ? parseFloat(p.stopPrice) : null,
+    targetPrice: p.targetPrice != null ? parseFloat(p.targetPrice) : null,
     addZoneLow: p.addZoneLow != null ? parseFloat(p.addZoneLow) : null,
     addZoneHigh: p.addZoneHigh != null ? parseFloat(p.addZoneHigh) : null,
     cutListAddedAt: p.cutListAddedAt ? p.cutListAddedAt.toISOString() : null,
@@ -163,122 +164,8 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
 
 // ─── Helpers for position history aggregation ─────────────────────────────────
 
-interface ActivityRow {
-  id: number;
-  activityType: string;
-  quantity: string | null;
-  price: string | null;
-  totalAmount: string | null;
-  tradeDate: Date;
-  notes: string | null;
-}
-
-interface PositionAggregation {
-  positionId: number;
-  ticker: string;
-  accountId: number;
-  status: 'open' | 'closed';
-  totalShares: number;
-  avgCostBasis: number;
-  totalInvested: number;
-  realizedPnl: number;
-  firstEntryDate: string | null;
-  lastActivityDate: string | null;
-  holdDurationDays: number;
-  transactions: Array<{
-    id: number;
-    activityType: string;
-    quantity: number | null;
-    price: number | null;
-    totalAmount: number | null;
-    tradeDate: string;
-    notes: string | null;
-  }>;
-}
-
-function computePositionAggregation(
-  posId: number,
-  ticker: string,
-  acctId: number,
-  activities: ActivityRow[],
-  today: Date,
-  positionQty: number = 0,
-  seededAvgCost: number = 0,
-): PositionAggregation {
-  // Sort chronologically for running avg cost calculation
-  const sorted = [...activities].sort((a, b) => a.tradeDate.getTime() - b.tradeDate.getTime());
-
-  let runningQty = 0;
-  let runningAvgCost = 0;
-  let totalInvested = 0;
-  let realizedPnl = 0;
-  let firstEntryDate: Date | null = null;
-  let lastActivityDate: Date | null = null;
-
-  for (const act of sorted) {
-    const qty = act.quantity ? parseFloat(act.quantity) : 0;
-    const price = act.price ? parseFloat(act.price) : 0;
-    const total = act.totalAmount ? Math.abs(parseFloat(act.totalAmount)) : 0;
-
-    if (act.activityType === 'buy' && qty > 0) {
-      const effectivePrice = price > 0 ? price : (qty > 0 ? total / qty : 0);
-      // Weighted average cost
-      runningAvgCost = (runningAvgCost * runningQty + effectivePrice * qty) / (runningQty + qty);
-      runningQty += qty;
-      totalInvested += effectivePrice * qty;
-      if (!firstEntryDate) firstEntryDate = act.tradeDate;
-    } else if (act.activityType === 'sell' && qty > 0) {
-      const effectivePrice = price > 0 ? price : (qty > 0 ? total / qty : 0);
-      realizedPnl += (effectivePrice - runningAvgCost) * qty;
-      runningQty = Math.max(0, runningQty - qty);
-    }
-
-    if (act.activityType === 'buy' || act.activityType === 'sell') {
-      lastActivityDate = act.tradeDate;
-    }
-  }
-
-  // If no activities drove runningQty above threshold, fall back to the stored position values.
-  // This handles seeded/imported positions that have no activity records yet.
-  const noActivityData = Math.abs(runningQty) < 0.0001 && positionQty > 0.0001;
-  const effectiveQty = noActivityData ? positionQty : runningQty;
-  const effectiveAvgCost = noActivityData ? seededAvgCost : runningAvgCost;
-  const effectiveTotalInvested = noActivityData ? positionQty * seededAvgCost : totalInvested;
-  const status: 'open' | 'closed' = Math.abs(effectiveQty) < 0.0001 ? 'closed' : 'open';
-
-  // Hold duration: first entry → last activity (closed) or today (open)
-  const endDate = status === 'closed' ? (lastActivityDate ?? today) : today;
-  const holdDurationDays = firstEntryDate
-    ? Math.max(0, Math.floor((endDate.getTime() - firstEntryDate.getTime()) / (1000 * 60 * 60 * 24)))
-    : 0;
-
-  const transactions = [...activities]
-    .sort((a, b) => b.tradeDate.getTime() - a.tradeDate.getTime())
-    .map(a => ({
-      id: a.id,
-      activityType: a.activityType,
-      quantity: a.quantity ? parseFloat(a.quantity) : null,
-      price: a.price ? parseFloat(a.price) : null,
-      totalAmount: a.totalAmount ? parseFloat(a.totalAmount) : null,
-      tradeDate: a.tradeDate instanceof Date ? a.tradeDate.toISOString() : String(a.tradeDate),
-      notes: a.notes ?? null,
-    }));
-
-  return {
-    positionId: posId,
-    ticker,
-    accountId: acctId,
-    status,
-    totalShares: effectiveQty,
-    avgCostBasis: effectiveAvgCost,
-    totalInvested: effectiveTotalInvested,
-    realizedPnl,
-    firstEntryDate: firstEntryDate ? firstEntryDate.toISOString() : null,
-    lastActivityDate: lastActivityDate ? lastActivityDate.toISOString() : null,
-    holdDurationDays,
-    transactions,
-  };
-}
+import { computePositionAggregation } from '../lib/positionAggregation';
+import type { ActivityRow } from '../lib/positionAggregation';
 
 // ─── GET /history — sleeve-level aggregation (literal, must precede /:id) ─────
 router.get("/history", async (req, res) => {
@@ -494,7 +381,7 @@ router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
   try {
     const id = parseInt(req.params.id);
     const { quantity, avgCost, currentPrice, assetType, notes,
-            positionBucket, ipsAction, stopPrice, addZoneLow, addZoneHigh,
+            positionBucket, ipsAction, stopPrice, targetPrice, addZoneLow, addZoneHigh,
             cutListAddedAt, policyNote, ipsVersion, exitReason } = req.body;
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (quantity !== undefined) updates.quantity = quantity.toString();
@@ -505,6 +392,7 @@ router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
     if (positionBucket !== undefined) updates.positionBucket = positionBucket || null;
     if (ipsAction !== undefined) updates.ipsAction = ipsAction || null;
     if (stopPrice !== undefined) updates.stopPrice = stopPrice != null ? stopPrice.toString() : null;
+    if (targetPrice !== undefined) updates.targetPrice = targetPrice != null ? targetPrice.toString() : null;
     if (addZoneLow !== undefined) updates.addZoneLow = addZoneLow != null ? addZoneLow.toString() : null;
     if (addZoneHigh !== undefined) updates.addZoneHigh = addZoneHigh != null ? addZoneHigh.toString() : null;
     if (cutListAddedAt !== undefined) updates.cutListAddedAt = cutListAddedAt ? new Date(cutListAddedAt) : null;

@@ -114,7 +114,7 @@ export default function AccountDetailScreen() {
 
   // ─── Filter / Sort / Search ───────────────────────────────────────────────
   type FilterType = 'all' | 'risers' | 'losers';
-  type SortField = 'value' | 'pct' | 'pnl' | 'name' | 'symbol' | 'day';
+  type SortField = 'value' | 'pct' | 'pnl' | 'name' | 'symbol' | 'day' | 'todaypnl';
   const [filter, setFilter] = useState<FilterType>('all');
   const [sortBy, setSortBy] = useState<SortField>('value');
   const [sortAsc, setSortAsc] = useState(false);
@@ -149,7 +149,7 @@ export default function AccountDetailScreen() {
   }, [positions, filter, sortBy, sortAsc, search]);
 
   const SORT_LABELS: Record<SortField, string> = {
-    value: 'Market Value', pct: 'P&L %', pnl: 'P&L $', name: 'Name', symbol: 'Symbol', day: 'Today',
+    value: 'Market Value', pct: 'P&L %', pnl: 'P&L $', name: 'Name', symbol: 'Symbol', day: 'Today', todaypnl: "Today P&L $",
   };
 
   const [isLoading, setIsLoading] = useState(false);
@@ -248,8 +248,8 @@ export default function AccountDetailScreen() {
     return computeActions(acctAccounts, positions, navMap);
   }, [accounts, positions, accountId, totalValue]);
 
-  // Grouped + filtered positions for Intraday mode
-  const intradayGroups = useMemo<Record<Bucket, Position[]>>(() => {
+  // Flat sorted positions for Intraday mode (no bucket grouping — global sort order)
+  const intradayPositions = useMemo<Position[]>(() => {
     let list = positions.filter(p => {
       if (!search.trim()) return true;
       const q = search.trim().toLowerCase();
@@ -257,15 +257,14 @@ export default function AccountDetailScreen() {
     });
     if (bucketFilter !== 'all') list = list.filter(p => positionBuckets[p.id] === bucketFilter);
     list.sort((a, b) => {
-      if (sortBy === 'value') return sortAsc ? a.marketValue - b.marketValue : b.marketValue - a.marketValue;
-      if (sortBy === 'pct')   return sortAsc ? a.unrealizedPnlPct - b.unrealizedPnlPct : b.unrealizedPnlPct - a.unrealizedPnlPct;
-      if (sortBy === 'day')   return sortAsc ? (a.dayChangePct ?? 0) - (b.dayChangePct ?? 0) : (b.dayChangePct ?? 0) - (a.dayChangePct ?? 0);
+      if (sortBy === 'value')    return sortAsc ? a.marketValue - b.marketValue : b.marketValue - a.marketValue;
+      if (sortBy === 'pct')      return sortAsc ? a.unrealizedPnlPct - b.unrealizedPnlPct : b.unrealizedPnlPct - a.unrealizedPnlPct;
+      if (sortBy === 'day')      return sortAsc ? (a.dayChangePct ?? 0) - (b.dayChangePct ?? 0) : (b.dayChangePct ?? 0) - (a.dayChangePct ?? 0);
+      if (sortBy === 'todaypnl') return sortAsc ? (a.dayChange ?? 0) - (b.dayChange ?? 0) : (b.dayChange ?? 0) - (a.dayChange ?? 0);
       // Default intraday sort: biggest absolute daily mover first
       return Math.abs(b.dayChangePct ?? 0) - Math.abs(a.dayChangePct ?? 0);
     });
-    const groups: Record<Bucket, Position[]> = { long_term: [], speculative: [], crypto: [] };
-    for (const p of list) groups[positionBuckets[p.id]].push(p);
-    return groups;
+    return list;
   }, [positions, search, bucketFilter, positionBuckets, sortBy, sortAsc]);
 
   // Policy severity per position (used by IntradayPositionRow badges)
@@ -296,6 +295,17 @@ export default function AccountDetailScreen() {
     setBucketOverrides(prev => { const next = { ...prev }; delete next[pos.id]; return next; });
     setShowBucketPicker(null);
   }, []);
+
+  // Column-tap sort cycling: first tap → desc, second tap → asc, third tap → default
+  const handleIntradaySort = useCallback((col: 'day' | 'pct' | 'todaypnl' | 'value') => {
+    if (sortBy === col) {
+      if (!sortAsc) { setSortAsc(true); }
+      else { setSortBy('value'); setSortAsc(false); }
+    } else {
+      setSortBy(col);
+      setSortAsc(false);
+    }
+  }, [sortBy, sortAsc]);
 
   const exportCSV = () => {
     const header = 'Symbol,Name,Qty,Avg Cost,Current Price,Market Value,Unrealized P&L,P&L %';
@@ -920,7 +930,7 @@ export default function AccountDetailScreen() {
               <Card key={pos.id} style={styles.posCard}>
                 <View style={styles.posHeader}>
                   <Pressable
-                    onPress={() => router.push({ pathname: '/chart/[symbol]', params: { symbol: pos.symbol, avgCost: String(pos.avgCost), accountId: String(accountId) } })}
+                    onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: pos.symbol, accountId: String(accountId) } })}
                     style={styles.posLeft}
                   >
                     <StockLogo symbol={pos.symbol} size={36} assetType={pos.assetType} />
@@ -967,39 +977,47 @@ export default function AccountDetailScreen() {
             );
           })
         ) : (
-          // Intraday mode — grouped compact rows
+          // Intraday mode — flat sorted list with sortable column headers
           <>
           <View style={styles.intradayColHeader}>
             <View style={{ flex: 1 }} />
-            <Text style={[styles.intradayColLabel, { width: 54 }]}>Today</Text>
-            <Text style={[styles.intradayColLabel, { width: 48 }]}>P&L</Text>
-            <Text style={[styles.intradayColLabel, { width: 64 }]}>Value</Text>
+            {([
+              { col: 'day',      label: 'Today',  width: 44 },
+              { col: 'pct',      label: 'P&L%',   width: 50 },
+              { col: 'todaypnl', label: 'Pnl$',   width: 50 },
+              { col: 'value',    label: 'Value',   width: 56 },
+            ] as const).map(({ col, label, width }) => {
+              const isActive = sortBy === col;
+              return (
+                <Pressable
+                  key={col}
+                  style={{ width, alignItems: 'flex-end' }}
+                  onPress={() => handleIntradaySort(col)}
+                  hitSlop={6}
+                >
+                  <Text style={[
+                    styles.intradayColLabel,
+                    isActive && { color: colors.primary },
+                  ]}>
+                    {label}{isActive ? (sortAsc ? ' ↑' : ' ↓') : ''}
+                  </Text>
+                </Pressable>
+              );
+            })}
             <View style={{ width: 22 }} />
           </View>
-          {BUCKET_ORDER.map(bucket => {
-            const group = intradayGroups[bucket] ?? [];
-            if (group.length === 0) return null;
-            return (
-              <View key={bucket}>
-                <View style={styles.bucketGroupHeader}>
-                  <View style={[styles.bucketDot, { backgroundColor: BUCKET_COLORS[bucket] }]} />
-                  <Text style={styles.bucketGroupTitle}>{BUCKET_LABELS[bucket]}</Text>
-                  <Text style={styles.bucketGroupCount}>{group.length}</Text>
-                </View>
-                {group.map(pos => (
-                  <IntradayPositionRow
-                    key={pos.id}
-                    position={pos}
-                    bucket={positionBuckets[pos.id] ?? 'speculative'}
-                    concentrationSeverity={positionSeverities[pos.id]?.conc}
-                    drawdownSeverity={positionSeverities[pos.id]?.dd}
-                    onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: pos.symbol, accountId: String(pos.accountId) } })}
-                    onMenuPress={() => setMenuPos(pos)}
-                  />
-                ))}
-              </View>
-            );
-          })}
+          {intradayPositions.map(pos => (
+            <IntradayPositionRow
+              key={pos.id}
+              position={pos}
+              bucket={positionBuckets[pos.id] ?? 'speculative'}
+              todayPnlAmt={pos.dayChange ?? 0}
+              concentrationSeverity={positionSeverities[pos.id]?.conc}
+              drawdownSeverity={positionSeverities[pos.id]?.dd}
+              onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: pos.symbol, accountId: String(pos.accountId) } })}
+              onMenuPress={() => setMenuPos(pos)}
+            />
+          ))}
           </>
         )}
 

@@ -19,6 +19,7 @@ import { usePortfolio, apiPut, apiGet } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { formatCurrency } from '@/components/ui/PnlBadge';
 import { computeActions, DEFAULT_CONCENTRATION_LIMIT } from '@/lib/actions';
+import { suggestLevels } from '@/lib/suggestLevels';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,13 @@ function bucketColor(bucket: string): string {
   }
 }
 
+/** Format share quantities: whole numbers as integers, fractional shares with up to 4 sig decimals. */
+function fmtQty(qty: number): string {
+  if (qty % 1 === 0) return qty.toFixed(0);
+  // strip trailing zeros (e.g. 0.5000 → "0.5")
+  return parseFloat(qty.toFixed(4)).toString();
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PositionDetailScreen() {
@@ -114,6 +122,10 @@ export default function PositionDetailScreen() {
   const [editingNote, setEditingNote] = useState(false);
   const [noteText, setNoteText] = useState('');
   const [expandedTxId, setExpandedTxId] = useState<number | null>(null);
+  const [editingStop, setEditingStop] = useState(false);
+  const [editingTarget, setEditingTarget] = useState(false);
+  const [stopInputVal, setStopInputVal] = useState('');
+  const [targetInputVal, setTargetInputVal] = useState('');
 
   const position = useMemo(
     () => positions.find(p => p.symbol === ticker && p.accountId === accountId),
@@ -182,6 +194,11 @@ export default function PositionDetailScreen() {
   );
   const crossAccountTotal = crossAccountPositions.reduce((s, p) => s + p.marketValue, 0);
 
+  const otherAccountPositions = useMemo(
+    () => crossAccountPositions.filter(p => p.accountId !== accountId),
+    [crossAccountPositions, accountId],
+  );
+
   const sleeveNavMap = useMemo(() => {
     const map = new Map<number, number>();
     for (const a of accounts) {
@@ -200,7 +217,13 @@ export default function PositionDetailScreen() {
   const currentPrice = quote?.price ?? position?.currentPrice ?? 0;
   const avgCost = position?.avgCost ?? historyDetail?.avgCostBasis ?? 0;
   const stopPrice = position?.stopPrice != null ? Number(position.stopPrice) : null;
+  const targetPrice = position?.targetPrice != null ? Number(position.targetPrice) : null;
   const drawdownPct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : 0;
+
+  const suggestedLevels = useMemo(
+    () => currentPrice > 0 ? suggestLevels(currentPrice, avgCost, quote?.low52w ?? null) : null,
+    [currentPrice, avgCost, quote?.low52w],
+  );
 
   const sharesToTrim = useMemo(() => {
     if (!position || accountNLV <= 0 || currentPrice <= 0) return 0;
@@ -214,8 +237,13 @@ export default function PositionDetailScreen() {
     const sorted = [...historyDetail.transactions].sort(
       (a, b) => new Date(a.tradeDate).getTime() - new Date(b.tradeDate).getTime(),
     );
-    let runningAvg = 0;
-    let runningQty = 0;
+    // Bootstrap from position data when no buy activities exist (seeded position)
+    const hasBuyTransactions = sorted.some(t => t.activityType === 'buy' && (t.quantity ?? 0) > 0);
+    const totalSellQty = hasBuyTransactions ? 0 : sorted
+      .filter(t => t.activityType === 'sell')
+      .reduce((s, t) => s + (t.quantity ?? 0), 0);
+    let runningAvg = hasBuyTransactions ? 0 : avgCost;
+    let runningQty = hasBuyTransactions ? 0 : ((historyDetail.totalShares ?? 0) + totalSellQty);
     const result = sorted.map(t => {
       const qty = t.quantity ?? 0;
       const price = t.price ?? (t.totalAmount != null && qty > 0 ? Math.abs(t.totalAmount) / qty : 0);
@@ -230,7 +258,7 @@ export default function PositionDetailScreen() {
       return { ...t, rowRealizedPnl };
     });
     return result.reverse();
-  }, [historyDetail?.transactions]);
+  }, [historyDetail?.transactions, avgCost, historyDetail?.totalShares]);
 
   const historySummary = useMemo(() => {
     if (!historyDetail) return null;
@@ -245,8 +273,10 @@ export default function PositionDetailScreen() {
       const p = t.price ?? (t.totalAmount != null && qty > 0 ? Math.abs(t.totalAmount) / qty : 0);
       return s + qty * p;
     }, 0);
-    return { totalBought, totalSold, realizedPnl: historyDetail.realizedPnl, holdDays: historyDetail.holdDurationDays };
-  }, [historyDetail]);
+    // Use enrichedTransactions P&L so seeded positions use the correct avg cost from context.
+    const realizedPnl = enrichedTransactions.reduce((s, t) => s + (t.rowRealizedPnl ?? 0), 0);
+    return { totalBought, totalSold, realizedPnl, holdDays: historyDetail.holdDurationDays };
+  }, [historyDetail, enrichedTransactions]);
 
   // ─── Chart ────────────────────────────────────────────────────────────────
 
@@ -346,28 +376,40 @@ export default function PositionDetailScreen() {
     );
   };
 
-  // ─── Guard ────────────────────────────────────────────────────────────────
+  // ─── Derived (position optional) ─────────────────────────────────────────
 
-  if (!position) {
-    return (
-      <View style={[styles.container, { paddingTop: insets.top }]}>
-        <Pressable style={styles.backBtn} onPress={() => router.back()}>
-          <Feather name="arrow-left" size={20} color={colors.textPrimary} />
-        </Pressable>
-        <Text style={styles.notFound}>Position not found</Text>
-      </View>
-    );
-  }
-
-  const bucket = position.positionBucket ?? null;
-  const isOpen = position.quantity > 0;
+  const bucket = position?.positionBucket ?? null;
+  const isOpen = (position?.quantity ?? 0) > 0;
 
   const saveNote = async () => {
+    if (!position) return;
     setEditingNote(false);
     try {
       await apiPut(`/positions/${position.id}`, { notes: noteText });
       queryClient.invalidateQueries({ queryKey: ['positions'] });
     } catch { /* silently fail — text remains visible */ }
+  };
+
+  const saveStop = async () => {
+    if (!position) return;
+    const price = parseFloat(stopInputVal);
+    if (isNaN(price) || price <= 0) { setEditingStop(false); return; }
+    setEditingStop(false);
+    try {
+      await apiPut(`/positions/${position.id}`, { stopPrice: price });
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+    } catch {}
+  };
+
+  const saveTarget = async () => {
+    if (!position) return;
+    const price = parseFloat(targetInputVal);
+    if (isNaN(price) || price <= 0) { setEditingTarget(false); return; }
+    setEditingTarget(false);
+    try {
+      await apiPut(`/positions/${position.id}`, { targetPrice: price });
+      queryClient.invalidateQueries({ queryKey: ['positions'] });
+    } catch {}
   };
 
   // ─── Price Card ───────────────────────────────────────────────────────────
@@ -376,7 +418,7 @@ export default function PositionDetailScreen() {
     <Card style={styles.priceCard} noPadding>
       <View style={{ padding: 16, paddingBottom: 4 }}>
         <Text style={styles.companyName} numberOfLines={1}>
-          {quote?.name ?? position.name}
+          {quote?.name ?? position?.name ?? ticker}
         </Text>
         {account && <Text style={styles.accountContext}>{account.name}</Text>}
 
@@ -439,27 +481,50 @@ export default function PositionDetailScreen() {
       <View style={styles.chartWrap}>{renderChart()}</View>
 
       {/* IPS status strip */}
-      <View style={styles.ipsStrip}>
-        <View style={[
-          styles.ipsPill,
-          isConcentrationViolated
-            ? { backgroundColor: colors.negative + '20', borderColor: colors.negative + '55' }
-            : { backgroundColor: colors.surface, borderColor: colors.separator },
-        ]}>
-          <View style={[styles.ipsDot, { backgroundColor: isConcentrationViolated ? colors.negative : colors.textMuted }]} />
-          <Text style={[styles.ipsPillText, { color: isConcentrationViolated ? colors.negative : colors.textSecondary }]}>
-            Conc {concentrationPct.toFixed(1)}%{isConcentrationViolated ? ' · over limit' : ''}
-          </Text>
+      {position && (
+        <View style={styles.ipsStrip}>
+          <View style={[
+            styles.ipsPill,
+            isConcentrationViolated
+              ? { backgroundColor: colors.negative + '20', borderColor: colors.negative + '55' }
+              : { backgroundColor: colors.surface, borderColor: colors.separator },
+          ]}>
+            <View style={[styles.ipsDot, { backgroundColor: isConcentrationViolated ? colors.negative : colors.textMuted }]} />
+            <Text style={[styles.ipsPillText, { color: isConcentrationViolated ? colors.negative : colors.textSecondary }]}>
+              Conc {concentrationPct.toFixed(1)}%{isConcentrationViolated ? ' · over limit' : ''}
+            </Text>
+          </View>
+          <View style={[styles.ipsPill, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
+            <View style={[styles.ipsDot, { backgroundColor: colors.textMuted }]} />
+            <Text style={styles.ipsPillText}>
+              {drawdownPct >= 0 ? '+' : ''}{drawdownPct.toFixed(1)}% vs cost
+            </Text>
+          </View>
         </View>
-        <View style={[styles.ipsPill, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
-          <View style={[styles.ipsDot, { backgroundColor: colors.textMuted }]} />
-          <Text style={styles.ipsPillText}>
-            {drawdownPct >= 0 ? '+' : ''}{drawdownPct.toFixed(1)}% vs cost
-          </Text>
-        </View>
-      </View>
+      )}
     </Card>
   );
+
+  // ─── Guard (show price card + chart for unowned tickers) ─────────────────
+
+  if (!position) {
+    return (
+      <View style={[styles.container, { paddingTop: insets.top }]}>
+        <View style={styles.topbar}>
+          <Pressable style={styles.backBtn} onPress={() => router.back()} hitSlop={8}>
+            <Feather name="arrow-left" size={20} color={colors.textPrimary} />
+          </Pressable>
+          <Text style={styles.topbarTicker}>{ticker}</Text>
+        </View>
+        <ScrollView
+          contentContainerStyle={[styles.scroll, { paddingBottom: Platform.OS === 'web' ? 40 : insets.bottom + 24 }]}
+          showsVerticalScrollIndicator={false}
+        >
+          {priceCard}
+        </ScrollView>
+      </View>
+    );
+  }
 
   // ─── Overview content ─────────────────────────────────────────────────────
 
@@ -504,6 +569,11 @@ export default function PositionDetailScreen() {
           <StatCell
             label="Hold Duration"
             value={historyDetail ? `${historyDetail.holdDurationDays}d` : (historyLoading ? '…' : '—')}
+          />
+          <StatCell
+            label="Today"
+            value={`${(position.dayChangePct ?? 0) >= 0 ? '+' : ''}${formatCurrency(position.dayChange ?? 0)} (${(position.dayChangePct ?? 0) >= 0 ? '+' : ''}${(position.dayChangePct ?? 0).toFixed(2)}%)`}
+            valueColor={(position.dayChangePct ?? 0) >= 0 ? colors.positive : colors.negative}
           />
         </View>
 
@@ -558,28 +628,150 @@ export default function PositionDetailScreen() {
         </View>
       </Card>
 
+      {/* Also held in other accounts */}
+      {otherAccountPositions.length > 0 && (
+        <Card>
+          <Text style={styles.cardLabel}>Also held in other accounts</Text>
+          {otherAccountPositions.map(p => {
+            const acct = accounts.find(a => a.id === p.accountId);
+            const acctNLV = sleeveNavMap.get(p.accountId) ?? 0;
+            const pct = acctNLV > 0 ? (p.marketValue / acctNLV) * 100 : 0;
+            const isOpPos = p.unrealizedPnl >= 0;
+            return (
+              <View key={p.id} style={styles.alsoHeldRow}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.alsoHeldAcct}>{acct?.name ?? `Account ${p.accountId}`}</Text>
+                  <Text style={styles.alsoHeldMeta}>
+                    {fmtQty(p.quantity)} sh · avg {formatCurrency(p.avgCost)} · {pct.toFixed(1)}% of account
+                  </Text>
+                </View>
+                <Text style={[styles.alsoHeldReturn, { color: isOpPos ? colors.positive : colors.negative }]}>
+                  {isOpPos ? '+' : ''}{p.unrealizedPnlPct.toFixed(1)}%
+                </Text>
+              </View>
+            );
+          })}
+        </Card>
+      )}
+
       {/* Levels */}
       <Card>
         <Text style={styles.cardLabel}>Levels</Text>
-        <View style={styles.levelRow}>
-          <View style={[styles.levelDot, { backgroundColor: colors.negative }]} />
-          <Text style={styles.levelLabel}>Stop</Text>
-          {stopPrice != null ? (
-            <>
-              <Text style={styles.levelPrice}>{formatCurrency(stopPrice)}</Text>
-              <Text style={[styles.levelDist, { color: currentPrice < stopPrice ? colors.negative : colors.textMuted }]}>
-                {(((currentPrice - stopPrice) / currentPrice) * 100).toFixed(1)}% away
+
+        {/* Stop row */}
+        {editingStop ? (
+          <View style={styles.levelEditRow}>
+            <View style={[styles.levelDot, { backgroundColor: colors.negative }]} />
+            <Text style={styles.levelLabel}>Stop</Text>
+            <TextInput
+              style={styles.levelInput}
+              value={stopInputVal}
+              onChangeText={setStopInputVal}
+              keyboardType="decimal-pad"
+              autoFocus
+              selectTextOnFocus
+            />
+            <Pressable style={styles.levelSaveBtn} onPress={saveStop}>
+              <Text style={styles.levelSaveBtnText}>Set</Text>
+            </Pressable>
+            <Pressable onPress={() => setEditingStop(false)} hitSlop={8}>
+              <Feather name="x" size={14} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : stopPrice != null ? (
+          <View style={styles.levelRow}>
+            <View style={[styles.levelDot, { backgroundColor: colors.negative }]} />
+            <Text style={styles.levelLabel}>Stop</Text>
+            <Text style={styles.levelPrice}>{formatCurrency(stopPrice)}</Text>
+            <Text style={[styles.levelDist, { color: currentPrice < stopPrice ? colors.negative : colors.textMuted }]}>
+              {(((currentPrice - stopPrice) / currentPrice) * 100).toFixed(1)}% away
+            </Text>
+            <Pressable
+              hitSlop={8}
+              onPress={() => { setStopInputVal(stopPrice.toFixed(2)); setEditingStop(true); }}
+              style={{ marginLeft: 'auto' }}
+            >
+              <Feather name="edit-2" size={12} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : (
+          <View>
+            <View style={styles.levelNudgeRow}>
+              <Feather name="alert-triangle" size={12} color="#F5A623" />
+              <Text style={styles.levelNudgeText}>
+                No stop set
+                {suggestedLevels ? ` · Suggested: ${formatCurrency(suggestedLevels.stop)}` : ''}
               </Text>
-            </>
-          ) : (
-            <Text style={styles.levelAdd}>+ Add</Text>
-          )}
-        </View>
-        <View style={styles.levelRow}>
-          <View style={[styles.levelDot, { backgroundColor: colors.positive }]} />
-          <Text style={styles.levelLabel}>Target</Text>
-          <Text style={styles.levelAdd}>+ Add</Text>
-        </View>
+              {suggestedLevels && (
+                <Pressable
+                  style={styles.levelSetBtn}
+                  onPress={() => { setStopInputVal(suggestedLevels.stop.toFixed(2)); setEditingStop(true); }}
+                >
+                  <Text style={styles.levelSetBtnText}>Set</Text>
+                </Pressable>
+              )}
+            </View>
+            {suggestedLevels && (
+              <Text style={styles.levelBasisText}>{suggestedLevels.basis}</Text>
+            )}
+          </View>
+        )}
+
+        {/* Target row */}
+        {editingTarget ? (
+          <View style={styles.levelEditRow}>
+            <View style={[styles.levelDot, { backgroundColor: colors.positive }]} />
+            <Text style={styles.levelLabel}>Target</Text>
+            <TextInput
+              style={styles.levelInput}
+              value={targetInputVal}
+              onChangeText={setTargetInputVal}
+              keyboardType="decimal-pad"
+              autoFocus
+              selectTextOnFocus
+            />
+            <Pressable style={styles.levelSaveBtn} onPress={saveTarget}>
+              <Text style={styles.levelSaveBtnText}>Set</Text>
+            </Pressable>
+            <Pressable onPress={() => setEditingTarget(false)} hitSlop={8}>
+              <Feather name="x" size={14} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : targetPrice != null ? (
+          <View style={styles.levelRow}>
+            <View style={[styles.levelDot, { backgroundColor: colors.positive }]} />
+            <Text style={styles.levelLabel}>Target</Text>
+            <Text style={styles.levelPrice}>{formatCurrency(targetPrice)}</Text>
+            <Text style={[styles.levelDist, { color: currentPrice >= targetPrice ? colors.positive : colors.textMuted }]}>
+              {(((targetPrice - currentPrice) / currentPrice) * 100).toFixed(1)}% away
+            </Text>
+            <Pressable
+              hitSlop={8}
+              onPress={() => { setTargetInputVal(targetPrice.toFixed(2)); setEditingTarget(true); }}
+              style={{ marginLeft: 'auto' }}
+            >
+              <Feather name="edit-2" size={12} color={colors.textMuted} />
+            </Pressable>
+          </View>
+        ) : (
+          <View>
+            <View style={styles.levelNudgeRow}>
+              <View style={[styles.levelNudgeDot]} />
+              <Text style={styles.levelNudgeTextNeutral}>
+                No target set
+                {suggestedLevels ? ` · Suggested: ${formatCurrency(suggestedLevels.target)}` : ''}
+              </Text>
+              {suggestedLevels && (
+                <Pressable
+                  style={styles.levelSetBtn}
+                  onPress={() => { setTargetInputVal(suggestedLevels.target.toFixed(2)); setEditingTarget(true); }}
+                >
+                  <Text style={styles.levelSetBtnText}>Set</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )}
       </Card>
 
       {/* Catalysts */}
@@ -612,10 +804,12 @@ export default function PositionDetailScreen() {
           {crossAccountExpanded && (
             <View style={styles.crossBody}>
               <View style={[styles.crossRow, styles.crossTotalRow]}>
-                <Text style={styles.crossAcctName}>Total</Text>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.crossAcctName}>Total</Text>
+                </View>
                 <View style={styles.crossRight}>
                   <Text style={styles.crossShares}>
-                    {crossAccountPositions.reduce((s, p) => s + p.quantity, 0).toFixed(0)} sh
+                    {fmtQty(crossAccountPositions.reduce((s, p) => s + p.quantity, 0))} sh
                   </Text>
                   <Text style={styles.crossValue}>{formatCurrency(crossAccountTotal)}</Text>
                 </View>
@@ -631,7 +825,7 @@ export default function PositionDetailScreen() {
                     </View>
                     <View style={styles.crossRight}>
                       <Text style={styles.crossMeta}>{formatCurrency(p.avgCost)}</Text>
-                      <Text style={styles.crossShares}>{p.quantity.toFixed(0)} sh</Text>
+                      <Text style={styles.crossShares}>{fmtQty(p.quantity)} sh</Text>
                       <Text style={styles.crossValue}>{formatCurrency(p.marketValue)}</Text>
                     </View>
                   </View>
@@ -908,11 +1102,22 @@ const styles = StyleSheet.create({
 
   // Levels
   levelRow: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderTopWidth: 1, borderTopColor: colors.separator },
+  levelEditRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.separator },
   levelDot: { width: 8, height: 8, borderRadius: 4 },
   levelLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, width: 50 },
   levelPrice: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.textPrimary, flex: 1 },
   levelDist: { fontFamily: 'Inter_400Regular', fontSize: 11 },
   levelAdd: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.primary, flex: 1 },
+  levelInput: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.textPrimary, borderBottomWidth: 1, borderBottomColor: colors.primary, paddingVertical: 2 },
+  levelSaveBtn: { backgroundColor: colors.primary + '22', paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8 },
+  levelSaveBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: colors.primary },
+  levelNudgeRow: { flexDirection: 'row', alignItems: 'center', gap: 6, paddingVertical: 9, borderTopWidth: 1, borderTopColor: colors.separator },
+  levelNudgeDot: { width: 8, height: 8, borderRadius: 4, backgroundColor: colors.textMuted },
+  levelNudgeText: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 12, color: '#F5A623' },
+  levelNudgeTextNeutral: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
+  levelSetBtn: { backgroundColor: colors.primary + '15', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
+  levelSetBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 11, color: colors.primary },
+  levelBasisText: { fontFamily: 'Inter_400Regular', fontSize: 10, color: colors.textMuted, paddingLeft: 18, paddingBottom: 4 },
 
   // Catalysts
   catalystRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.separator },
@@ -931,7 +1136,13 @@ const styles = StyleSheet.create({
   crossRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
   crossMeta: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted },
   crossShares: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textSecondary },
-  crossValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary, width: 76, textAlign: 'right' },
+  crossValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary, minWidth: 90, textAlign: 'right' },
+
+  // Also held in other accounts
+  alsoHeldRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.separator },
+  alsoHeldAcct: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary },
+  alsoHeldMeta: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 2 },
+  alsoHeldReturn: { fontFamily: 'Inter_700Bold', fontSize: 13 },
 
   // History
   historyEmpty: { alignItems: 'center', paddingVertical: 40 },

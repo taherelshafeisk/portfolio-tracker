@@ -10,3 +10,4 @@ export * from "./tradeAnnotations";
 export * from "./policyProposals";
 export * from "./convictions";
 export * from "./convictionAttachments";
+export * from "./portfolioSnapshots";

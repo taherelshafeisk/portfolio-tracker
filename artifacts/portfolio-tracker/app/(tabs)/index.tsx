@@ -248,6 +248,9 @@ export default function HomeScreen() {
         {/* 2. Sleeve grid */}
         <SleeveSection sleeves={sleeves} />
 
+        {/* 2b. Stop coverage */}
+        <StopCoverageBar positions={positions} />
+
         {/* 3. Actions */}
         <ActionsSection
           actions={actions}
@@ -360,6 +363,44 @@ function ActionRow({ action, showBorder, onDismiss }: ActionRowProps) {
     </Pressable>
   );
 }
+
+// ─── Stop Coverage Bar ────────────────────────────────────────────────────────
+
+function StopCoverageBar({ positions }: { positions: Position[] }) {
+  const total = positions.length;
+  if (total === 0) return null;
+
+  const withStop = positions.filter(p => p.stopPrice != null).length;
+  const isAllProtected = withStop === total;
+  const fillPct = (withStop / total) * 100;
+
+  return (
+    <View style={stopStyles.wrapper}>
+      {isAllProtected ? (
+        <View style={stopStyles.row}>
+          <Feather name="check-circle" size={13} color={colors.positive} />
+          <Text style={stopStyles.allProtectedText}>All positions protected</Text>
+        </View>
+      ) : (
+        <>
+          <Text style={stopStyles.label}>{withStop} of {total} positions have stops set</Text>
+          <View style={stopStyles.track}>
+            <View style={[stopStyles.fill, { width: `${fillPct}%` as any }]} />
+          </View>
+        </>
+      )}
+    </View>
+  );
+}
+
+const stopStyles = StyleSheet.create({
+  wrapper: { marginHorizontal: 16, marginBottom: 8, gap: 6 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 6 },
+  allProtectedText: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.positive },
+  label: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
+  track: { height: 4, backgroundColor: colors.surface, borderRadius: 2, overflow: 'hidden' },
+  fill: { height: 4, backgroundColor: colors.positive, borderRadius: 2 },
+});
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 

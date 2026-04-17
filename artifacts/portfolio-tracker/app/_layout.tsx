@@ -42,16 +42,6 @@ function RootLayoutNav() {
         }}
       />
       <Stack.Screen
-        name="chart/[symbol]"
-        options={{
-          headerShown: true,
-          headerStyle: { backgroundColor: '#0A0E1A' },
-          headerTintColor: '#F0F4FF',
-          headerBackTitle: 'Back',
-          presentation: 'card',
-        }}
-      />
-      <Stack.Screen
         name="orders/index"
         options={{
           headerShown: true,

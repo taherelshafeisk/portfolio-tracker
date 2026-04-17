@@ -17,6 +17,7 @@ export const positionsTable = pgTable("positions", {
   positionBucket: text("position_bucket"),   // 'core'|'swing'|'spec'|'def'|'anchor'|'inc'|'cut'
   ipsAction: text("ips_action"),             // 'hold'|'add'|'trim'|'monitor'|'cut'|'exit'
   stopPrice: numeric("stop_price", { precision: 20, scale: 4 }),
+  targetPrice: numeric("target_price", { precision: 20, scale: 4 }),
   addZoneLow: numeric("add_zone_low", { precision: 20, scale: 4 }),
   addZoneHigh: numeric("add_zone_high", { precision: 20, scale: 4 }),
   cutListAddedAt: timestamp("cut_list_added_at"),

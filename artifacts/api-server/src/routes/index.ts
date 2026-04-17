@@ -11,6 +11,7 @@ import alertsRouter from "./alerts";
 import portfolioPolicyRouter from "./portfolioPolicy";
 import ipsRouter from "./ips";
 import convictionsRouter from "./convictions";
+import snapshotsRouter from "./snapshots";
 
 const router: IRouter = Router();
 
@@ -26,5 +27,6 @@ router.use("/alerts", alertsRouter);
 router.use("/portfolio-policy", portfolioPolicyRouter);
 router.use("/ips", ipsRouter);
 router.use("/convictions", convictionsRouter);
+router.use("/snapshots", snapshotsRouter);
 
 export default router;

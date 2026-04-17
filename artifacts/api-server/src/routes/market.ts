@@ -1,4 +1,6 @@
 import { Router, type IRouter } from "express";
+import { db } from "@workspace/db";
+import { positionsTable } from "@workspace/db";
 
 const router: IRouter = Router();
 
@@ -203,9 +205,19 @@ router.get("/screener", async (req, res) => {
       "PLTR","SOFI","RIOT","MARA","COIN","SHOP","SNAP","PINS","RBLX","U",
       "ARKK","SPY","QQQ","IWM","XLF","XLV","XLE","XLK","XLY","XLC"
     ];
+    // FIX 4: query all active positions upfront so we can flag alreadyOwned per result
+    const allPositions = await db.select({ symbol: positionsTable.symbol, quantity: positionsTable.quantity })
+      .from(positionsTable);
+    const ownedSymbols = new Set(
+      allPositions
+        .filter(p => parseFloat(p.quantity) > 0)
+        .map(p => p.symbol.toUpperCase())
+    );
+
     const results = await Promise.allSettled(
       screenSymbols.map(async (symbol) => {
-        const url = `${YAHOO_BASE}/v8/finance/chart/${symbol}?interval=1d&range=1mo`;
+        // FIX 1: fetch 3 months so Wilder's EMA has enough bars to stabilise
+        const url = `${YAHOO_BASE}/v8/finance/chart/${symbol}?interval=1d&range=3mo`;
         const data = await fetchYahoo(url);
         const result = data?.chart?.result?.[0];
         if (!result) return null;
@@ -216,32 +228,58 @@ router.get("/screener", async (req, res) => {
         const change = price - previousClose;
         const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
         const volume = meta.regularMarketVolume || 0;
-        // Calculate relative volume and swing score
-        const closes = result.indicators?.quote?.[0]?.close?.filter(Boolean) || [];
-        const volumes = result.indicators?.quote?.[0]?.volume?.filter(Boolean) || [];
+        // Calculate relative volume
+        const closes: number[] = (result.indicators?.quote?.[0]?.close || []).filter(Boolean);
+        const volumes: number[] = (result.indicators?.quote?.[0]?.volume || []).filter(Boolean);
         const avgVolume = volumes.length > 0 ? volumes.reduce((a: number, b: number) => a + b, 0) / volumes.length : 0;
         const relativeVolume = avgVolume > 0 ? volume / avgVolume : 1;
-        // Simple RSI approximation using last 14 closes
+
+        // FIX 1: Wilder's smoothed RSI(14) — seed on first 14 periods, then EMA
         let rsi = 50;
         if (closes.length >= 15) {
-          const recentCloses = closes.slice(-15);
-          let gains = 0, losses = 0;
-          for (let i = 1; i < recentCloses.length; i++) {
-            const diff = recentCloses[i] - recentCloses[i-1];
-            if (diff > 0) gains += diff;
-            else losses += Math.abs(diff);
+          let avgGain = 0;
+          let avgLoss = 0;
+          // Seed: simple average of first 14 price changes
+          for (let i = 1; i <= 14; i++) {
+            const diff = closes[i] - closes[i - 1];
+            if (diff > 0) avgGain += diff;
+            else avgLoss += Math.abs(diff);
           }
-          const avgGain = gains / 14;
-          const avgLoss = losses / 14;
+          avgGain /= 14;
+          avgLoss /= 14;
+          // Smooth remaining periods with Wilder's EMA
+          for (let i = 15; i < closes.length; i++) {
+            const diff = closes[i] - closes[i - 1];
+            const gain = diff > 0 ? diff : 0;
+            const loss = diff < 0 ? Math.abs(diff) : 0;
+            avgGain = (avgGain * 13 + gain) / 14;
+            avgLoss = (avgLoss * 13 + loss) / 14;
+          }
           const rs = avgLoss > 0 ? avgGain / avgLoss : 100;
           rsi = 100 - (100 / (1 + rs));
         }
-        // Swing score: high volume, RSI between 40-60 (momentum without overbought)
+
+        // FIX 3: RSI scoring — trending zone earns full points, pullback partial, extended/oversold zero
+        let rsiScore: number;
+        if (rsi >= 50 && rsi <= 70) rsiScore = 40;
+        else if (rsi >= 40 && rsi < 50) rsiScore = 25;
+        else if (rsi > 70 && rsi <= 80) rsiScore = 15;
+        else rsiScore = 0; // < 40 or > 80
+
+        // FIX 2: direction-aware price move scoring — breakouts rewarded, distribution penalised
+        let priceScore: number;
+        if (changePercent >= 1 && changePercent <= 5) priceScore = 30;
+        else if (changePercent > 5 && changePercent <= 10) priceScore = 20;
+        else if (changePercent < 0 && changePercent >= -3 && relativeVolume < 1.2) priceScore = 20;
+        else if (changePercent < -3 || (changePercent < 0 && relativeVolume > 1.5)) priceScore = 0;
+        else priceScore = 10;
+
         const swingScore = Math.min(100,
           (relativeVolume > 1.5 ? 30 : relativeVolume * 20) +
-          (rsi >= 40 && rsi <= 65 ? 40 : Math.max(0, 40 - Math.abs(rsi - 52) * 2)) +
-          (Math.abs(changePercent) > 1 && Math.abs(changePercent) < 10 ? 30 : 15)
+          rsiScore +
+          priceScore
         );
+
         return {
           symbol: meta.symbol,
           name: meta.shortName || meta.longName || symbol,
@@ -250,10 +288,11 @@ router.get("/screener", async (req, res) => {
           volume,
           avgVolume: Math.round(avgVolume),
           relativeVolume: Math.round(relativeVolume * 100) / 100,
-          sector: undefined,
           marketCap: meta.marketCap || undefined,
           rsi: Math.round(rsi * 10) / 10,
           swingScore: Math.round(swingScore),
+          // FIX 4: flag symbols already held in any sleeve with qty > 0
+          alreadyOwned: ownedSymbols.has((meta.symbol || symbol).toUpperCase()),
         };
       })
     );

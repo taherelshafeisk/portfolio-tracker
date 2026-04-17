@@ -149,6 +149,7 @@ export const ListAccountPositionsResponseItem = zod.object({
     .enum(["hold", "add", "trim", "monitor", "cut", "exit"])
     .nullish(),
   stopPrice: zod.number().nullish(),
+  targetPrice: zod.number().nullish(),
   addZoneLow: zod.number().nullish(),
   addZoneHigh: zod.number().nullish(),
   cutListAddedAt: zod.date().nullish(),
@@ -312,6 +313,7 @@ export const UpdatePositionBody = zod.object({
     .enum(["hold", "add", "trim", "monitor", "cut", "exit"])
     .optional(),
   stopPrice: zod.number().nullish(),
+  targetPrice: zod.number().nullish(),
   addZoneLow: zod.number().nullish(),
   addZoneHigh: zod.number().nullish(),
   cutListAddedAt: zod.date().nullish(),
@@ -353,6 +355,7 @@ export const UpdatePositionResponse = zod.object({
     .enum(["hold", "add", "trim", "monitor", "cut", "exit"])
     .nullish(),
   stopPrice: zod.number().nullish(),
+  targetPrice: zod.number().nullish(),
   addZoneLow: zod.number().nullish(),
   addZoneHigh: zod.number().nullish(),
   cutListAddedAt: zod.date().nullish(),

@@ -333,7 +333,15 @@ router.post("/builder/next", async (req, res) => {
       ipsAction: p.ipsAction ?? null,
     }));
 
-    const coveredPositions = session.coveredPositions as string[];
+    let coveredPositions: string[] = [];
+    try {
+      const raw = session.coveredPositions;
+      if (Array.isArray(raw)) {
+        coveredPositions = raw as string[];
+      }
+    } catch {
+      coveredPositions = [];
+    }
     const nextPosition =
       positionSummaries.find(p => !coveredPositions.includes(p.symbol)) ?? null;
 
@@ -346,7 +354,17 @@ router.post("/builder/next", async (req, res) => {
     });
 
     // Build message history, appending userMessage if present
-    let history = (session.conversationHistory as HistoryMessage[]) ?? [];
+    let history: HistoryMessage[] = [];
+    try {
+      const raw = session.conversationHistory;
+      if (Array.isArray(raw)) {
+        history = raw as HistoryMessage[];
+      } else if (raw && typeof raw === 'object') {
+        history = Object.values(raw) as HistoryMessage[];
+      }
+    } catch {
+      history = [];
+    }
     if (userMessage?.trim()) {
       history = [...history, { role: "user" as const, content: userMessage.trim() }];
     }

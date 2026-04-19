@@ -34,6 +34,7 @@ interface Conversation {
 }
 
 const SUGGESTED_PROMPTS = [
+  "Build my IPS",
   "What's violating my IPS right now?",
   "Which position has the worst risk/reward?",
   "Am I on track with my cut list?",
@@ -51,11 +52,19 @@ export default function AIScreen() {
   const [input, setInput] = useState('');
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
+  const [ipsProgress, setIpsProgress] = useState<{
+    goalsComplete: boolean;
+    ipsComplete: boolean;
+    covered: number;
+    total: number;
+  } | null>(null);
+  const [isIpsMode, setIsIpsMode] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const msgIdCounter = useRef(10000);
 
   useEffect(() => {
     fetchConversations();
+    fetchIpsProgress();
   }, []);
 
   const fetchConversations = async () => {
@@ -88,6 +97,89 @@ export default function AIScreen() {
       setMessages(data.messages || []);
     } catch {}
   };
+
+  const fetchIpsProgress = async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/api/ips/builder/session`);
+      const data = await res.json();
+      setIpsProgress({
+        goalsComplete: data.goalsComplete,
+        ipsComplete: data.ipsComplete,
+        covered: data.covered,
+        total: data.total,
+      });
+    } catch {}
+  };
+
+  const startIpsBuilder = async () => {
+    setIsIpsMode(true);
+    setActiveConv({ id: -1, title: 'IPS Builder', createdAt: new Date().toISOString() });
+    setMessages([]);
+    setStreaming(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/ips/builder/next`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      });
+      const data = await res.json();
+      setMessages([{
+        id: msgIdCounter.current++,
+        role: 'assistant',
+        content: data.message,
+        createdAt: new Date().toISOString(),
+      }]);
+      await fetchIpsProgress();
+    } catch (err: any) {
+      setMessages([{
+        id: msgIdCounter.current++,
+        role: 'assistant',
+        content: `Error: ${err?.message || 'Failed to start IPS builder'}`,
+        createdAt: new Date().toISOString(),
+      }]);
+    } finally {
+      setStreaming(false);
+    }
+  };
+
+  const sendIpsBuilderMessage = useCallback(async (text?: string) => {
+    const content = (text || input).trim();
+    if (!content || streaming) return;
+    Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
+    setInput('');
+    const userMsg: Message = {
+      id: msgIdCounter.current++,
+      role: 'user',
+      content,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages(prev => [...prev, userMsg]);
+    setStreaming(true);
+    try {
+      const res = await fetch(`${BASE_URL}/api/ips/builder/next`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userMessage: content }),
+      });
+      const data = await res.json();
+      setMessages(prev => [...prev, {
+        id: msgIdCounter.current++,
+        role: 'assistant',
+        content: data.message,
+        createdAt: new Date().toISOString(),
+      }]);
+      await fetchIpsProgress();
+    } catch (err: any) {
+      setMessages(prev => [...prev, {
+        id: msgIdCounter.current++,
+        role: 'assistant',
+        content: `Error: ${err?.message || 'Unknown error'}`,
+        createdAt: new Date().toISOString(),
+      }]);
+    } finally {
+      setStreaming(false);
+    }
+  }, [input, streaming]);
 
   const sendMessage = useCallback(async (text?: string) => {
     const content = (text || input).trim();
@@ -202,11 +294,19 @@ export default function AIScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>AI Advisor</Text>
         {activeConv && (
-          <Pressable onPress={() => { setActiveConv(null); setMessages([]); }}>
+          <Pressable onPress={() => { setActiveConv(null); setMessages([]); setIsIpsMode(false); }}>
             <Feather name="plus-square" size={22} color={colors.textSecondary} />
           </Pressable>
         )}
       </View>
+
+      {ipsProgress && !ipsProgress.ipsComplete && !activeConv && (
+        <Pressable style={styles.ipsProgressBar} onPress={startIpsBuilder}>
+          <Text style={styles.ipsProgressText}>
+            IPS · {ipsProgress.covered} of {ipsProgress.total} positions defined — tap to continue
+          </Text>
+        </Pressable>
+      )}
 
       {!activeConv && conversations.length > 0 && (
         <View style={styles.historySection}>
@@ -235,7 +335,7 @@ export default function AIScreen() {
             <Text style={styles.welcomeText}>Ask me anything about your portfolio, market analysis, or trading strategies</Text>
             <View style={styles.suggestionsGrid}>
               {SUGGESTED_PROMPTS.map((p, i) => (
-                <Pressable key={i} style={styles.suggestion} onPress={() => sendMessage(p)}>
+                <Pressable key={i} style={styles.suggestion} onPress={() => p === 'Build my IPS' ? startIpsBuilder() : sendMessage(p)}>
                   <Text style={styles.suggestionText}>{p}</Text>
                 </Pressable>
               ))}
@@ -273,7 +373,7 @@ export default function AIScreen() {
             />
             <Pressable
               style={[styles.sendBtn, (!input.trim() || streaming) && styles.sendBtnDisabled]}
-              onPress={() => sendMessage()}
+              onPress={() => isIpsMode ? sendIpsBuilderMessage() : sendMessage()}
               disabled={!input.trim() || streaming}
             >
               <Feather name="send" size={18} color={colors.background} />
@@ -317,4 +417,18 @@ const styles = StyleSheet.create({
   input: { flex: 1, backgroundColor: colors.surface, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14, maxHeight: 100, borderWidth: 1, borderColor: colors.separator },
   sendBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendBtnDisabled: { opacity: 0.4 },
+  ipsProgressBar: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 10,
+    backgroundColor: '#F5A623',
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  ipsProgressText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+    color: '#1a1a1a',
+    textAlign: 'center',
+  },
 });

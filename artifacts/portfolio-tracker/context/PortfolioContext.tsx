@@ -63,6 +63,19 @@ export async function apiDelete(path: string): Promise<void> {
   if (!res.ok && res.status !== 204) throw new Error(`API error ${res.status}`);
 }
 
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const res = await fetch(`${BASE_URL}/api${path}`, {
+    method: 'POST',
+    body: formData,
+  });
+  if (!res.ok) {
+    let msg = `API error ${res.status}`;
+    try { const j = await res.json(); if (j?.error) msg = j.error; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  return res.json();
+}
+
 export interface Account {
   id: number;
   name: string;

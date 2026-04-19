@@ -60,6 +60,7 @@
   "dependencies": {
     "@shopify/react-native-skia": "^2.5.3",
     "expo-dev-client": "~6.0.20",
+    "expo-document-picker": "^55.0.13",
     "expo-notifications": "^55.0.18",
     "victory-native": "^41.20.2"
   }

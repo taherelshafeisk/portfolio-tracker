@@ -1,31 +1,16 @@
 import { Router, type IRouter } from "express";
-import multer from "multer";
-import mammoth from "mammoth";
 import { db } from "@workspace/db";
 import {
   policyProposalsTable,
   policyProposalItemsTable,
   positionsTable,
+  accountsTable,
+  ipsBuilderSessionsTable,
 } from "@workspace/db";
-import { eq, desc } from "drizzle-orm";
+import { eq, desc, and } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 
 const router: IRouter = Router();
-
-const docxUpload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (_req, file, cb) => {
-    if (
-      file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
-      file.originalname.endsWith(".docx")
-    ) {
-      cb(null, true);
-    } else {
-      cb(new Error("Only .docx files are accepted"));
-    }
-  },
-});
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -37,43 +22,6 @@ interface ProposedFields {
   addZoneHigh?: number | null;
   policyNote?: string | null;
 }
-
-// ── System prompt ─────────────────────────────────────────────────────────────
-
-const IPS_SYSTEM_PROMPT = `You are an assistant mapping an Investment Policy Statement into structured portfolio policy fields. Output proposals only — do NOT write to any database.
-
-For every extracted value, cite the exact source snippet (<= 240 chars) and note confidence 0-1.
-
-Output JSON only, no markdown:
-{
-  "ipsVersion": "string",
-  "proposals": [
-    {
-      "entityType": "position",
-      "entityKey": "SYMBOL",
-      "proposedFields": {
-        "positionBucket": null,
-        "ipsAction": null,
-        "stopPrice": null,
-        "addZoneLow": null,
-        "addZoneHigh": null,
-        "policyNote": null
-      },
-      "confidence": 0.9,
-      "rationale": "short explanation",
-      "evidenceSnippet": "exact text from doc <= 240 chars"
-    }
-  ],
-  "unmatched": ["symbols mentioned but not in portfolio"],
-  "globalQuestions": ["ambiguities needing clarification"]
-}
-
-Valid positionBucket values: core, swing, speculative, crypto, cash
-Valid ipsAction values: hold, add, trim, cut, watch
-
-Never infer a stopPrice if not explicitly stated — leave null and note it in globalQuestions.
-
-Process positions one at a time in order. Complete each position object fully before starting the next. Never interleave fields from different positions. If unsure about a field, set it to null rather than guessing.`;
 
 // ── Response helpers ──────────────────────────────────────────────────────────
 
@@ -109,147 +57,6 @@ function proposalToResponse(
     unmatched: extra?.unmatched ?? [],
   };
 }
-
-// ── POST /ips/extract-text ────────────────────────────────────────────────────
-
-router.post("/extract-text", docxUpload.single("file"), async (req, res) => {
-  if (!req.file) {
-    return res.status(400).json({ error: "No file uploaded" });
-  }
-  try {
-    const { value: text } = await mammoth.extractRawText({ buffer: req.file.buffer });
-    return res.json({ text, filename: req.file.originalname });
-  } catch (err) {
-    console.error("[ips/extract-text] error:", err);
-    return res.status(422).json({ error: "Could not extract text from document" });
-  }
-});
-
-// ── POST /ips/parse ───────────────────────────────────────────────────────────
-
-router.post("/parse", async (req, res) => {
-  try {
-    const { text, ipsVersion, filename } = req.body as {
-      text?: string;
-      ipsVersion?: string;
-      filename?: string;
-    };
-
-    if (!text || typeof text !== "string" || !text.trim()) {
-      return res.status(400).json({ error: "text is required" });
-    }
-
-    // Call Claude
-    const message = await anthropic.messages.create({
-      model: "claude-sonnet-4-6",
-      max_tokens: 8192,
-      system: IPS_SYSTEM_PROMPT,
-      messages: [
-        {
-          role: "user",
-          content: `Parse this Investment Policy Statement and extract position-level policy:\n\n${text}`,
-        },
-        {
-          role: "assistant",
-          content: "{",
-        },
-      ],
-    });
-
-    console.log('[ips/parse] Claude content blocks:', JSON.stringify(message.content, null, 2));
-
-    const rawText =
-      message.content[0]?.type === "text" ? message.content[0].text : "";
-
-    console.log('[ips/parse] Raw Claude response length:', rawText?.length);
-    console.log('[ips/parse] Raw Claude response (first 500 chars):', rawText?.substring(0, 500));
-
-    type ParsedResponse = {
-      ipsVersion?: string;
-      proposals?: Array<{
-        entityType?: string;
-        entityKey?: string;
-        proposedFields?: ProposedFields;
-        confidence?: number;
-        rationale?: string;
-        evidenceSnippet?: string;
-      }>;
-      globalQuestions?: string[];
-      unmatched?: string[];
-    };
-
-    // Strip markdown fences, then slice to the outermost { … } object.
-    const cleaned = ("{" + rawText)
-      .replace(/^```json\s*/i, "")
-      .replace(/^```\s*/i, "")
-      .replace(/```\s*$/i, "")
-      .trim();
-
-    const s = cleaned.indexOf("{");
-    const e = cleaned.lastIndexOf("}");
-    const jsonCandidate = s !== -1 && e > s ? cleaned.slice(s, e + 1) : cleaned;
-
-    let parsed: ParsedResponse;
-    try {
-      parsed = JSON.parse(jsonCandidate) as ParsedResponse;
-    } catch (parseErr) {
-      console.error(
-        "[ips/parse] JSON.parse failed.\nRaw Claude response:\n" + rawText,
-        "\nParse error:", parseErr,
-      );
-      return res.status(502).json({
-        error: "Could not parse AI response. Check server logs for details.",
-      });
-    }
-
-    const proposals = (parsed.proposals ?? []).filter(
-      p => p.entityKey && p.proposedFields,
-    );
-
-    // Insert proposal header
-    const [proposal] = await db
-      .insert(policyProposalsTable)
-      .values({
-        ipsVersion: ipsVersion || parsed.ipsVersion || null,
-        sourceFilename: filename || null,
-        status: "pending",
-      })
-      .returning();
-
-    // Insert items (skip if none extracted)
-    let items: (typeof policyProposalItemsTable.$inferSelect)[] = [];
-    if (proposals.length > 0) {
-      items = await db
-        .insert(policyProposalItemsTable)
-        .values(
-          proposals.map(p => ({
-            proposalId: proposal.id,
-            entityType: p.entityType ?? "position",
-            entityKey: (p.entityKey ?? "").toUpperCase(),
-            proposedFields: p.proposedFields as Record<string, unknown>,
-            confidence:
-              p.confidence != null ? String(p.confidence) : null,
-            rationale: p.rationale ?? null,
-            evidenceSnippet: p.evidenceSnippet
-              ? p.evidenceSnippet.slice(0, 240)
-              : null,
-            status: "pending",
-          })),
-        )
-        .returning();
-    }
-
-    return res.status(201).json(
-      proposalToResponse(proposal, items, {
-        globalQuestions: parsed.globalQuestions ?? [],
-        unmatched: parsed.unmatched ?? [],
-      }),
-    );
-  } catch (err) {
-    console.error("[ips/parse] error:", err);
-    return res.status(500).json({ error: "Failed to parse IPS document" });
-  }
-});
 
 // ── GET /ips/proposals ────────────────────────────────────────────────────────
 
@@ -394,6 +201,334 @@ router.put("/proposals/:id/items/:itemId", async (req, res) => {
   } catch (err) {
     console.error("[ips/items] error:", err);
     return res.status(500).json({ error: "Failed to update proposal item" });
+  }
+});
+
+// ── IPS Builder types ─────────────────────────────────────────────────────────
+
+interface IpsProposal {
+  type?: "goals_complete";
+  entityType?: string;
+  entityKey?: string;
+  proposedFields?: Record<string, unknown>;
+  confidence?: number;
+  rationale?: string;
+}
+
+type HistoryMessage = { role: "user" | "assistant"; content: string };
+
+function buildBuilderSystemPrompt(opts: {
+  positions: Array<{
+    symbol: string;
+    quantity: number;
+    unrealizedPnl: number;
+    positionBucket: string | null;
+    ipsAction: string | null;
+  }>;
+  coveredPositions: string[];
+  goalsComplete: boolean;
+  nextPosition: { symbol: string; positionBucket: string | null; ipsAction: string | null } | null;
+  totalNavUsd: number;
+}): string {
+  const { positions, coveredPositions, goalsComplete, nextPosition, totalNavUsd } = opts;
+
+  const positionLines = positions
+    .map(p => {
+      const pnlSign = p.unrealizedPnl >= 0 ? "+" : "";
+      const covered = coveredPositions.includes(p.symbol) ? " ✓" : "";
+      return `  ${p.symbol}${covered}: qty=${p.quantity.toFixed(2)}, P&L=${pnlSign}${p.unrealizedPnl.toFixed(0)} USD, bucket=${p.positionBucket ?? "unset"}, action=${p.ipsAction ?? "unset"}`;
+    })
+    .join("\n");
+
+  const navFormatted = totalNavUsd.toLocaleString("en-US", {
+    style: "currency",
+    currency: "USD",
+    maximumFractionDigits: 0,
+  });
+
+  const uncoveredCount = positions.length - coveredPositions.length;
+
+  const phaseInstructions = !goalsComplete
+    ? `CURRENT PHASE: Goals Discovery
+Ask about investment goals in a conversational way. Cover:
+1. Purpose of this portfolio (retirement, wealth building, income, etc.)
+2. Time horizon
+3. Risk tolerance (can they stomach a 30% drawdown?)
+4. Expected contributions or withdrawals
+
+Ask at most 2 questions at a time. Be conversational, not clinical.
+When you have enough to characterise their goals, embed this marker at the end of your response:
+<!-- IPS_PROPOSAL: {"type":"goals_complete"} -->`
+    : nextPosition
+    ? `CURRENT PHASE: Position Classification
+Next position to cover: ${nextPosition.symbol}
+Current bucket: ${nextPosition.positionBucket ?? "unset"}, current action: ${nextPosition.ipsAction ?? "unset"}
+
+Propose a positionBucket and ipsAction for ${nextPosition.symbol} based on its P&L and portfolio context. Ask the user to confirm or adjust. Keep it to 2 questions max.
+
+Valid positionBucket values: core, swing, speculative, crypto, cash, def, anchor, inc, cut
+Valid ipsAction values: hold, add, trim, cut, watch, exit, monitor
+
+When the user confirms (or adjusts), embed the proposal at the end of your response:
+<!-- IPS_PROPOSAL: {"entityType":"position","entityKey":"${nextPosition.symbol}","proposedFields":{"positionBucket":"<value>","ipsAction":"<value>"},"confidence":0.9,"rationale":"<short reason>"} -->`
+    : `CURRENT PHASE: Complete
+All positions have been classified. Summarise the IPS policy you've built with the user and invite them to review.`;
+
+  return `You are an IPS (Investment Policy Statement) builder assistant helping a trader systematically classify their portfolio positions.
+
+Portfolio positions (${positions.length} total, ${coveredPositions.length} covered, ${uncoveredCount} remaining):
+${positionLines}
+Total portfolio NAV: ${navFormatted}
+
+${phaseInstructions}
+
+Rules:
+- Ask at most 2 questions per response
+- Propose answers where data supports it — don't make the user do the thinking
+- Be direct and friendly, not formal or clinical
+- Never reveal the <!-- IPS_PROPOSAL --> comment syntax to the user — it is stripped before display
+- Always embed the proposal comment at the very end of your response if making a proposal`;
+}
+
+// ── POST /ips/builder/next ────────────────────────────────────────────────────
+
+router.post("/builder/next", async (req, res) => {
+  try {
+    const { userMessage } = req.body as { userMessage?: string };
+
+    // Fetch or create single session (no auth yet)
+    let [session] = await db.select().from(ipsBuilderSessionsTable).limit(1);
+    if (!session) {
+      [session] = await db
+        .insert(ipsBuilderSessionsTable)
+        .values({})
+        .returning();
+    }
+
+    // Fetch accounts + positions
+    const [accounts, positions] = await Promise.all([
+      db.select().from(accountsTable),
+      db.select().from(positionsTable),
+    ]);
+
+    // Compute total NAV: cash balances + position market values
+    const totalCash = accounts.reduce(
+      (sum, a) => sum + parseFloat(a.currentBalance),
+      0,
+    );
+    const totalMv = positions.reduce(
+      (sum, p) => sum + parseFloat(p.quantity) * parseFloat(p.currentPrice),
+      0,
+    );
+    const totalNavUsd = totalCash + totalMv;
+
+    // Build position summaries for system prompt
+    const positionSummaries = positions.map(p => ({
+      symbol: p.symbol,
+      quantity: parseFloat(p.quantity),
+      unrealizedPnl:
+        (parseFloat(p.currentPrice) - parseFloat(p.avgCost)) *
+        parseFloat(p.quantity),
+      positionBucket: p.positionBucket ?? null,
+      ipsAction: p.ipsAction ?? null,
+    }));
+
+    const coveredPositions = session.coveredPositions as string[];
+    const nextPosition =
+      positionSummaries.find(p => !coveredPositions.includes(p.symbol)) ?? null;
+
+    const systemPrompt = buildBuilderSystemPrompt({
+      positions: positionSummaries,
+      coveredPositions,
+      goalsComplete: session.goalsComplete,
+      nextPosition,
+      totalNavUsd,
+    });
+
+    // Build message history, appending userMessage if present
+    let history = (session.conversationHistory as HistoryMessage[]) ?? [];
+    if (userMessage?.trim()) {
+      history = [...history, { role: "user" as const, content: userMessage.trim() }];
+    }
+
+    // Ensure at least one message for the first call
+    const messages: HistoryMessage[] =
+      history.length > 0
+        ? history
+        : [{ role: "user", content: "Let's begin building my IPS." }];
+
+    // Call Claude
+    const claudeResponse = await anthropic.messages.create({
+      model: "claude-sonnet-4-6",
+      max_tokens: 1024,
+      system: systemPrompt,
+      messages,
+    });
+
+    const assistantText =
+      claudeResponse.content[0]?.type === "text"
+        ? claudeResponse.content[0].text
+        : "";
+
+    // Append assistant response to history
+    history = [...history, { role: "assistant" as const, content: assistantText }];
+
+    // Parse embedded <!-- IPS_PROPOSAL: {...} --> blocks
+    const proposalMatches = [
+      ...assistantText.matchAll(/<!--\s*IPS_PROPOSAL:\s*(\{[\s\S]*?\})\s*-->/g),
+    ];
+    const parsedProposals = proposalMatches.flatMap<IpsProposal>(m => {
+      try {
+        return [JSON.parse(m[1]!) as IpsProposal];
+      } catch {
+        return [];
+      }
+    });
+
+    // Upsert proposals into policyProposalItemsTable
+    let proposalCount = 0;
+    const newlyCovered: string[] = [];
+    let goalsNowComplete = session.goalsComplete;
+
+    if (parsedProposals.length > 0) {
+      // Find or create the builder proposal header (keyed by sentinel filename)
+      let builderProposal = await db
+        .select()
+        .from(policyProposalsTable)
+        .where(eq(policyProposalsTable.sourceFilename, "__ips_builder__"))
+        .limit(1)
+        .then(rows => rows[0]);
+
+      if (!builderProposal) {
+        [builderProposal] = await db
+          .insert(policyProposalsTable)
+          .values({ sourceFilename: "__ips_builder__", status: "pending" })
+          .returning();
+      }
+
+      for (const proposal of parsedProposals) {
+        if (proposal.type === "goals_complete") {
+          goalsNowComplete = true;
+          continue;
+        }
+
+        if (!proposal.entityKey || !proposal.proposedFields) continue;
+
+        const key = proposal.entityKey.toUpperCase();
+
+        const existing = await db
+          .select()
+          .from(policyProposalItemsTable)
+          .where(
+            and(
+              eq(policyProposalItemsTable.proposalId, builderProposal.id),
+              eq(policyProposalItemsTable.entityKey, key),
+            ),
+          )
+          .limit(1)
+          .then(rows => rows[0]);
+
+        if (existing) {
+          await db
+            .update(policyProposalItemsTable)
+            .set({
+              proposedFields: proposal.proposedFields,
+              rationale: proposal.rationale ?? null,
+              updatedAt: new Date(),
+            })
+            .where(eq(policyProposalItemsTable.id, existing.id));
+        } else {
+          await db.insert(policyProposalItemsTable).values({
+            proposalId: builderProposal.id,
+            entityType: proposal.entityType ?? "position",
+            entityKey: key,
+            proposedFields: proposal.proposedFields,
+            confidence:
+              proposal.confidence != null ? String(proposal.confidence) : null,
+            rationale: proposal.rationale ?? null,
+            evidenceSnippet: null,
+            status: "pending",
+          });
+        }
+
+        proposalCount++;
+        if (!coveredPositions.includes(key)) {
+          newlyCovered.push(key);
+        }
+      }
+    }
+
+    // Update session state
+    const updatedCovered = [...new Set([...coveredPositions, ...newlyCovered])];
+    const ipsComplete =
+      goalsNowComplete && updatedCovered.length >= positions.length;
+
+    await db
+      .update(ipsBuilderSessionsTable)
+      .set({
+        conversationHistory: history,
+        coveredPositions: updatedCovered,
+        goalsComplete: goalsNowComplete,
+        ipsComplete,
+        updatedAt: new Date(),
+      })
+      .where(eq(ipsBuilderSessionsTable.id, session.id));
+
+    // Strip proposal comments before returning the display message
+    const displayMessage = assistantText
+      .replace(/<!--\s*IPS_PROPOSAL:[\s\S]*?-->/g, "")
+      .trim();
+
+    return res.json({
+      message: displayMessage,
+      proposalCount,
+      progress: {
+        covered: updatedCovered.length,
+        total: positions.length,
+        goalsComplete: goalsNowComplete,
+      },
+    });
+  } catch (err) {
+    console.error("[ips/builder/next] error:", err);
+    return res.status(500).json({ error: "Failed to process builder step" });
+  }
+});
+
+// ── GET /ips/builder/session ──────────────────────────────────────────────────
+
+router.get("/builder/session", async (_req, res) => {
+  try {
+    const [session] = await db.select().from(ipsBuilderSessionsTable).limit(1);
+    const [positions] = await Promise.all([db.select().from(positionsTable)]);
+
+    if (!session) {
+      return res.json({
+        goalsComplete: false,
+        ipsComplete: false,
+        covered: 0,
+        total: positions.length,
+        lastMessage: null,
+      });
+    }
+
+    const history = (session.conversationHistory as HistoryMessage[]) ?? [];
+    const lastAssistant = [...history].reverse().find(m => m.role === "assistant");
+    const lastMessage = lastAssistant
+      ? lastAssistant.content
+          .replace(/<!--\s*IPS_PROPOSAL:[\s\S]*?-->/g, "")
+          .trim()
+      : null;
+
+    return res.json({
+      goalsComplete: session.goalsComplete,
+      ipsComplete: session.ipsComplete,
+      covered: (session.coveredPositions as string[]).length,
+      total: positions.length,
+      lastMessage,
+    });
+  } catch (err) {
+    console.error("[ips/builder/session] error:", err);
+    return res.status(500).json({ error: "Failed to fetch builder session" });
   }
 });
 

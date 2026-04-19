@@ -197,14 +197,7 @@ export default function HomeScreen() {
       <View style={styles.header}>
         <Text style={styles.greeting}>{getGreeting()}</Text>
         <View style={styles.headerActions}>
-          <Pressable
-            onPress={() => router.push('/ips-parse')}
-            style={styles.refreshBtn}
-            hitSlop={4}
-          >
-            <Feather name="file-text" size={18} color={colors.textSecondary} />
-          </Pressable>
-          <Pressable onPress={handleExplicitRefresh} style={styles.refreshBtn}>
+<Pressable onPress={handleExplicitRefresh} style={styles.refreshBtn}>
             <Feather name="refresh-cw" size={18} color={colors.textSecondary} />
           </Pressable>
         </View>

@@ -282,7 +282,7 @@ Schema:
 
     const response = await anthropic.messages.create({
       model: "claude-sonnet-4-20250514",
-      max_tokens: 1000,
+      max_tokens: 4096,
       messages: [
         {
           role: "user",
@@ -491,9 +491,9 @@ router.get("/", async (req: Request, res: Response) => {
     // Fetch all attachments in one query
     const allAttachments = rows.length > 0
       ? await db
-          .select()
-          .from(convictionAttachmentsTable)
-          .orderBy(convictionAttachmentsTable.displayOrder)
+        .select()
+        .from(convictionAttachmentsTable)
+        .orderBy(convictionAttachmentsTable.displayOrder)
       : [];
 
     const attachmentsByConviction = new Map<string, ConvictionAttachment[]>();

@@ -369,11 +369,20 @@ router.post("/builder/next", async (req, res) => {
       history = [...history, { role: "user" as const, content: userMessage.trim() }];
     }
 
-    // Ensure at least one message for the first call
-    const messages: HistoryMessage[] =
+    // Ensure messages always end with a user turn (Anthropic requirement)
+    let messages: HistoryMessage[] =
       history.length > 0
         ? history
         : [{ role: "user", content: "Let's begin building my IPS." }];
+
+    // If last message is assistant (e.g. first call with no userMessage
+    // after session already has history), add a silent continuation prompt
+    if (messages[messages.length - 1]?.role === "assistant") {
+      messages = [
+        ...messages,
+        { role: "user", content: "Please continue." }
+      ];
+    }
 
     // Call Claude
     const claudeResponse = await anthropic.messages.create({

@@ -1,4 +1,6 @@
 import { Router, type IRouter } from "express";
+import multer from "multer";
+import mammoth from "mammoth";
 import { db } from "@workspace/db";
 import {
   policyProposalsTable,
@@ -9,6 +11,21 @@ import { eq, desc } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 
 const router: IRouter = Router();
+
+const docxUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (
+      file.mimetype === "application/vnd.openxmlformats-officedocument.wordprocessingml.document" ||
+      file.originalname.endsWith(".docx")
+    ) {
+      cb(null, true);
+    } else {
+      cb(new Error("Only .docx files are accepted"));
+    }
+  },
+});
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -54,7 +71,9 @@ Output JSON only, no markdown:
 Valid positionBucket values: core, swing, speculative, crypto, cash
 Valid ipsAction values: hold, add, trim, cut, watch
 
-Never infer a stopPrice if not explicitly stated — leave null and note it in globalQuestions.`;
+Never infer a stopPrice if not explicitly stated — leave null and note it in globalQuestions.
+
+Process positions one at a time in order. Complete each position object fully before starting the next. Never interleave fields from different positions. If unsure about a field, set it to null rather than guessing.`;
 
 // ── Response helpers ──────────────────────────────────────────────────────────
 
@@ -91,6 +110,21 @@ function proposalToResponse(
   };
 }
 
+// ── POST /ips/extract-text ────────────────────────────────────────────────────
+
+router.post("/extract-text", docxUpload.single("file"), async (req, res) => {
+  if (!req.file) {
+    return res.status(400).json({ error: "No file uploaded" });
+  }
+  try {
+    const { value: text } = await mammoth.extractRawText({ buffer: req.file.buffer });
+    return res.json({ text, filename: req.file.originalname });
+  } catch (err) {
+    console.error("[ips/extract-text] error:", err);
+    return res.status(422).json({ error: "Could not extract text from document" });
+  }
+});
+
 // ── POST /ips/parse ───────────────────────────────────────────────────────────
 
 router.post("/parse", async (req, res) => {
@@ -114,6 +148,10 @@ router.post("/parse", async (req, res) => {
         {
           role: "user",
           content: `Parse this Investment Policy Statement and extract position-level policy:\n\n${text}`,
+        },
+        {
+          role: "assistant",
+          content: "{",
         },
       ],
     });
@@ -141,7 +179,7 @@ router.post("/parse", async (req, res) => {
     };
 
     // Strip markdown fences, then slice to the outermost { … } object.
-    const cleaned = rawText
+    const cleaned = ("{" + rawText)
       .replace(/^```json\s*/i, "")
       .replace(/^```\s*/i, "")
       .replace(/```\s*$/i, "")

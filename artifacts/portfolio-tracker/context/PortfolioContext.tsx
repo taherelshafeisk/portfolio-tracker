@@ -135,6 +135,13 @@ export interface TradeActivity {
   createdAt: string;
 }
 
+export type MacroPosture = {
+  label: string | null;
+  notes: string | null;
+  cryptoView: string | null;
+  setAt: string | null;
+};
+
 export interface TopMover {
   symbol: string;
   dayChange: number;
@@ -179,12 +186,14 @@ interface PortfolioContextValue {
   positions: Position[];
   activities: TradeActivity[];
   summary: PortfolioSummary | null;
+  macroPosture: MacroPosture | null;
   isLoading: boolean;
   /** Non-null when the last refresh failed. Cleared on the next successful fetch. */
   error: string | null;
   refreshAll: () => Promise<void>;
   refreshPositions: (accountId?: number) => Promise<void>;
   refreshActivities: () => Promise<void>;
+  fetchMacroPosture: () => Promise<void>;
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
@@ -194,8 +203,18 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [positions, setPositions] = useState<Position[]>([]);
   const [activities, setActivities] = useState<TradeActivity[]>([]);
   const [summary, setSummary] = useState<PortfolioSummary | null>(null);
+  const [macroPosture, setMacroPosture] = useState<MacroPosture | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const fetchMacroPosture = useCallback(async () => {
+    try {
+      const data = await apiGet<MacroPosture>('/macro-posture');
+      setMacroPosture(data.label !== null ? data : null);
+    } catch (e) {
+      console.warn('Failed to fetch macro posture:', e);
+    }
+  }, []);
 
   const refreshAll = useCallback(async () => {
     setIsLoading(true);
@@ -220,6 +239,9 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       // 3. Fetch summary AFTER positions so it reads fresh prices from DB
       const summ = await apiGet<PortfolioSummary>('/portfolio/summary');
       setSummary(summ);
+
+      // 4. Fetch macro posture alongside
+      await fetchMacroPosture();
     } catch (e) {
       const isNetworkError = e instanceof TypeError && (e as TypeError).message.includes('Network request failed');
       setError(isNetworkError ? "Can't reach the server. Check your connection." : "Failed to load portfolio. Pull down to retry.");
@@ -261,12 +283,14 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     positions,
     activities,
     summary,
+    macroPosture,
     isLoading,
     error,
     refreshAll,
     refreshPositions,
     refreshActivities,
-  }), [accounts, positions, activities, summary, isLoading, error, refreshAll, refreshPositions, refreshActivities]);
+    fetchMacroPosture,
+  }), [accounts, positions, activities, summary, macroPosture, isLoading, error, refreshAll, refreshPositions, refreshActivities, fetchMacroPosture]);
 
   return (
     <PortfolioContext.Provider value={value}>

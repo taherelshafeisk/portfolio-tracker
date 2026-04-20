@@ -12,3 +12,4 @@ export * from "./convictions";
 export * from "./convictionAttachments";
 export * from "./portfolioSnapshots";
 export * from "./ipsBuilderSessions";
+export * from "./macroPosture";

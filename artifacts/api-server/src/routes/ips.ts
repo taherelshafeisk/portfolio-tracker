@@ -6,6 +6,7 @@ import {
   positionsTable,
   accountsTable,
   ipsBuilderSessionsTable,
+  macroPostureTable,
 } from "@workspace/db";
 import { eq, desc, and } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
@@ -274,8 +275,9 @@ function buildBuilderSystemPrompt(opts: {
   goalsComplete: boolean;
   nextPosition: { symbol: string; positionBucket: string | null; ipsAction: string | null } | null;
   totalNavUsd: number;
+  macroPosture?: { label: string; notes: string | null; cryptoView: string | null } | null;
 }): string {
-  const { positions, coveredPositions, goalsComplete, nextPosition, totalNavUsd } = opts;
+  const { positions, coveredPositions, goalsComplete, nextPosition, totalNavUsd, macroPosture } = opts;
 
   const positionLines = positions
     .map(p => {
@@ -319,11 +321,15 @@ When the user confirms (or adjusts), embed the proposal at the end of your respo
     : `CURRENT PHASE: Complete
 All positions have been classified. Summarise the IPS policy you've built with the user and invite them to review.`;
 
+  const macroLines = macroPosture
+    ? `\nCurrent macro posture: ${macroPosture.label}${macroPosture.notes ? ` — ${macroPosture.notes}` : ""}\nCrypto view: ${macroPosture.cryptoView ?? "not set"}`
+    : "";
+
   return `You are an IPS (Investment Policy Statement) builder assistant helping a trader systematically classify their portfolio positions.
 
 Portfolio positions (${positions.length} total, ${coveredPositions.length} covered, ${uncoveredCount} remaining):
 ${positionLines}
-Total portfolio NAV: ${navFormatted}
+Total portfolio NAV: ${navFormatted}${macroLines}
 
 ${phaseInstructions}
 
@@ -351,11 +357,13 @@ router.post("/builder/next", async (req, res) => {
         .returning();
     }
 
-    // Fetch accounts + positions
-    const [accounts, positions] = await Promise.all([
+    // Fetch accounts, positions, and active macro posture
+    const [accounts, positions, macroPostureRows] = await Promise.all([
       db.select().from(accountsTable),
       db.select().from(positionsTable),
+      db.select().from(macroPostureTable).where(eq(macroPostureTable.isActive, true)).limit(1),
     ]);
+    const macroPosture = macroPostureRows[0] ?? null;
 
     // Compute total NAV: cash balances + position market values
     const totalCash = accounts.reduce(
@@ -406,6 +414,7 @@ router.post("/builder/next", async (req, res) => {
       goalsComplete: session.goalsComplete,
       nextPosition,
       totalNavUsd,
+      macroPosture,
     });
 
     // Build message history, appending userMessage if present

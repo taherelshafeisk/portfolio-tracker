@@ -8,7 +8,7 @@ import { router } from 'expo-router';
 import { Feather } from '@expo/vector-icons';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiGet, apiPost, apiPatch, type Position, type Account } from '@/context/PortfolioContext';
+import { usePortfolio, apiGet, apiPost, apiPatch, type Position, type Account, type MacroPosture } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 
@@ -82,7 +82,7 @@ function computeHealthSignal(
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
-  const { summary, accounts, positions, isLoading, error, refreshAll } = usePortfolio();
+  const { summary, accounts, positions, macroPosture, isLoading, error, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const [dismissModal, setDismissModal] = useState<{ action: Action } | null>(null);
@@ -241,6 +241,9 @@ export default function HomeScreen() {
         {/* 2. Sleeve grid */}
         <SleeveSection sleeves={sleeves} />
 
+        {/* 2a. Market posture entry */}
+        <MacroPostureRow posture={macroPosture} />
+
         {/* 2b. Stop coverage */}
         <StopCoverageBar positions={positions} />
 
@@ -356,6 +359,83 @@ function ActionRow({ action, showBorder, onDismiss }: ActionRowProps) {
     </Pressable>
   );
 }
+
+// ─── Macro Posture Row ────────────────────────────────────────────────────────
+
+const POSTURE_COLORS: Record<string, string> = {
+  bull: '#00E676',
+  'late-cycle': '#F59E0B',
+  distribution: '#FF9800',
+  stagflation: '#FF6B35',
+  'war-escalation': '#C0392B',
+  recession: '#FF4757',
+  neutral: '#8899AA',
+};
+
+const POSTURE_DISPLAY: Record<string, string> = {
+  bull: 'Bull',
+  'late-cycle': 'Late-Cycle',
+  distribution: 'Distribution',
+  stagflation: 'Stagflation',
+  'war-escalation': 'War Escalation',
+  recession: 'Recession',
+  neutral: 'Neutral',
+};
+
+function MacroPostureRow({ posture }: { posture: MacroPosture | null }) {
+  return (
+    <Pressable
+      style={postureStyles.row}
+      onPress={() => router.push('/macro-posture')}
+    >
+      {posture?.label ? (
+        <>
+          <Text style={postureStyles.rowLabel}>Market Posture</Text>
+          <View style={[postureStyles.chip, { backgroundColor: `${POSTURE_COLORS[posture.label] ?? colors.textMuted}20`, borderColor: POSTURE_COLORS[posture.label] ?? colors.textMuted }]}>
+            <Text style={[postureStyles.chipText, { color: POSTURE_COLORS[posture.label] ?? colors.textMuted }]}>
+              {POSTURE_DISPLAY[posture.label] ?? posture.label}
+            </Text>
+          </View>
+        </>
+      ) : (
+        <Text style={postureStyles.noPosture}>Set market posture</Text>
+      )}
+      <Feather name="chevron-right" size={15} color={posture?.label ? colors.textSecondary : '#F59E0B'} />
+    </Pressable>
+  );
+}
+
+const postureStyles = StyleSheet.create({
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    marginBottom: 4,
+    gap: 8,
+  },
+  rowLabel: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: colors.textSecondary,
+  },
+  chip: {
+    borderWidth: 1,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 3,
+  },
+  chipText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+  },
+  noPosture: {
+    flex: 1,
+    fontFamily: 'Inter_500Medium',
+    fontSize: 13,
+    color: '#F59E0B',
+  },
+});
 
 // ─── Stop Coverage Bar ────────────────────────────────────────────────────────
 

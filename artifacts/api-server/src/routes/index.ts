@@ -12,6 +12,7 @@ import portfolioPolicyRouter from "./portfolioPolicy";
 import ipsRouter from "./ips";
 import convictionsRouter from "./convictions";
 import snapshotsRouter from "./snapshots";
+import macroPostureRouter from "./macroPosture";
 
 const router: IRouter = Router();
 
@@ -28,5 +29,6 @@ router.use("/portfolio-policy", portfolioPolicyRouter);
 router.use("/ips", ipsRouter);
 router.use("/convictions", convictionsRouter);
 router.use("/snapshots", snapshotsRouter);
+router.use("/macro-posture", macroPostureRouter);
 
 export default router;

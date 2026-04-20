@@ -431,7 +431,7 @@ const styles = StyleSheet.create({
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
   thinkingText: { fontFamily: 'Inter_400Regular', fontSize: 15, color: colors.textSecondary },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
-  input: { flex: 1, backgroundColor: colors.surface, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14, maxHeight: 100, borderWidth: 1, borderColor: colors.separator },
+  input: { flex: 1, backgroundColor: colors.surface, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 16, maxHeight: 100, borderWidth: 1, borderColor: colors.separator },
   sendBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendBtnDisabled: { opacity: 0.4 },
   ipsProgressBar: {

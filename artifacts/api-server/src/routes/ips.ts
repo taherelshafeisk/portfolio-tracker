@@ -332,7 +332,8 @@ Rules:
 - Propose answers where data supports it — don't make the user do the thinking
 - Be direct and friendly, not formal or clinical
 - Never reveal the <!-- IPS_PROPOSAL --> comment syntax to the user — it is stripped before display
-- Always embed the proposal comment at the very end of your response if making a proposal`;
+- Always embed the proposal comment at the very end of your response if making a proposal
+- Never create entityKey values with suffixes like _LOT1, _LOT2, _SWING, or any other suffix. Each position is identified by symbol only (e.g. 'META', not 'META_LOT1'). Sleeve separation is already handled by the account structure.`;
 }
 
 // ── POST /ips/builder/next ────────────────────────────────────────────────────

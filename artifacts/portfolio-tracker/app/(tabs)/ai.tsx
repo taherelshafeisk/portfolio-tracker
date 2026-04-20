@@ -370,7 +370,7 @@ export default function AIScreen() {
           />
         )}
 
-        <View style={[styles.inputArea, { paddingBottom: bottomPad + 8 }]}>
+        <View style={[styles.inputArea, { paddingBottom: Platform.OS === 'web' ? bottomPad + 8 : insets.bottom + 60 }]}>
           {streaming && (
             <View style={styles.thinkingRow}>
               <ActivityIndicator size="small" color={colors.primary} />
@@ -407,9 +407,9 @@ const styles = StyleSheet.create({
   header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 8, paddingTop: 4 },
   title: { fontFamily: 'Inter_700Bold', fontSize: 26, color: colors.textPrimary },
   historySection: { paddingHorizontal: 16, marginBottom: 8 },
-  historyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textSecondary, marginBottom: 8 },
+  historyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary, marginBottom: 8 },
   historyItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.separator },
-  historyText: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textPrimary },
+  historyText: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 15, color: colors.textPrimary },
   chatArea: { flex: 1 },
   welcomeArea: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingTop: 20 },
   aiIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,212,255,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(0,212,255,0.3)', marginBottom: 16 },
@@ -417,7 +417,7 @@ const styles = StyleSheet.create({
   welcomeText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
   suggestionsGrid: { width: '100%', gap: 8 },
   suggestion: { backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.separator },
-  suggestionText: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textSecondary },
+  suggestionText: { fontFamily: 'Inter_400Regular', fontSize: 16, color: colors.textSecondary },
   messageList: { padding: 16, gap: 12 },
   msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 4 },
   msgRowUser: { justifyContent: 'flex-end' },
@@ -429,7 +429,7 @@ const styles = StyleSheet.create({
   userBubbleText: { color: colors.background },
   inputArea: { paddingHorizontal: 16, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.separator },
   thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  thinkingText: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textSecondary },
+  thinkingText: { fontFamily: 'Inter_400Regular', fontSize: 15, color: colors.textSecondary },
   inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
   input: { flex: 1, backgroundColor: colors.surface, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 14, maxHeight: 100, borderWidth: 1, borderColor: colors.separator },
   sendBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
@@ -444,7 +444,7 @@ const styles = StyleSheet.create({
   },
   ipsProgressText: {
     fontFamily: 'Inter_600SemiBold',
-    fontSize: 13,
+    fontSize: 15,
     color: '#1a1a1a',
     textAlign: 'center',
   },
@@ -460,7 +460,7 @@ const styles = StyleSheet.create({
   },
   reviewBarText: {
     fontFamily: 'Inter_600SemiBold',
-    fontSize: 13,
+    fontSize: 15,
     color: colors.primary,
     textAlign: 'center',
   },

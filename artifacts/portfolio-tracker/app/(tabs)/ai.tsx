@@ -6,8 +6,9 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import { colors } from '@/constants/colors';
+import { type AIContextPayload } from '@/hooks/useAIContext';
 
 function resolveBaseUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
@@ -34,6 +35,110 @@ interface Conversation {
   createdAt: string;
 }
 
+function buildContextPrefix(ctx: AIContextPayload): string | null {
+  if (!ctx) return null;
+  switch (ctx.screen) {
+    case 'home': {
+      const lines = ['[Context]', 'Screen: Home / Portfolio'];
+      if (ctx.macro_posture) lines.push(`Macro posture: ${ctx.macro_posture}`);
+      if (ctx.violations.length > 0) {
+        lines.push(`IPS violations (${ctx.violations.length}):`);
+        ctx.violations.forEach(v => lines.push(`  • ${v.type} (${v.severity}): ${v.detail}`));
+      }
+      if (ctx.sleeves_summary.length > 0) {
+        lines.push('Sleeves:');
+        ctx.sleeves_summary.forEach(s =>
+          lines.push(`  • ${s.name}: $${s.value.toFixed(0)} (${s.change_pct >= 0 ? '+' : ''}${s.change_pct.toFixed(2)}%)`),
+        );
+      }
+      return lines.join('\n');
+    }
+    case 'position_detail': {
+      const lines = [
+        '[Context]',
+        `Screen: Position — ${ctx.ticker}`,
+        `Name: ${ctx.name}`,
+        `Sleeve: ${ctx.sleeve}`,
+        `Qty: ${ctx.qty} shares @ avg cost $${ctx.avg_cost.toFixed(2)}`,
+        `Current price: $${ctx.current_price.toFixed(2)}`,
+        `P&L: ${ctx.pnl_pct >= 0 ? '+' : ''}${ctx.pnl_pct.toFixed(2)}%`,
+      ];
+      if (ctx.stop != null) lines.push(`Stop: $${ctx.stop.toFixed(2)}`);
+      if (ctx.target != null) lines.push(`Target: $${ctx.target.toFixed(2)}`);
+      if (ctx.ips_flags.length > 0) {
+        lines.push('IPS flags:');
+        ctx.ips_flags.forEach(f => lines.push(`  • ${f.rule}: ${f.detail}`));
+      }
+      if (ctx.macro_tag) lines.push(`Macro posture: ${ctx.macro_tag}`);
+      if (ctx.thesis) lines.push(`Thesis: ${ctx.thesis}`);
+      return lines.join('\n');
+    }
+    case 'trade_swings': {
+      const lines = [
+        '[Context]',
+        'Screen: Trade → Open Swings',
+        `${ctx.positions.length} positions open, $${ctx.total_allocated.toFixed(0)} of $${ctx.target.toFixed(0)} deployed (${ctx.utilization_pct.toFixed(0)}%)`,
+      ];
+      if (ctx.macro_posture) lines.push(`Macro posture: ${ctx.macro_posture}`);
+      if (ctx.positions.length > 0) {
+        lines.push('Positions:');
+        ctx.positions.forEach(p =>
+          lines.push(`  • ${p.ticker}: ${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(1)}%, ${p.days_held}d held${p.stop_set ? '' : ', NO STOP'}`),
+        );
+      }
+      return lines.join('\n');
+    }
+    case 'sleeve_detail': {
+      const lines = [
+        '[Context]',
+        `Screen: Sleeve — ${ctx.sleeve_name}`,
+        `Total value: $${ctx.total_value.toFixed(0)}`,
+      ];
+      if (ctx.leverage != null) lines.push(`Leverage: ${ctx.leverage.toFixed(2)}x`);
+      if (ctx.positions.length > 0) {
+        lines.push('Positions:');
+        ctx.positions.forEach(p => {
+          const flags = p.ips_flags.length > 0 ? ` [${p.ips_flags.join(', ')}]` : '';
+          lines.push(`  • ${p.ticker}: ${p.weight_pct.toFixed(1)}%${flags}`);
+        });
+      }
+      return lines.join('\n');
+    }
+    case 'screener_result': {
+      const lines = [
+        '[Context]',
+        `Screen: Screener Result — ${ctx.ticker}`,
+        `Price: $${ctx.price.toFixed(2)}`,
+        `Stage: ${ctx.stage}`,
+        `RSI: ${ctx.rsi.toFixed(0)}`,
+      ];
+      if (ctx.ema_status.length > 0) lines.push(`EMA status: ${ctx.ema_status.join(', ')}`);
+      lines.push(`IPS headroom: bucket ${ctx.ips_headroom.bucket_available ? 'available' : 'full'}, leverage ${ctx.ips_headroom.leverage_ok ? 'ok' : 'at limit'}`);
+      return lines.join('\n');
+    }
+    default:
+      return null;
+  }
+}
+
+function deriveBadgeLabel(ctx: AIContextPayload): string | null {
+  if (!ctx) return null;
+  switch (ctx.screen) {
+    case 'home':
+      return ctx.violations.length > 0 ? `Home · ${ctx.violations.length} violations` : 'Home';
+    case 'position_detail':
+      return `${ctx.ticker} · ${ctx.pnl_pct >= 0 ? '+' : ''}${ctx.pnl_pct.toFixed(1)}%`;
+    case 'trade_swings':
+      return `Swings · ${ctx.positions.length} open`;
+    case 'sleeve_detail':
+      return ctx.sleeve_name;
+    case 'screener_result':
+      return `${ctx.ticker} · ${ctx.stage}`;
+    default:
+      return null;
+  }
+}
+
 const SUGGESTED_PROMPTS = [
   "Build my IPS",
   "What's violating my IPS right now?",
@@ -45,6 +150,7 @@ const SUGGESTED_PROMPTS = [
 
 export default function AIScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams<{ context?: string }>();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
@@ -64,6 +170,19 @@ export default function AIScreen() {
   const [pendingProposalCount, setPendingProposalCount] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const msgIdCounter = useRef(10000);
+  const [userHasSent, setUserHasSent] = useState(false);
+
+  const incomingContext = useRef<AIContextPayload>(null);
+  const contextPrefix = useRef<string | null>(null);
+  useEffect(() => {
+    if (params.context) {
+      try {
+        const parsed = JSON.parse(params.context) as AIContextPayload;
+        incomingContext.current = parsed;
+        contextPrefix.current = buildContextPrefix(parsed);
+      } catch {}
+    }
+  }, [params.context]);
 
   useEffect(() => {
     fetchConversations();
@@ -196,7 +315,6 @@ export default function AIScreen() {
     if (!content || streaming) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
 
-    // Show user message and loading state immediately
     setInput('');
     const userMsg: Message = {
       id: msgIdCounter.current++,
@@ -205,8 +323,13 @@ export default function AIScreen() {
       createdAt: new Date().toISOString(),
     };
     setMessages(prev => [...prev, userMsg]);
+    setUserHasSent(true);
     setStreaming(true);
     setStreamingContent('');
+
+    // Build content with optional silent context prefix on the first message
+    const prefix = !userHasSent && contextPrefix.current ? contextPrefix.current + '\n\n' : '';
+    const fullContent = prefix + content;
 
     let conv = activeConv;
     try {
@@ -214,17 +337,18 @@ export default function AIScreen() {
         conv = await createConversation(content.slice(0, 40));
       }
 
+      if (!conv) throw new Error('No conversation');
       const response = await fetch(`${BASE_URL}/api/anthropic/conversations/${conv.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content }),
+        body: JSON.stringify({ content: fullContent }),
       });
 
       if (!response.body) throw new Error('No stream');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
-      let fullContent = '';
+      let streamBuffer = '';
       let serverError: string | null = null;
 
       while (true) {
@@ -239,13 +363,13 @@ export default function AIScreen() {
               if (data.error) {
                 serverError = data.error;
               } else if (data.content) {
-                fullContent += data.content;
-                setStreamingContent(fullContent);
+                streamBuffer += data.content;
+                setStreamingContent(streamBuffer);
               } else if (data.done) {
                 const aiMsg: Message = {
                   id: msgIdCounter.current++,
                   role: 'assistant',
-                  content: fullContent,
+                  content: streamBuffer,
                   createdAt: new Date().toISOString(),
                 };
                 setMessages(prev => [...prev, aiMsg]);
@@ -304,11 +428,20 @@ export default function AIScreen() {
       <View style={styles.header}>
         <Text style={styles.title}>AI Advisor</Text>
         {activeConv && (
-          <Pressable onPress={() => { setActiveConv(null); setMessages([]); setIsIpsMode(false); }}>
+          <Pressable onPress={() => { setActiveConv(null); setMessages([]); setIsIpsMode(false); setUserHasSent(false); }}>
             <Feather name="plus-square" size={22} color={colors.textSecondary} />
           </Pressable>
         )}
       </View>
+
+      {!userHasSent && incomingContext.current && (() => {
+        const label = deriveBadgeLabel(incomingContext.current);
+        return label ? (
+          <View style={styles.contextIndicator}>
+            <Text style={styles.contextIndicatorText}>📍 {label}</Text>
+          </View>
+        ) : null;
+      })()}
 
       {ipsProgress && !ipsProgress.ipsComplete && !activeConv && (
         <Pressable style={styles.ipsProgressBar} onPress={startIpsBuilder}>
@@ -434,6 +567,15 @@ const styles = StyleSheet.create({
   input: { flex: 1, backgroundColor: colors.surface, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 16, maxHeight: 100, borderWidth: 1, borderColor: colors.separator },
   sendBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
   sendBtnDisabled: { opacity: 0.4 },
+  contextIndicator: {
+    marginHorizontal: 16,
+    marginBottom: 6,
+  },
+  contextIndicatorText: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 12,
+    color: colors.textMuted,
+  },
   ipsProgressBar: {
     marginHorizontal: 16,
     marginBottom: 8,

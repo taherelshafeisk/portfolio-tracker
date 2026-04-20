@@ -12,6 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
 import { ASSET_TYPES, getAssetType } from '@/constants/assetTypes';
 import { usePortfolio, apiGet, apiPost, apiPut, apiDelete, apiPatch, Position, Account } from '@/context/PortfolioContext';
+import { useAIContext } from '@/hooks/useAIContext';
 import { computeActions, type Action } from '@/lib/actions';
 import { Card } from '@/components/ui/Card';
 import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
@@ -105,6 +106,7 @@ export default function AccountDetailScreen() {
   const insets = useSafeAreaInsets();
   const navigation = useNavigation();
   const { accounts, positions: allPositions, summary, refreshAll } = usePortfolio();
+  const { setAIContext } = useAIContext();
   const accSummary = summary?.accounts.find(a => a.id === accountId);
 
   const account = accounts.find(a => a.id === accountId);
@@ -220,6 +222,22 @@ export default function AccountDetailScreen() {
   const cashBalance = account?.currentBalance ?? 0;
   const equity = positionsValue + cashBalance;
   const leverageRatio = cashBalance < 0 && equity > 0 ? positionsValue / equity : null;
+
+  useEffect(() => {
+    if (!account || positions.length === 0) return;
+    const accountNLV = positionsValue + cashBalance;
+    setAIContext({
+      screen: 'sleeve_detail',
+      sleeve_name: account.name,
+      total_value: accountNLV,
+      leverage: leverageRatio ?? undefined,
+      positions: positions.map(p => ({
+        ticker: p.symbol,
+        weight_pct: accountNLV > 0 ? (p.marketValue / accountNLV) * 100 : 0,
+        ips_flags: [],
+      })),
+    });
+  }, [account?.id, positions.length, leverageRatio]);
 
   // Load persisted mode preference (user's last manual choice for this account)
   useEffect(() => {

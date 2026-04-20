@@ -9,6 +9,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiGet, apiPost, apiPatch, type Position, type Account, type MacroPosture } from '@/context/PortfolioContext';
+import { useAIContext } from '@/hooks/useAIContext';
 import { Card } from '@/components/ui/Card';
 import { Skeleton } from '@/components/ui/Skeleton';
 
@@ -83,6 +84,7 @@ function computeHealthSignal(
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { summary, accounts, positions, macroPosture, isLoading, error, refreshAll } = usePortfolio();
+  const { setAIContext } = useAIContext();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
 
   const [dismissModal, setDismissModal] = useState<{ action: Action } | null>(null);
@@ -187,6 +189,20 @@ export default function HomeScreen() {
     dismissModal.action.dbIds?.forEach(id => patchAlert({ id, reason }));
     setDismissModal(null);
   }, [dismissModal, patchAlert]);
+
+  useEffect(() => {
+    if (!summary) return;
+    setAIContext({
+      screen: 'home',
+      violations: actions.map(a => ({ type: a.type, severity: a.severity, detail: a.label })),
+      macro_posture: macroPosture?.label ?? 'Unknown',
+      sleeves_summary: sleeves.map(s => ({
+        name: s.name,
+        value: s.nav,
+        change_pct: s.dayChangePct ?? 0,
+      })),
+    });
+  }, [actions, macroPosture, sleeves, summary]);
 
   // ── Render ──────────────────────────────────────────────────────────────────
 

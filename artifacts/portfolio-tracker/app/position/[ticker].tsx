@@ -16,6 +16,7 @@ import Svg, {
 } from 'react-native-svg';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiPut, apiGet } from '@/context/PortfolioContext';
+import { useAIContext } from '@/hooks/useAIContext';
 import { Card } from '@/components/ui/Card';
 import { formatCurrency } from '@/components/ui/PnlBadge';
 import { computeActions, DEFAULT_CONCENTRATION_LIMIT } from '@/lib/actions';
@@ -113,7 +114,8 @@ export default function PositionDetailScreen() {
   const { ticker, accountId: accountIdParam } = useLocalSearchParams<{ ticker: string; accountId: string }>();
   const accountId = parseInt(accountIdParam);
   const insets = useSafeAreaInsets();
-  const { positions, accounts } = usePortfolio();
+  const { positions, accounts, macroPosture } = usePortfolio();
+  const { setAIContext } = useAIContext();
   const queryClient = useQueryClient();
 
   const [activeTab, setActiveTab] = useState<'overview' | 'history'>('overview');
@@ -219,6 +221,29 @@ export default function PositionDetailScreen() {
   const stopPrice = position?.stopPrice != null ? Number(position.stopPrice) : null;
   const targetPrice = position?.targetPrice != null ? Number(position.targetPrice) : null;
   const drawdownPct = avgCost > 0 ? ((currentPrice - avgCost) / avgCost) * 100 : 0;
+
+  React.useEffect(() => {
+    if (!position || !account) return;
+    const flags: { rule: string; detail: string }[] = [];
+    if (isConcentrationViolated) {
+      flags.push({ rule: 'Concentration', detail: `${concentrationPct.toFixed(1)}% vs ${(concentrationLimit * 100).toFixed(0)}% limit` });
+    }
+    setAIContext({
+      screen: 'position_detail',
+      ticker: position.symbol,
+      name: position.name ?? position.symbol,
+      sleeve: account.name,
+      qty: position.quantity,
+      avg_cost: position.avgCost,
+      current_price: currentPrice,
+      pnl_pct: position.unrealizedPnlPct,
+      stop: stopPrice ?? undefined,
+      target: targetPrice ?? undefined,
+      ips_flags: flags,
+      macro_tag: macroPosture?.label ?? undefined,
+      thesis: position.notes ?? undefined,
+    });
+  }, [position?.id, currentPrice, isConcentrationViolated, macroPosture]);
 
   const suggestedLevels = useMemo(
     () => currentPrice > 0 ? suggestLevels(currentPrice, avgCost, quote?.low52w ?? null) : null,

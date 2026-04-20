@@ -6,6 +6,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
+import { useRouter } from 'expo-router';
 import { colors } from '@/constants/colors';
 
 function resolveBaseUrl(): string {
@@ -43,6 +44,7 @@ const SUGGESTED_PROMPTS = [
 ];
 
 export default function AIScreen() {
+  const router = useRouter();
   const insets = useSafeAreaInsets();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
@@ -59,6 +61,7 @@ export default function AIScreen() {
     total: number;
   } | null>(null);
   const [isIpsMode, setIsIpsMode] = useState(false);
+  const [pendingProposalCount, setPendingProposalCount] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const msgIdCounter = useRef(10000);
 
@@ -108,6 +111,13 @@ export default function AIScreen() {
         covered: data.covered,
         total: data.total,
       });
+      if (data.covered > 0 && !data.ipsComplete) {
+        try {
+          const pr = await fetch(`${BASE_URL}/api/ips/proposals/pending-items`);
+          const pitems = await pr.json();
+          setPendingProposalCount(Array.isArray(pitems) ? pitems.length : 0);
+        } catch {}
+      }
     } catch {}
   };
 
@@ -307,6 +317,13 @@ export default function AIScreen() {
           </Text>
         </Pressable>
       )}
+      {ipsProgress && ipsProgress.covered > 0 && !ipsProgress.ipsComplete && !activeConv && pendingProposalCount > 0 && (
+        <Pressable style={styles.reviewBar} onPress={() => router.push('/ips-review')}>
+          <Text style={styles.reviewBarText}>
+            Review & approve {pendingProposalCount} proposal{pendingProposalCount === 1 ? '' : 's'} →
+          </Text>
+        </Pressable>
+      )}
 
       {!activeConv && conversations.length > 0 && (
         <View style={styles.historySection}>
@@ -429,6 +446,22 @@ const styles = StyleSheet.create({
     fontFamily: 'Inter_600SemiBold',
     fontSize: 13,
     color: '#1a1a1a',
+    textAlign: 'center',
+  },
+  reviewBar: {
+    marginHorizontal: 16,
+    marginBottom: 8,
+    borderRadius: 10,
+    backgroundColor: colors.surface,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  reviewBarText: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+    color: colors.primary,
     textAlign: 'center',
   },
 });

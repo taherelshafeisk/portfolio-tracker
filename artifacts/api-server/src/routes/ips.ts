@@ -21,6 +21,8 @@ interface ProposedFields {
   addZoneLow?: number | null;
   addZoneHigh?: number | null;
   policyNote?: string | null;
+  secondaryBucket?: string | null;
+  splitRatio?: number | null;
 }
 
 // ── Response helpers ──────────────────────────────────────────────────────────
@@ -79,6 +81,42 @@ router.get("/proposals", async (_req, res) => {
     );
   } catch {
     return res.status(500).json({ error: "Failed to fetch proposals" });
+  }
+});
+
+// ── GET /ips/proposals/pending-items ─────────────────────────────────────────
+
+router.get("/proposals/pending-items", async (_req, res) => {
+  try {
+    const builderProposal = await db
+      .select()
+      .from(policyProposalsTable)
+      .where(eq(policyProposalsTable.sourceFilename, "__ips_builder__"))
+      .limit(1)
+      .then(rows => rows[0]);
+
+    if (!builderProposal) return res.json([]);
+
+    const items = await db
+      .select()
+      .from(policyProposalItemsTable)
+      .where(
+        and(
+          eq(policyProposalItemsTable.proposalId, builderProposal.id),
+          eq(policyProposalItemsTable.status, "pending"),
+        ),
+      )
+      .orderBy(policyProposalItemsTable.entityKey);
+
+    return res.json(
+      items.map(item => ({
+        ...itemToResponse(item),
+        ipsVersion: builderProposal.ipsVersion,
+      })),
+    );
+  } catch (err) {
+    console.error("[ips/proposals/pending-items] error:", err);
+    return res.status(500).json({ error: "Failed to fetch pending items" });
   }
 });
 
@@ -162,6 +200,13 @@ router.put("/proposals/:id/items/:itemId", async (req, res) => {
               : null;
         if ("policyNote" in fieldsToApply)
           posUpdates.policyNote = fieldsToApply.policyNote ?? null;
+        if ("secondaryBucket" in fieldsToApply)
+          posUpdates.secondaryBucket = fieldsToApply.secondaryBucket ?? null;
+        if ("splitRatio" in fieldsToApply)
+          posUpdates.splitRatio =
+            fieldsToApply.splitRatio != null
+              ? String(fieldsToApply.splitRatio)
+              : null;
         if (proposal?.ipsVersion)
           posUpdates.ipsVersion = proposal.ipsVersion;
 
@@ -322,8 +367,17 @@ router.post("/builder/next", async (req, res) => {
     );
     const totalNavUsd = totalCash + totalMv;
 
-    // Build position summaries for system prompt
-    const positionSummaries = positions.map(p => ({
+    // Deduplicate by symbol, keeping the row with the largest market value
+    const symbolMap = new Map<string, typeof positions[0]>();
+    for (const p of positions) {
+      const mv = parseFloat(p.quantity) * parseFloat(p.currentPrice);
+      const cur = symbolMap.get(p.symbol);
+      const curMv = cur ? parseFloat(cur.quantity) * parseFloat(cur.currentPrice) : -1;
+      if (!cur || mv > curMv) symbolMap.set(p.symbol, p);
+    }
+    const uniquePositions = [...symbolMap.values()];
+
+    const positionSummaries = uniquePositions.map(p => ({
       symbol: p.symbol,
       quantity: parseFloat(p.quantity),
       unrealizedPnl:
@@ -488,7 +542,7 @@ router.post("/builder/next", async (req, res) => {
     // Update session state
     const updatedCovered = [...new Set([...coveredPositions, ...newlyCovered])];
     const ipsComplete =
-      goalsNowComplete && updatedCovered.length >= positions.length;
+      goalsNowComplete && updatedCovered.length >= uniquePositions.length;
 
     await db
       .update(ipsBuilderSessionsTable)
@@ -511,7 +565,7 @@ router.post("/builder/next", async (req, res) => {
       proposalCount,
       progress: {
         covered: updatedCovered.length,
-        total: positions.length,
+        total: uniquePositions.length,
         goalsComplete: goalsNowComplete,
       },
     });
@@ -526,17 +580,24 @@ router.post("/builder/next", async (req, res) => {
 router.get("/builder/session", async (_req, res) => {
   try {
     const [session] = await db.select().from(ipsBuilderSessionsTable).limit(1);
-    const [positions] = await Promise.all([db.select().from(positionsTable)]);
+    const allPositions = await db.select().from(positionsTable);
+    const distinctSymbols = [...new Set(allPositions.map(p => p.symbol))];
+    const totalSymbols = distinctSymbols.length;
 
     if (!session) {
       return res.json({
         goalsComplete: false,
         ipsComplete: false,
         covered: 0,
-        total: positions.length,
+        total: totalSymbols,
         lastMessage: null,
       });
     }
+
+    const coveredArr = Array.isArray(session.coveredPositions)
+      ? (session.coveredPositions as string[])
+      : [];
+    const coveredCount = coveredArr.filter(s => distinctSymbols.includes(s)).length;
 
     const history = (session.conversationHistory as HistoryMessage[]) ?? [];
     const lastAssistant = [...history].reverse().find(m => m.role === "assistant");
@@ -549,8 +610,8 @@ router.get("/builder/session", async (_req, res) => {
     return res.json({
       goalsComplete: session.goalsComplete,
       ipsComplete: session.ipsComplete,
-      covered: (session.coveredPositions as string[]).length,
-      total: positions.length,
+      covered: coveredCount,
+      total: totalSymbols,
       lastMessage,
     });
   } catch (err) {

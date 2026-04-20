@@ -24,6 +24,8 @@ export const positionsTable = pgTable("positions", {
   policyNote: text("policy_note"),
   ipsVersion: text("ips_version"),
   exitReason: text("exit_reason"),   // 'IPS_RULE'|'STOP_LOSS'|'ALERT_TRIGGERED'|'MANUAL'|'CUT_LIST'
+  secondaryBucket: text("secondary_bucket"),
+  splitRatio: numeric("split_ratio", { precision: 4, scale: 3 }),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [

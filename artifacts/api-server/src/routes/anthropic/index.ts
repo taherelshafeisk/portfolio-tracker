@@ -428,6 +428,14 @@ If totalAmount is not shown as a structured field, look for a monetary number in
 
 CURRENCY: Keep all prices and amounts in the native currency shown in the screenshot. Do NOT convert currencies during extraction. Return the detected currency code in the top-level "currency" field.
 
+ORDER STATUS — CRITICAL EXCLUSION RULES:
+Only include trades that were actually executed (filled). EXCLUDE any row where:
+- The status contains "Cancelled", "Canceled", "Rejected", "Expired", "Pending", or "Not Filled"
+- The filled quantity is 0 (e.g. "0 Filled", "Qty Filled: 0", "Filled: 0/8")
+- The row describes an open/working order that has not yet executed
+Example rows to SKIP entirely: "Stop 263.00, Day order. Cancelled, 0 Filled", "Limit 50.00 - Pending", "GTC order - Rejected"
+If in doubt, omit the row — the user can add it manually.
+
 Only return the JSON object, no additional text. If no trades are visible, return an empty trades array.`;
 
     const response = await anthropic.messages.create({
@@ -509,6 +517,14 @@ Only return the JSON object, no additional text. If no trades are visible, retur
           fxRates[currency] = await fetchForexRateToUSD(currency);
           console.log(`[forex] ${currency} → USD rate: ${fxRates[currency]}`);
         }
+
+        // Drop cancelled/unfilled orders: buy and sell must have qty > 0
+        parsedData.trades = (parsedData.trades || []).filter((trade: any) => {
+          if (trade.activityType === "buy" || trade.activityType === "sell") {
+            return trade.quantity != null && trade.quantity > 0;
+          }
+          return true;
+        });
 
         for (let i = 0; i < (parsedData.trades || []).length; i++) {
           const trade = parsedData.trades[i];

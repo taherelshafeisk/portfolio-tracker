@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
-import { activitiesTable, positionsTable, tradeAnnotationsTable } from "@workspace/db";
-import { eq, desc, and, asc, isNotNull, inArray } from "drizzle-orm";
+import { activitiesTable, positionsTable, accountsTable, tradeAnnotationsTable } from "@workspace/db";
+import { eq, desc, and, asc, isNotNull, inArray, sql } from "drizzle-orm";
 import { validate } from "../middlewares/validate";
 import { CreateActivityBody, z } from "@workspace/api-zod/schemas";
 
@@ -22,6 +22,42 @@ const toResponse = (a: typeof activitiesTable.$inferSelect) => ({
   tradeDate: a.tradeDate.toISOString(),
   createdAt: a.createdAt.toISOString(),
 });
+
+// ── Cash adjustment ────────────────────────────────────────────────────────────
+
+/**
+ * Adjusts account.currentBalance for a single activity.
+ * direction=1 applies the normal effect; direction=-1 reverses it (used on delete).
+ *
+ * Cash effects:
+ *   buy / withdrawal  → debit  (balance decreases)
+ *   sell / deposit / dividend → credit (balance increases)
+ */
+async function adjustCashForActivity(
+  accountId: number,
+  activityType: string,
+  quantity: number | null,
+  price: number | null,
+  totalAmount: number | null,
+  direction: 1 | -1 = 1,
+): Promise<void> {
+  const absAmt =
+    totalAmount != null
+      ? Math.abs(totalAmount)
+      : quantity != null && price != null
+        ? Math.abs(quantity * price)
+        : null;
+
+  if (absAmt == null || absAmt === 0) return;
+
+  const isDebit = activityType === "buy" || activityType === "withdrawal";
+  const delta = direction * (isDebit ? -absAmt : absAmt);
+
+  await db
+    .update(accountsTable)
+    .set({ currentBalance: sql`current_balance + ${delta}`, updatedAt: new Date() })
+    .where(eq(accountsTable.id, accountId));
+}
 
 // ── Reconciliation ─────────────────────────────────────────────────────────────
 
@@ -191,6 +227,14 @@ router.post("/", validate(CreateActivityBodyHttp), async (req, res) => {
       await reconcilePosition(accountId, upperSymbol);
     }
 
+    await adjustCashForActivity(
+      accountId,
+      activityType,
+      quantity ?? null,
+      price ?? null,
+      totalAmount ?? null,
+    );
+
     return res.status(201).json(toResponse(activity));
   } catch (error) {
     return res.status(500).json({ error: "Failed to create activity" });
@@ -302,6 +346,17 @@ router.delete("/:id", async (req, res) => {
 
     if (deleted?.symbol && deleted?.accountId) {
       await reconcilePosition(deleted.accountId, deleted.symbol);
+    }
+
+    if (deleted?.accountId) {
+      await adjustCashForActivity(
+        deleted.accountId,
+        deleted.activityType,
+        deleted.quantity ? parseFloat(deleted.quantity) : null,
+        deleted.price ? parseFloat(deleted.price) : null,
+        deleted.totalAmount ? parseFloat(deleted.totalAmount) : null,
+        -1,
+      );
     }
 
     res.status(204).send();

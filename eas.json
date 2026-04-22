@@ -6,13 +6,16 @@
   "build": {
     "development": {
       "developmentClient": true,
-      "distribution": "internal"
+      "distribution": "internal",
+      "projectRoot": "artifacts/portfolio-tracker"
     },
     "preview": {
-      "distribution": "internal"
+      "distribution": "internal",
+      "projectRoot": "artifacts/portfolio-tracker"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "projectRoot": "artifacts/portfolio-tracker"
     }
   },
   "submit": {

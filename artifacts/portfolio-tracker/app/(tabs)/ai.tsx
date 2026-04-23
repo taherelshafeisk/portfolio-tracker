@@ -4,10 +4,10 @@ import {
   TextInput, Platform, ActivityIndicator, KeyboardAvoidingView,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { colors } from '@/constants/colors';
+import { fonts } from '@/constants/fonts';
 import { type AIContextPayload } from '@/hooks/useAIContext';
 
 function resolveBaseUrl(): string {
@@ -55,11 +55,8 @@ function buildContextPrefix(ctx: AIContextPayload): string | null {
     }
     case 'position_detail': {
       const lines = [
-        '[Context]',
-        `Screen: Position — ${ctx.ticker}`,
-        `Name: ${ctx.name}`,
-        `Sleeve: ${ctx.sleeve}`,
-        `Qty: ${ctx.qty} shares @ avg cost $${ctx.avg_cost.toFixed(2)}`,
+        '[Context]', `Screen: Position — ${ctx.ticker}`, `Name: ${ctx.name}`,
+        `Sleeve: ${ctx.sleeve}`, `Qty: ${ctx.qty} shares @ avg cost $${ctx.avg_cost.toFixed(2)}`,
         `Current price: $${ctx.current_price.toFixed(2)}`,
         `P&L: ${ctx.pnl_pct >= 0 ? '+' : ''}${ctx.pnl_pct.toFixed(2)}%`,
       ];
@@ -69,91 +66,75 @@ function buildContextPrefix(ctx: AIContextPayload): string | null {
         lines.push('IPS flags:');
         ctx.ips_flags.forEach(f => lines.push(`  • ${f.rule}: ${f.detail}`));
       }
-      if (ctx.macro_tag) lines.push(`Macro posture: ${ctx.macro_tag}`);
       if (ctx.thesis) lines.push(`Thesis: ${ctx.thesis}`);
       return lines.join('\n');
     }
     case 'trade_swings': {
       const lines = [
-        '[Context]',
-        'Screen: Trade → Open Swings',
-        `${ctx.positions.length} positions open, $${ctx.total_allocated.toFixed(0)} of $${ctx.target.toFixed(0)} deployed (${ctx.utilization_pct.toFixed(0)}%)`,
+        '[Context]', 'Screen: Trade → Open Swings',
+        `${ctx.positions.length} positions open, $${ctx.total_allocated.toFixed(0)} of $${ctx.target.toFixed(0)} deployed`,
       ];
-      if (ctx.macro_posture) lines.push(`Macro posture: ${ctx.macro_posture}`);
-      if (ctx.positions.length > 0) {
-        lines.push('Positions:');
-        ctx.positions.forEach(p =>
-          lines.push(`  • ${p.ticker}: ${p.pnl_pct >= 0 ? '+' : ''}${p.pnl_pct.toFixed(1)}%, ${p.days_held}d held${p.stop_set ? '' : ', NO STOP'}`),
-        );
-      }
       return lines.join('\n');
     }
     case 'sleeve_detail': {
-      const lines = [
-        '[Context]',
-        `Screen: Sleeve — ${ctx.sleeve_name}`,
-        `Total value: $${ctx.total_value.toFixed(0)}`,
-      ];
-      if (ctx.leverage != null) lines.push(`Leverage: ${ctx.leverage.toFixed(2)}x`);
-      if (ctx.positions.length > 0) {
-        lines.push('Positions:');
-        ctx.positions.forEach(p => {
-          const flags = p.ips_flags.length > 0 ? ` [${p.ips_flags.join(', ')}]` : '';
-          lines.push(`  • ${p.ticker}: ${p.weight_pct.toFixed(1)}%${flags}`);
-        });
-      }
-      return lines.join('\n');
+      return `[Context]\nScreen: Sleeve — ${ctx.sleeve_name}\nTotal value: $${ctx.total_value.toFixed(0)}`;
     }
-    case 'screener_result': {
-      const lines = [
-        '[Context]',
-        `Screen: Screener Result — ${ctx.ticker}`,
-        `Price: $${ctx.price.toFixed(2)}`,
-        `Stage: ${ctx.stage}`,
-        `RSI: ${ctx.rsi.toFixed(0)}`,
-      ];
-      if (ctx.ema_status.length > 0) lines.push(`EMA status: ${ctx.ema_status.join(', ')}`);
-      lines.push(`IPS headroom: bucket ${ctx.ips_headroom.bucket_available ? 'available' : 'full'}, leverage ${ctx.ips_headroom.leverage_ok ? 'ok' : 'at limit'}`);
-      return lines.join('\n');
-    }
-    default:
-      return null;
-  }
-}
-
-function deriveBadgeLabel(ctx: AIContextPayload): string | null {
-  if (!ctx) return null;
-  switch (ctx.screen) {
-    case 'home':
-      return ctx.violations.length > 0 ? `Home · ${ctx.violations.length} violations` : 'Home';
-    case 'position_detail':
-      return `${ctx.ticker} · ${ctx.pnl_pct >= 0 ? '+' : ''}${ctx.pnl_pct.toFixed(1)}%`;
-    case 'trade_swings':
-      return `Swings · ${ctx.positions.length} open`;
-    case 'sleeve_detail':
-      return ctx.sleeve_name;
-    case 'screener_result':
-      return `${ctx.ticker} · ${ctx.stage}`;
     default:
       return null;
   }
 }
 
 const SUGGESTED_PROMPTS = [
-  "Build my IPS",
   "What's violating my IPS right now?",
   "Which position has the worst risk/reward?",
-  "Am I on track with my cut list?",
-  "What should I do before market open tomorrow?",
   "Summarize my portfolio in one paragraph",
+  "What should I do before market open tomorrow?",
 ];
 
-export default function AIScreen() {
+// ─── Message bubble ───────────────────────────────────────────────────────────
+
+function MessageRow({ msg }: { msg: Message & { streaming?: boolean } }) {
+  const isUser = msg.role === 'user';
+
+  if (isUser) {
+    return (
+      <View style={styles.userRow}>
+        <View style={styles.userBubble}>
+          <Text style={styles.userText}>{msg.content}</Text>
+        </View>
+      </View>
+    );
+  }
+
+  return (
+    <View style={styles.coachRow}>
+      <Text style={styles.coachText}>
+        {msg.content}
+        {msg.streaming && <Text style={{ color: colors.gold }}>|</Text>}
+      </Text>
+    </View>
+  );
+}
+
+// ─── Coach avatar ─────────────────────────────────────────────────────────────
+
+function CoachAvatar() {
+  return (
+    <View style={styles.avatar}>
+      <Text style={styles.avatarText}>c</Text>
+    </View>
+  );
+}
+
+// ─── Screen ───────────────────────────────────────────────────────────────────
+
+export default function CoachScreen() {
   const router = useRouter();
   const params = useLocalSearchParams<{ context?: string }>();
   const insets = useSafeAreaInsets();
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' ? 20 : insets.top;
   const bottomPad = Platform.OS === 'web' ? 34 : insets.bottom;
+
   const [conversations, setConversations] = useState<Conversation[]>([]);
   const [activeConv, setActiveConv] = useState<Conversation | null>(null);
   const [messages, setMessages] = useState<Message[]>([]);
@@ -161,19 +142,16 @@ export default function AIScreen() {
   const [streaming, setStreaming] = useState(false);
   const [streamingContent, setStreamingContent] = useState('');
   const [ipsProgress, setIpsProgress] = useState<{
-    goalsComplete: boolean;
-    ipsComplete: boolean;
-    covered: number;
-    total: number;
+    goalsComplete: boolean; ipsComplete: boolean; covered: number; total: number;
   } | null>(null);
   const [isIpsMode, setIsIpsMode] = useState(false);
   const [pendingProposalCount, setPendingProposalCount] = useState(0);
   const flatListRef = useRef<FlatList>(null);
   const msgIdCounter = useRef(10000);
   const [userHasSent, setUserHasSent] = useState(false);
-
   const incomingContext = useRef<AIContextPayload>(null);
   const contextPrefix = useRef<string | null>(null);
+
   useEffect(() => {
     if (params.context) {
       try {
@@ -224,12 +202,7 @@ export default function AIScreen() {
     try {
       const res = await fetch(`${BASE_URL}/api/ips/builder/session`);
       const data = await res.json();
-      setIpsProgress({
-        goalsComplete: data.goalsComplete,
-        ipsComplete: data.ipsComplete,
-        covered: data.covered,
-        total: data.total,
-      });
+      setIpsProgress({ goalsComplete: data.goalsComplete, ipsComplete: data.ipsComplete, covered: data.covered, total: data.total });
       if (data.covered > 0 && !data.ipsComplete) {
         try {
           const pr = await fetch(`${BASE_URL}/api/ips/proposals/pending-items`);
@@ -252,20 +225,10 @@ export default function AIScreen() {
         body: JSON.stringify({}),
       });
       const data = await res.json();
-      setMessages([{
-        id: msgIdCounter.current++,
-        role: 'assistant',
-        content: data.message,
-        createdAt: new Date().toISOString(),
-      }]);
+      setMessages([{ id: msgIdCounter.current++, role: 'assistant', content: data.message, createdAt: new Date().toISOString() }]);
       await fetchIpsProgress();
     } catch (err: any) {
-      setMessages([{
-        id: msgIdCounter.current++,
-        role: 'assistant',
-        content: `Error: ${err?.message || 'Failed to start IPS builder'}`,
-        createdAt: new Date().toISOString(),
-      }]);
+      setMessages([{ id: msgIdCounter.current++, role: 'assistant', content: `Error: ${err?.message || 'Failed to start IPS builder'}`, createdAt: new Date().toISOString() }]);
     } finally {
       setStreaming(false);
     }
@@ -276,12 +239,7 @@ export default function AIScreen() {
     if (!content || streaming) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
     setInput('');
-    const userMsg: Message = {
-      id: msgIdCounter.current++,
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString(),
-    };
+    const userMsg: Message = { id: msgIdCounter.current++, role: 'user', content, createdAt: new Date().toISOString() };
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     try {
@@ -291,20 +249,10 @@ export default function AIScreen() {
         body: JSON.stringify({ userMessage: content }),
       });
       const data = await res.json();
-      setMessages(prev => [...prev, {
-        id: msgIdCounter.current++,
-        role: 'assistant',
-        content: data.message,
-        createdAt: new Date().toISOString(),
-      }]);
+      setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'assistant', content: data.message, createdAt: new Date().toISOString() }]);
       await fetchIpsProgress();
     } catch (err: any) {
-      setMessages(prev => [...prev, {
-        id: msgIdCounter.current++,
-        role: 'assistant',
-        content: `Error: ${err?.message || 'Unknown error'}`,
-        createdAt: new Date().toISOString(),
-      }]);
+      setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'assistant', content: `Error: ${err?.message || 'Unknown error'}`, createdAt: new Date().toISOString() }]);
     } finally {
       setStreaming(false);
     }
@@ -314,38 +262,24 @@ export default function AIScreen() {
     const content = (text || input).trim();
     if (!content || streaming) return;
     Haptics.impactAsync(Haptics.ImpactFeedbackStyle.Light);
-
     setInput('');
-    const userMsg: Message = {
-      id: msgIdCounter.current++,
-      role: 'user',
-      content,
-      createdAt: new Date().toISOString(),
-    };
+    const userMsg: Message = { id: msgIdCounter.current++, role: 'user', content, createdAt: new Date().toISOString() };
     setMessages(prev => [...prev, userMsg]);
     setUserHasSent(true);
     setStreaming(true);
     setStreamingContent('');
 
-    // Build content with optional silent context prefix on the first message
     const prefix = !userHasSent && contextPrefix.current ? contextPrefix.current + '\n\n' : '';
     const fullContent = prefix + content;
-
     let conv = activeConv;
-    try {
-      if (!conv) {
-        conv = await createConversation(content.slice(0, 40));
-      }
 
+    try {
+      if (!conv) conv = await createConversation(content.slice(0, 40));
       if (!conv) {
-        setMessages(prev => [...prev, {
-          id: msgIdCounter.current++,
-          role: 'assistant' as const,
-          content: 'Error: Failed to create conversation',
-          createdAt: new Date().toISOString(),
-        }]);
+        setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'assistant' as const, content: 'Error: Failed to create conversation', createdAt: new Date().toISOString() }]);
         return;
       }
+
       const response = await fetch(`${BASE_URL}/api/anthropic/conversations/${conv.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -353,7 +287,6 @@ export default function AIScreen() {
       });
 
       if (!response.body) throw new Error('No stream');
-
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
       let streamBuffer = '';
@@ -363,44 +296,23 @@ export default function AIScreen() {
         const { done, value } = await reader.read();
         if (done) break;
         const chunk = decoder.decode(value, { stream: true });
-        const lines = chunk.split('\n');
-        for (const line of lines) {
+        for (const line of chunk.split('\n')) {
           if (line.startsWith('data: ')) {
             try {
               const data = JSON.parse(line.slice(6));
-              if (data.error) {
-                serverError = data.error;
-              } else if (data.content) {
-                streamBuffer += data.content;
-                setStreamingContent(streamBuffer);
-              } else if (data.done) {
-                const aiMsg: Message = {
-                  id: msgIdCounter.current++,
-                  role: 'assistant',
-                  content: streamBuffer,
-                  createdAt: new Date().toISOString(),
-                };
-                setMessages(prev => [...prev, aiMsg]);
+              if (data.error) { serverError = data.error; }
+              else if (data.content) { streamBuffer += data.content; setStreamingContent(streamBuffer); }
+              else if (data.done) {
+                setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'assistant', content: streamBuffer, createdAt: new Date().toISOString() }]);
                 setStreamingContent('');
               }
-            } catch {
-              console.error('Failed to parse SSE event:', line.slice(0, 500));
-            }
+            } catch {}
           }
         }
       }
-
-      if (serverError) {
-        throw new Error(serverError);
-      }
+      if (serverError) throw new Error(serverError);
     } catch (err: any) {
-      const errMsg = err?.message || 'Unknown error';
-      setMessages(prev => [...prev, {
-        id: msgIdCounter.current++,
-        role: 'assistant',
-        content: `Error: ${errMsg}`,
-        createdAt: new Date().toISOString(),
-      }]);
+      setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'assistant', content: `Error: ${err?.message || 'Unknown error'}`, createdAt: new Date().toISOString() }]);
     } finally {
       setStreaming(false);
       setStreamingContent('');
@@ -408,54 +320,38 @@ export default function AIScreen() {
     }
   }, [input, streaming, activeConv]);
 
-  const renderMessage = ({ item }: { item: Message | { id: number; streaming: boolean; content: string } }) => {
-    const isUser = 'role' in item && item.role === 'user';
-    const isStreaming = 'streaming' in item;
-    return (
-      <View style={[styles.msgRow, isUser && styles.msgRowUser]}>
-        {!isUser && (
-          <View style={styles.aiAvatar}>
-            <Feather name="cpu" size={14} color={colors.primary} />
-          </View>
-        )}
-        <View style={[styles.bubble, isUser ? styles.userBubble : styles.aiBubble]}>
-          <Text style={[styles.bubbleText, isUser && styles.userBubbleText]}>
-            {item.content}
-            {isStreaming && <Text style={{ color: colors.primary }}>|</Text>}
-          </Text>
-        </View>
-      </View>
-    );
-  };
-
   const allMessages: any[] = [...messages];
   if (streamingContent) {
     allMessages.push({ id: -1, streaming: true, role: 'assistant', content: streamingContent });
   }
 
   return (
-    <View style={[styles.container, { paddingTop: topPad }]}>
+    <View style={[styles.root, { paddingTop: topPad }]}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>AI Advisor</Text>
+        <View style={styles.headerLeft}>
+          <CoachAvatar />
+          <View>
+            <Text style={styles.headerTitle}>Coach</Text>
+            <Text style={styles.headerSub}>
+              {streaming ? '● Thinking…' : '● Ready'}
+            </Text>
+          </View>
+        </View>
         {activeConv && (
-          <Pressable onPress={() => { setActiveConv(null); setMessages([]); setIsIpsMode(false); setUserHasSent(false); }}>
-            <Feather name="plus-square" size={22} color={colors.textSecondary} />
+          <Pressable
+            style={styles.newBtn}
+            onPress={() => { setActiveConv(null); setMessages([]); setIsIpsMode(false); setUserHasSent(false); }}
+          >
+            <Text style={styles.newBtnText}>New</Text>
           </Pressable>
         )}
       </View>
 
-      {!userHasSent && incomingContext.current && (() => {
-        const label = deriveBadgeLabel(incomingContext.current);
-        return label ? (
-          <View style={styles.contextIndicator}>
-            <Text style={styles.contextIndicatorText}>📍 {label}</Text>
-          </View>
-        ) : null;
-      })()}
-
+      {/* IPS progress bar */}
       {ipsProgress && !ipsProgress.ipsComplete && !activeConv && (
-        <Pressable style={styles.ipsProgressBar} onPress={startIpsBuilder}>
-          <Text style={styles.ipsProgressText}>
+        <Pressable style={styles.ipsBar} onPress={startIpsBuilder}>
+          <Text style={styles.ipsBarText}>
             IPS · {ipsProgress.covered} of {ipsProgress.total} positions defined — tap to continue
           </Text>
         </Pressable>
@@ -468,14 +364,18 @@ export default function AIScreen() {
         </Pressable>
       )}
 
+      {/* Conversation history */}
       {!activeConv && conversations.length > 0 && (
         <View style={styles.historySection}>
-          <Text style={styles.historyTitle}>Recent Conversations</Text>
-          {conversations.slice(0, 4).map(conv => (
-            <Pressable key={conv.id} style={styles.historyItem} onPress={() => loadConversation(conv)}>
-              <Feather name="message-circle" size={16} color={colors.textSecondary} />
+          <Text style={styles.historyEyebrow}>RECENT</Text>
+          {conversations.slice(0, 4).map((conv, i) => (
+            <Pressable
+              key={conv.id}
+              style={[styles.historyItem, i > 0 && styles.historyItemBorder]}
+              onPress={() => loadConversation(conv)}
+            >
               <Text style={styles.historyText} numberOfLines={1}>{conv.title}</Text>
-              <Feather name="chevron-right" size={14} color={colors.textMuted} />
+              <Text style={styles.historyChevron}>›</Text>
             </Pressable>
           ))}
         </View>
@@ -488,14 +388,17 @@ export default function AIScreen() {
       >
         {messages.length === 0 && !streaming ? (
           <View style={styles.welcomeArea}>
-            <View style={styles.aiIcon}>
-              <Feather name="cpu" size={32} color={colors.primary} />
-            </View>
-            <Text style={styles.welcomeTitle}>Portfolio AI Advisor</Text>
-            <Text style={styles.welcomeText}>Ask me anything about your portfolio, market analysis, or trading strategies</Text>
-            <View style={styles.suggestionsGrid}>
+            <Text style={styles.welcomeTitle}>
+              Ask me about{'\n'}
+              <Text style={styles.welcomeItalic}>your portfolio.</Text>
+            </Text>
+            <View style={styles.suggestions}>
               {SUGGESTED_PROMPTS.map((p, i) => (
-                <Pressable key={i} style={styles.suggestion} onPress={() => p === 'Build my IPS' ? startIpsBuilder() : sendMessage(p)}>
+                <Pressable
+                  key={i}
+                  style={styles.suggestion}
+                  onPress={() => p === 'Build my IPS' ? startIpsBuilder() : sendMessage(p)}
+                >
                   <Text style={styles.suggestionText}>{p}</Text>
                 </Pressable>
               ))}
@@ -506,25 +409,26 @@ export default function AIScreen() {
             ref={flatListRef}
             data={allMessages}
             keyExtractor={item => item.id.toString()}
-            renderItem={renderMessage}
+            renderItem={({ item }) => <MessageRow msg={item} />}
             contentContainerStyle={styles.messageList}
             onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
             showsVerticalScrollIndicator={false}
           />
         )}
 
+        {/* Input */}
         <View style={[styles.inputArea, { paddingBottom: Platform.OS === 'web' ? bottomPad + 8 : insets.bottom + 60 }]}>
           {streaming && (
             <View style={styles.thinkingRow}>
-              <ActivityIndicator size="small" color={colors.primary} />
-              <Text style={styles.thinkingText}>Thinking...</Text>
+              <ActivityIndicator size="small" color={colors.ink3} />
+              <Text style={styles.thinkingText}>Thinking…</Text>
             </View>
           )}
           <View style={styles.inputRow}>
             <TextInput
               style={styles.input}
-              placeholder="Ask your AI advisor..."
-              placeholderTextColor={colors.textMuted}
+              placeholder="Ask your coach…"
+              placeholderTextColor={colors.ink3}
               value={input}
               onChangeText={setInput}
               multiline
@@ -536,7 +440,7 @@ export default function AIScreen() {
               onPress={() => isIpsMode ? sendIpsBuilderMessage() : sendMessage()}
               disabled={!input.trim() || streaming}
             >
-              <Feather name="send" size={18} color={colors.background} />
+              <Text style={styles.sendBtnText}>↑</Text>
             </Pressable>
           </View>
         </View>
@@ -545,75 +449,187 @@ export default function AIScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingBottom: 8, paddingTop: 4 },
-  title: { fontFamily: 'Inter_700Bold', fontSize: 26, color: colors.textPrimary },
-  historySection: { paddingHorizontal: 16, marginBottom: 8 },
-  historyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary, marginBottom: 8 },
-  historyItem: { flexDirection: 'row', alignItems: 'center', gap: 10, paddingVertical: 10, borderBottomWidth: 1, borderBottomColor: colors.separator },
-  historyText: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 15, color: colors.textPrimary },
-  chatArea: { flex: 1 },
-  welcomeArea: { flex: 1, alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingTop: 20 },
-  aiIcon: { width: 64, height: 64, borderRadius: 32, backgroundColor: 'rgba(0,212,255,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(0,212,255,0.3)', marginBottom: 16 },
-  welcomeTitle: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary, marginBottom: 8, textAlign: 'center' },
-  welcomeText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary, textAlign: 'center', marginBottom: 24, lineHeight: 20 },
-  suggestionsGrid: { width: '100%', gap: 8 },
-  suggestion: { backgroundColor: colors.surface, borderRadius: 12, padding: 14, borderWidth: 1, borderColor: colors.separator },
-  suggestionText: { fontFamily: 'Inter_400Regular', fontSize: 16, color: colors.textSecondary },
-  messageList: { padding: 16, gap: 12 },
-  msgRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 8, marginBottom: 4 },
-  msgRowUser: { justifyContent: 'flex-end' },
-  aiAvatar: { width: 28, height: 28, borderRadius: 14, backgroundColor: 'rgba(0,212,255,0.1)', alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: 'rgba(0,212,255,0.2)' },
-  bubble: { maxWidth: '80%', padding: 12, borderRadius: 16 },
-  aiBubble: { backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.separator, borderBottomLeftRadius: 4 },
-  userBubble: { backgroundColor: colors.primary, borderBottomRightRadius: 4 },
-  bubbleText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textPrimary, lineHeight: 20 },
-  userBubbleText: { color: colors.background },
-  inputArea: { paddingHorizontal: 16, paddingTop: 8, borderTopWidth: 1, borderTopColor: colors.separator },
-  thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
-  thinkingText: { fontFamily: 'Inter_400Regular', fontSize: 15, color: colors.textSecondary },
-  inputRow: { flexDirection: 'row', alignItems: 'flex-end', gap: 10 },
-  input: { flex: 1, backgroundColor: colors.surface, borderRadius: 20, paddingHorizontal: 16, paddingVertical: 10, color: colors.textPrimary, fontFamily: 'Inter_400Regular', fontSize: 16, maxHeight: 100, borderWidth: 1, borderColor: colors.separator },
-  sendBtn: { width: 42, height: 42, borderRadius: 21, backgroundColor: colors.primary, alignItems: 'center', justifyContent: 'center' },
-  sendBtnDisabled: { opacity: 0.4 },
-  contextIndicator: {
-    marginHorizontal: 16,
-    marginBottom: 6,
+  root: { flex: 1, backgroundColor: colors.bg },
+
+  header: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hair,
   },
-  contextIndicatorText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
+  headerLeft: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  avatar: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: colors.deep,
+    borderWidth: 1.2,
+    borderColor: colors.goldOnDeep,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  ipsProgressBar: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 10,
-    backgroundColor: '#F5A623',
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+  avatarText: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 16,
+    color: colors.goldOnDeep,
   },
-  ipsProgressText: {
-    fontFamily: 'Inter_600SemiBold',
+  headerTitle: {
+    fontFamily: fonts.sansMedium,
     fontSize: 15,
-    color: '#1a1a1a',
-    textAlign: 'center',
+    color: colors.ink,
   },
-  reviewBar: {
-    marginHorizontal: 16,
-    marginBottom: 8,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
+  headerSub: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    color: colors.ink3,
+    letterSpacing: 0.5,
+  },
+  newBtn: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: colors.hair2,
+    borderRadius: 2,
   },
-  reviewBarText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 15,
-    color: colors.primary,
-    textAlign: 'center',
+  newBtnText: {
+    fontFamily: fonts.sans,
+    fontSize: 13,
+    color: colors.ink2,
   },
+
+  // IPS / review bars
+  ipsBar: {
+    marginHorizontal: 22,
+    marginTop: 10,
+    borderRadius: 2,
+    backgroundColor: colors.goldSoft,
+    borderWidth: 1,
+    borderColor: colors.gold,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  ipsBarText: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.gold, textAlign: 'center' },
+  reviewBar: {
+    marginHorizontal: 22,
+    marginTop: 8,
+    borderRadius: 2,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    paddingVertical: 10,
+    paddingHorizontal: 14,
+  },
+  reviewBarText: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.accent, textAlign: 'center' },
+
+  // History
+  historySection: { paddingHorizontal: 22, marginTop: 16, marginBottom: 8 },
+  historyEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+    marginBottom: 8,
+  },
+  historyItem: { flexDirection: 'row', alignItems: 'center', paddingVertical: 12 },
+  historyItemBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
+  historyText: { flex: 1, fontFamily: fonts.sans, fontSize: 14, color: colors.ink },
+  historyChevron: { fontSize: 16, color: colors.ink3 },
+
+  // Chat area
+  chatArea: { flex: 1 },
+
+  // Welcome
+  welcomeArea: { flex: 1, paddingHorizontal: 22, paddingTop: 40 },
+  welcomeTitle: {
+    fontFamily: fonts.serif,
+    fontSize: 26,
+    letterSpacing: -0.02 * 26,
+    color: colors.ink,
+    lineHeight: 32,
+    marginBottom: 24,
+  },
+  welcomeItalic: { fontFamily: fonts.serifItalic },
+  suggestions: { gap: 8 },
+  suggestion: {
+    padding: 14,
+    borderRadius: 2,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    backgroundColor: colors.card,
+  },
+  suggestionText: { fontFamily: fonts.serif, fontSize: 14, color: colors.ink2, lineHeight: 20 },
+
+  // Messages
+  messageList: { padding: 22, gap: 16 },
+
+  coachRow: { marginBottom: 4 },
+  coachText: {
+    fontFamily: fonts.serifItalic,
+    fontSize: 13.5,
+    color: colors.ink,
+    lineHeight: 22,
+  },
+
+  userRow: { alignItems: 'flex-end', marginBottom: 4 },
+  userBubble: {
+    maxWidth: '80%',
+    backgroundColor: colors.bgInset,
+    borderRadius: 14,
+    borderBottomRightRadius: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  userText: {
+    fontFamily: fonts.sans,
+    fontSize: 13.5,
+    color: colors.ink,
+    lineHeight: 20,
+  },
+
+  // Input
+  inputArea: {
+    paddingHorizontal: 22,
+    paddingTop: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.hair,
+  },
+  thinkingRow: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  thinkingText: { fontFamily: fonts.serifItalic, fontSize: 13, color: colors.ink3 },
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 10,
+    backgroundColor: colors.card,
+    borderRadius: 22,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    paddingHorizontal: 16,
+    paddingVertical: 8,
+  },
+  input: {
+    flex: 1,
+    color: colors.ink,
+    fontSize: 14,
+    maxHeight: 100,
+    paddingVertical: 4,
+    fontFamily: fonts.serif,
+  },
+  sendBtn: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    backgroundColor: colors.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  sendBtnDisabled: { opacity: 0.3 },
+  sendBtnText: { color: colors.card, fontSize: 16, lineHeight: 18 },
 });

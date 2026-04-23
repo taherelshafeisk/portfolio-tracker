@@ -1,3 +1,15 @@
 {
-  "expo": {}
+  "expo": {
+    "extra": {
+      "eas": {
+        "projectId": "8784fa94-58fc-46a4-979f-88e7503193ba"
+      }
+    },
+    "ios": {
+      "bundleIdentifier": "com.taherelshafei.workspace",
+      "infoPlist": {
+        "ITSAppUsesNonExemptEncryption": false
+      }
+    }
+  }
 }

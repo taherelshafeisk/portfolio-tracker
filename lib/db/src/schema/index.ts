@@ -13,3 +13,4 @@ export * from "./convictionAttachments";
 export * from "./portfolioSnapshots";
 export * from "./ipsBuilderSessions";
 export * from "./macroPosture";
+export * from "./positionFlags";

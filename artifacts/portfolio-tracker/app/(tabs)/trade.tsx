@@ -4,12 +4,11 @@ import {
   Platform, Alert, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiGet, type Position, type Account } from '@/context/PortfolioContext';
+import { fonts } from '@/constants/fonts';
+import { usePortfolio, apiGet, type Position } from '@/context/PortfolioContext';
 import { formatCurrency } from '@/components/ui/PnlBadge';
-import { Card } from '@/components/ui/Card';
 import { useAIContext } from '@/hooks/useAIContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -51,50 +50,33 @@ function daysHeld(createdAt: string): number {
   return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000);
 }
 
-function pnlColor(pct: number) {
-  return pct >= 0 ? colors.positive : colors.negative;
-}
-
-function rsiBarColor(rsi: number) {
-  if (rsi >= 50 && rsi <= 70) return colors.positive;
-  return colors.negative;
-}
-
-// ─── Top-tab toggle ───────────────────────────────────────────────────────────
-
 type Tab = 'swings' | 'screener';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
-export default function TradeScreen() {
+export default function DecideScreen() {
   const insets = useSafeAreaInsets();
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' ? 20 : insets.top;
   const [activeTab, setActiveTab] = useState<Tab>('swings');
 
   return (
-    <View style={[styles.container, { paddingTop: topPad }]}>
+    <View style={[styles.root, { paddingTop: topPad }]}>
+      {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Trade</Text>
+        <Text style={styles.eyebrow}>DECIDE</Text>
+        <Text style={styles.title}>Pre-trade review</Text>
       </View>
 
-      {/* Top-tab toggle */}
-      <View style={styles.topTabRow}>
-        <Pressable
-          style={[styles.topTab, activeTab === 'swings' && styles.topTabActive]}
-          onPress={() => setActiveTab('swings')}
-        >
-          <Text style={[styles.topTabText, activeTab === 'swings' && styles.topTabTextActive]}>
-            Open Swings
-          </Text>
-        </Pressable>
-        <Pressable
-          style={[styles.topTab, activeTab === 'screener' && styles.topTabActive]}
-          onPress={() => setActiveTab('screener')}
-        >
-          <Text style={[styles.topTabText, activeTab === 'screener' && styles.topTabTextActive]}>
-            Screener
-          </Text>
-        </Pressable>
+      {/* Sub-tab toggle — serif tabs with underline indicator */}
+      <View style={styles.tabRow}>
+        {(['swings', 'screener'] as Tab[]).map(tab => (
+          <Pressable key={tab} style={styles.tabOption} onPress={() => setActiveTab(tab)}>
+            <Text style={[styles.tabLabel, activeTab === tab && styles.tabLabelActive]}>
+              {tab === 'swings' ? 'Open Swings' : 'Screener'}
+            </Text>
+            {activeTab === tab && <View style={styles.tabUnderline} />}
+          </Pressable>
+        ))}
       </View>
 
       {activeTab === 'swings' ? <OpenSwingsSection /> : <ScreenerSection />}
@@ -109,9 +91,7 @@ function OpenSwingsSection() {
   const { accounts, positions, macroPosture } = usePortfolio();
   const { setAIContext } = useAIContext();
 
-  const swingAccounts = accounts.filter(a =>
-    a.name.toLowerCase().includes('swing')
-  );
+  const swingAccounts = accounts.filter(a => a.name.toLowerCase().includes('swing'));
   const swingAccountIds = new Set(swingAccounts.map(a => a.id));
   const swingPositions = positions.filter(p => swingAccountIds.has(p.accountId));
 
@@ -134,113 +114,89 @@ function OpenSwingsSection() {
     });
   }, [swingPositions.length, swingNav, macroPosture]);
 
+  const bottomPad = Platform.OS === 'web' ? 100 : insets.bottom + 80;
+
   return (
     <ScrollView
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={[
-        styles.scrollContent,
-        { paddingBottom: Platform.OS === 'web' ? 100 : insets.bottom + 90 },
-      ]}
+      contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
     >
       {/* Allocation summary */}
-      <Card style={styles.allocationCard}>
-        <Text style={styles.allocationLabel}>Swing allocation</Text>
+      <View style={styles.allocationCard}>
+        <Text style={styles.allocationEyebrow}>SWING ALLOCATION</Text>
         <Text style={styles.allocationValue}>
-          {formatCurrency(swingNav)}{' '}
-          <Text style={styles.allocationTarget}>of {formatCurrency(SWING_ALLOCATION_TARGET)} target</Text>
+          ${swingNav.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+          <Text style={styles.allocationTarget}>
+            {'  '}of ${SWING_ALLOCATION_TARGET.toLocaleString()} target
+          </Text>
         </Text>
         <View style={styles.progressTrack}>
           <View style={[styles.progressFill, { width: `${allocationPct}%` as any }]} />
         </View>
         <Text style={styles.allocationPct}>{allocationPct.toFixed(0)}% deployed</Text>
-      </Card>
+      </View>
 
       {swingAccounts.length === 0 && (
         <View style={styles.emptyState}>
-          <Feather name="inbox" size={28} color={colors.textMuted} />
-          <Text style={styles.emptyText}>No swing account found</Text>
-          <Text style={styles.emptySubText}>Create an account with "swing" in its name</Text>
+          <Text style={styles.emptyTitle}>No swing account</Text>
+          <Text style={styles.emptyText}>Create an account with "swing" in its name</Text>
         </View>
       )}
 
       {swingPositions.length === 0 && swingAccounts.length > 0 && (
         <View style={styles.emptyState}>
-          <Feather name="trending-up" size={28} color={colors.textMuted} />
-          <Text style={styles.emptyText}>No open swing positions</Text>
+          <Text style={styles.emptyTitle}>No open swings</Text>
         </View>
       )}
 
-      {swingPositions.map(pos => (
-        <SwingPositionCard key={pos.id} position={pos} />
-      ))}
+      {/* Positions ledger */}
+      {swingPositions.length > 0 && (
+        <View style={styles.ledgerTable}>
+          {swingPositions.map((pos, i) => (
+            <SwingRow key={pos.id} position={pos} isFirst={i === 0} />
+          ))}
+        </View>
+      )}
 
       <Pressable
         style={styles.newTradeBtn}
         onPress={() => Alert.alert('Coming soon', 'New Swing Trade entry coming soon.')}
       >
-        <Feather name="plus" size={18} color={colors.background} />
-        <Text style={styles.newTradeBtnText}>New Swing Trade</Text>
+        <Text style={styles.newTradeBtnText}>+ New Swing Trade</Text>
       </Pressable>
     </ScrollView>
   );
 }
 
-function SwingPositionCard({ position: p }: { position: Position }) {
-  const pnlPct = p.unrealizedPnlPct;
+function SwingRow({ position: p, isFirst }: { position: Position; isFirst: boolean }) {
+  const pnlPos = p.unrealizedPnlPct >= 0;
   const days = daysHeld(p.createdAt);
 
   return (
     <Pressable
-      style={styles.positionCard}
+      style={[styles.swingRow, !isFirst && styles.swingRowBorder]}
       onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: p.symbol } })}
     >
-      <View style={styles.positionHeader}>
-        <View>
-          <Text style={styles.positionSymbol}>{p.symbol}</Text>
-          <Text style={styles.positionQty}>{p.quantity} shares · {days}d held</Text>
-        </View>
-        <View style={styles.positionPnl}>
-          <Text style={[styles.pnlPct, { color: pnlColor(pnlPct) }]}>
-            {pnlPct >= 0 ? '+' : ''}{pnlPct.toFixed(2)}%
-          </Text>
-          <Text style={[styles.pnlAbs, { color: pnlColor(p.unrealizedPnl) }]}>
-            {formatCurrency(p.unrealizedPnl)}
-          </Text>
-        </View>
+      {/* Left: ticker + meta */}
+      <View style={styles.swingRowLeft}>
+        <Text style={styles.swingTicker}>{p.symbol}</Text>
+        <Text style={styles.swingMeta}>
+          {p.quantity} sh · {days}d held
+        </Text>
       </View>
 
-      <View style={styles.priceRow}>
-        <PriceCell label="Entry" value={formatCurrency(p.avgCost)} />
-        <PriceCell label="Current" value={formatCurrency(p.currentPrice)} />
-        <PriceCell
-          label="Stop"
-          value={p.stopPrice != null ? formatCurrency(p.stopPrice) : '⚠️ No stop'}
-          warn={p.stopPrice == null}
-        />
-        <PriceCell
-          label="Target"
-          value={p.targetPrice != null ? formatCurrency(p.targetPrice) : 'Set target'}
-          dim={p.targetPrice == null}
-        />
+      {/* Right: prices + P&L */}
+      <View style={styles.swingRowRight}>
+        <Text style={[styles.swingPnl, { color: pnlPos ? colors.positive : colors.negative }]}>
+          {pnlPos ? '+' : ''}{p.unrealizedPnlPct.toFixed(2)}%
+        </Text>
+        <Text style={[styles.swingPnlAbs, { color: pnlPos ? colors.positive : colors.negative }]}>
+          {formatCurrency(p.unrealizedPnl)}
+        </Text>
       </View>
+
+      <Text style={styles.chevron}>›</Text>
     </Pressable>
-  );
-}
-
-function PriceCell({
-  label, value, warn, dim,
-}: { label: string; value: string; warn?: boolean; dim?: boolean }) {
-  return (
-    <View style={styles.priceCell}>
-      <Text style={styles.priceCellLabel}>{label}</Text>
-      <Text style={[
-        styles.priceCellValue,
-        warn && { color: '#F59E0B' },
-        dim && { color: colors.textMuted },
-      ]}>
-        {value}
-      </Text>
-    </View>
   );
 }
 
@@ -292,32 +248,25 @@ function ScreenerSection() {
   const stage2 = results.filter(r => r.isStage2);
   const onWatch = results.filter(r => !r.isStage2 && criteriaScore(r.criteria) >= 3);
   const notReady = results.filter(r => !r.isStage2 && criteriaScore(r.criteria) < 3);
+  const bottomPad = Platform.OS === 'web' ? 100 : insets.bottom + 80;
 
   return (
     <ScrollView
       showsVerticalScrollIndicator={false}
-      contentContainerStyle={[
-        styles.scrollContent,
-        { paddingBottom: Platform.OS === 'web' ? 100 : insets.bottom + 90 },
-      ]}
+      contentContainerStyle={[styles.scrollContent, { paddingBottom: bottomPad }]}
     >
-      {/* Scan button + cache info */}
+      {/* Scan controls */}
       <View style={styles.scanHeader}>
         <Pressable
-          style={[styles.scanBtn, isScanning && styles.scanBtnDisabled]}
+          style={[styles.scanBtn, isScanning && { opacity: 0.6 }]}
           onPress={scan}
           disabled={isScanning}
         >
-          {isScanning ? (
-            <ActivityIndicator size="small" color={colors.background} />
-          ) : (
-            <Feather name="zap" size={16} color={colors.background} />
-          )}
-          <Text style={styles.scanBtnText}>
-            {isScanning ? 'Scanning...' : 'Scan Market'}
-          </Text>
+          {isScanning
+            ? <ActivityIndicator size="small" color={colors.deepInk} />
+            : <Text style={styles.scanBtnText}>Scan Market</Text>
+          }
         </Pressable>
-
         {lastScanned && (
           <Pressable onPress={scan} disabled={isScanning}>
             <Text style={styles.refreshText}>
@@ -328,36 +277,34 @@ function ScreenerSection() {
       </View>
 
       {isScanning && (
-        <Card style={styles.scanningCard}>
-          <ActivityIndicator size="large" color={colors.primary} />
-          <Text style={styles.scanningText}>Scanning {results.length > 0 ? '(refreshing)' : 'market'}…</Text>
+        <View style={styles.scanningCard}>
+          <ActivityIndicator size="large" color={colors.ink3} />
+          <Text style={styles.scanningText}>Scanning{results.length > 0 ? ' (refreshing)' : ' market'}…</Text>
           <Text style={styles.scanningSubText}>Can take 30–60 seconds</Text>
-        </Card>
+        </View>
       )}
 
       {error && (
         <View style={styles.errorBanner}>
-          <Feather name="alert-circle" size={14} color={colors.negative} />
           <Text style={styles.errorText}>{error}</Text>
         </View>
       )}
 
       {results.length === 0 && !isScanning && !error && (
         <View style={styles.emptyState}>
-          <Feather name="search" size={28} color={colors.textMuted} />
-          <Text style={styles.emptyText}>Tap "Scan Market" to screen stocks</Text>
-          <Text style={styles.emptySubText}>Results cached for 1 hour</Text>
+          <Text style={styles.emptyTitle}>No results yet</Text>
+          <Text style={styles.emptyText}>Tap "Scan Market" to screen stocks · results cached 1 hour</Text>
         </View>
       )}
 
       {stage2.length > 0 && (
-        <ResultGroup label="Stage 2 ✅" results={stage2} onResultPress={handleResultPress} />
+        <ResultGroup label="Stage 2" status="ok" results={stage2} onResultPress={handleResultPress} />
       )}
       {onWatch.length > 0 && (
-        <ResultGroup label="On Watch 👀" results={onWatch} onResultPress={handleResultPress} />
+        <ResultGroup label="On watch" status="amber" results={onWatch} onResultPress={handleResultPress} />
       )}
       {notReady.length > 0 && (
-        <ResultGroup label="Not Ready ❌" results={notReady} onResultPress={handleResultPress} />
+        <ResultGroup label="Not ready" status="none" results={notReady} onResultPress={handleResultPress} />
       )}
 
       {results.length > 0 && (
@@ -367,447 +314,242 @@ function ScreenerSection() {
   );
 }
 
-function ResultGroup({ label, results, onResultPress }: { label: string; results: MinerviniResult[]; onResultPress: (r: MinerviniResult) => void }) {
+function ResultGroup({
+  label, status, results, onResultPress,
+}: { label: string; status: 'ok' | 'amber' | 'none'; results: MinerviniResult[]; onResultPress: (r: MinerviniResult) => void }) {
+  const dotColor = status === 'ok' ? colors.positive : status === 'amber' ? colors.amber : colors.ink3;
   return (
     <View style={styles.resultGroup}>
-      <Text style={styles.groupLabel}>{label}</Text>
-      {results.map(r => (
-        <ScreenerResultCard key={r.symbol} result={r} onPress={() => onResultPress(r)} />
-      ))}
+      <View style={styles.groupHeader}>
+        <View style={[styles.groupDot, { backgroundColor: dotColor }]} />
+        <Text style={styles.groupLabel}>{label}</Text>
+        <Text style={styles.groupCount}>{results.length}</Text>
+      </View>
+      <View style={styles.ledgerTable}>
+        {results.map((r, i) => (
+          <ScreenerRow key={r.symbol} result={r} isFirst={i === 0} onPress={() => onResultPress(r)} />
+        ))}
+      </View>
     </View>
   );
 }
 
-function ScreenerResultCard({ result: r, onPress }: { result: MinerviniResult; onPress: () => void }) {
+function ScreenerRow({ result: r, isFirst, onPress }: { result: MinerviniResult; isFirst: boolean; onPress: () => void }) {
   const score = criteriaScore(r.criteria);
   const rsi = r.indicators?.rsi14 ?? null;
-  const ema50 = r.indicators?.ema50 ?? null;
-  const ema150 = r.indicators?.ema150 ?? null;
-  const ema200 = r.indicators?.ema200 ?? null;
-  const price = r.indicators?.price ?? r.price;
 
   return (
-    <Pressable onPress={onPress}>
-    <Card style={styles.resultCard}>
-      <View style={styles.resultHeader}>
-        <View>
-          <Text style={styles.resultSymbol}>{r.symbol}</Text>
-          <Text style={styles.resultPrice}>{formatCurrency(r.price)}</Text>
-        </View>
-        <View style={styles.resultBadge}>
-          {r.isStage2 ? (
-            <View style={[styles.badge, styles.badgeGreen]}>
-              <Text style={[styles.badgeText, { color: colors.positive }]}>Stage 2</Text>
-            </View>
-          ) : (
-            <View style={[styles.badge, styles.badgeNeutral]}>
-              <Text style={[styles.badgeText, { color: colors.textSecondary }]}>{score}/5</Text>
-            </View>
-          )}
+    <Pressable
+      style={[styles.screenerRow, !isFirst && styles.screenerRowBorder]}
+      onPress={onPress}
+    >
+      <View style={styles.screenerRowLeft}>
+        <Text style={styles.screenerTicker}>{r.symbol}</Text>
+        <Text style={styles.screenerMeta}>
+          {r.isStage2 ? 'Stage 2' : `${score}/5`}
+          {rsi != null ? ` · RSI ${rsi.toFixed(0)}` : ''}
+        </Text>
+      </View>
+      <View style={styles.screenerRowRight}>
+        <Text style={styles.screenerPrice}>${r.price.toFixed(2)}</Text>
+        <View style={styles.emaChips}>
+          {r.criteria.priceAboveEma50 && <View style={[styles.chip, { borderColor: colors.positive }]}><Text style={[styles.chipText, { color: colors.positive }]}>50d↑</Text></View>}
+          {r.criteria.priceAbove200 && <View style={[styles.chip, { borderColor: colors.positive }]}><Text style={[styles.chipText, { color: colors.positive }]}>200d↑</Text></View>}
         </View>
       </View>
-
-      {/* RSI bar */}
-      {rsi != null ? (
-        <View style={styles.rsiRow}>
-          <Text style={styles.indicatorLabel}>RSI</Text>
-          <View style={styles.rsiTrack}>
-            <View style={[
-              styles.rsiFill,
-              { width: `${Math.min(rsi, 100)}%` as any, backgroundColor: rsiBarColor(rsi) },
-            ]} />
-          </View>
-          <Text style={[styles.rsiValue, { color: rsiBarColor(rsi) }]}>{rsi.toFixed(0)}</Text>
-        </View>
-      ) : (
-        <Text style={styles.naText}>RSI unavailable</Text>
-      )}
-
-      {/* EMA status */}
-      <View style={styles.emaRow}>
-        {ema50 != null && <EmaChip label="50d" above={price >= ema50} />}
-        {ema150 != null && <EmaChip label="150d" above={price >= ema150} />}
-        {ema200 != null && <EmaChip label="200d" above={price >= ema200} />}
-        {ema150 != null && ema200 != null && <EmaChip label="150>200" above={ema150 >= ema200} />}
-      </View>
-
-      <Pressable
-        style={styles.watchlistBtn}
-        onPress={() => Alert.alert('Coming soon', 'Watchlist feature coming soon.')}
-      >
-        <Feather name="bookmark" size={13} color={colors.textSecondary} />
-        <Text style={styles.watchlistBtnText}>Add to watchlist</Text>
-      </Pressable>
-    </Card>
+      <Text style={styles.chevron}>›</Text>
     </Pressable>
-  );
-}
-
-function EmaChip({ label, above }: { label: string; above: boolean }) {
-  return (
-    <View style={[styles.emaChip, above ? styles.emaChipGreen : styles.emaChipRed]}>
-      <Text style={[styles.emaChipText, { color: above ? colors.positive : colors.negative }]}>
-        {label} {above ? '↑' : '↓'}
-      </Text>
-    </View>
   );
 }
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 8,
-    paddingTop: 4,
+  root: { flex: 1, backgroundColor: colors.bg },
+
+  header: { paddingHorizontal: 22, paddingTop: 18, paddingBottom: 4 },
+  eyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 2.2,
+    textTransform: 'uppercase',
+    color: colors.ink3,
   },
   title: {
-    fontFamily: 'Inter_700Bold',
+    fontFamily: fonts.serif,
     fontSize: 26,
-    color: colors.textPrimary,
+    letterSpacing: -0.02 * 26,
+    color: colors.ink,
+    marginTop: 4,
   },
 
-  // Top-tab toggle
-  topTabRow: {
+  // Sub-tabs
+  tabRow: {
     flexDirection: 'row',
-    marginHorizontal: 16,
-    marginBottom: 12,
-    backgroundColor: colors.surface,
-    borderRadius: 10,
-    padding: 3,
+    paddingHorizontal: 22,
+    gap: 20,
+    marginBottom: 16,
+    marginTop: 12,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hair,
   },
-  topTab: {
-    flex: 1,
-    paddingVertical: 8,
-    alignItems: 'center',
-    borderRadius: 8,
-  },
-  topTabActive: {
-    backgroundColor: colors.surfaceElevated,
-  },
-  topTabText: {
-    fontFamily: 'Inter_500Medium',
+  tabOption: { alignItems: 'center', paddingBottom: 10 },
+  tabLabel: {
+    fontFamily: fonts.serif,
     fontSize: 14,
-    color: colors.textMuted,
+    color: colors.ink3,
   },
-  topTabTextActive: {
-    color: colors.textPrimary,
+  tabLabelActive: {
+    fontFamily: fonts.serifItalic,
+    color: colors.ink,
+  },
+  tabUnderline: {
+    height: 1.5,
+    backgroundColor: colors.accent,
+    alignSelf: 'stretch',
+    position: 'absolute',
+    bottom: -1,
+    left: 0,
+    right: 0,
   },
 
-  scrollContent: { paddingHorizontal: 16, paddingTop: 4 },
+  scrollContent: { paddingHorizontal: 22, paddingTop: 4 },
 
-  // Allocation card
-  allocationCard: { padding: 16, marginBottom: 12 },
-  allocationLabel: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginBottom: 4,
+  // Allocation
+  allocationCard: {
+    marginBottom: 16,
+    paddingBottom: 14,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.hair,
+  },
+  allocationEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+    marginBottom: 6,
   },
   allocationValue: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 20,
-    color: colors.textPrimary,
+    fontFamily: fonts.mono,
+    fontSize: 22,
+    fontWeight: '500',
+    color: colors.ink,
     marginBottom: 10,
+    fontVariant: ['tabular-nums'],
   },
   allocationTarget: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 14,
-    color: colors.textSecondary,
+    fontFamily: fonts.sans,
+    fontSize: 13,
+    color: colors.ink3,
+    fontWeight: '400',
   },
   progressTrack: {
-    height: 6,
-    backgroundColor: colors.surfaceBorder,
-    borderRadius: 3,
+    height: 3,
+    backgroundColor: colors.hair2,
+    borderRadius: 2,
     overflow: 'hidden',
     marginBottom: 6,
   },
   progressFill: {
-    height: 6,
-    backgroundColor: colors.swing,
-    borderRadius: 3,
+    height: 3,
+    backgroundColor: colors.gold,
+    borderRadius: 2,
   },
   allocationPct: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.ink3,
+    fontVariant: ['tabular-nums'],
   },
 
-  // Position card
-  positionCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 12,
-    padding: 14,
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: colors.separator,
+  // Ledger
+  ledgerTable: {
+    borderTopWidth: 1,
+    borderTopColor: colors.ink,
+    marginBottom: 16,
   },
-  positionHeader: {
+  swingRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 12,
+    alignItems: 'center',
+    paddingVertical: 12,
+    gap: 8,
   },
-  positionSymbol: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 17,
-    color: colors.textPrimary,
-  },
-  positionQty: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  positionPnl: { alignItems: 'flex-end' },
-  pnlPct: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 16,
-  },
-  pnlAbs: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    marginTop: 2,
-  },
-  priceRow: { flexDirection: 'row', gap: 8 },
-  priceCell: { flex: 1 },
-  priceCellLabel: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 10,
-    color: colors.textMuted,
-    marginBottom: 2,
-    textTransform: 'uppercase',
-    letterSpacing: 0.5,
-  },
-  priceCellValue: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 12,
-    color: colors.textPrimary,
-  },
+  swingRowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
+  swingRowLeft: { flex: 1 },
+  swingTicker: { fontFamily: fonts.monoBold, fontSize: 13, color: colors.ink },
+  swingMeta: { fontFamily: fonts.mono, fontSize: 10, color: colors.ink3, marginTop: 2 },
+  swingRowRight: { alignItems: 'flex-end' },
+  swingPnl: { fontFamily: fonts.mono, fontSize: 13, fontVariant: ['tabular-nums'] },
+  swingPnlAbs: { fontFamily: fonts.mono, fontSize: 11, fontVariant: ['tabular-nums'] },
+  chevron: { fontSize: 16, color: colors.ink3 },
 
-  // New trade button
+  // New trade
   newTradeBtn: {
-    flexDirection: 'row',
+    borderRadius: 2,
+    borderWidth: 1,
+    borderColor: colors.ink,
+    paddingVertical: 12,
     alignItems: 'center',
-    justifyContent: 'center',
-    gap: 8,
-    backgroundColor: colors.swing,
-    borderRadius: 12,
-    paddingVertical: 14,
-    marginTop: 8,
+    marginBottom: 16,
   },
-  newTradeBtnText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 15,
-    color: colors.background,
-  },
+  newTradeBtnText: { fontFamily: fonts.sansMedium, fontSize: 14, color: colors.ink },
 
-  // Empty state
-  emptyState: {
-    alignItems: 'center',
-    paddingVertical: 40,
-    gap: 8,
-  },
-  emptyText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 15,
-    color: colors.textSecondary,
-  },
-  emptySubText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: colors.textMuted,
-  },
+  // Empty
+  emptyState: { alignItems: 'center', paddingVertical: 40, gap: 8 },
+  emptyTitle: { fontFamily: fonts.serif, fontSize: 18, color: colors.ink },
+  emptyText: { fontFamily: fonts.sans, fontSize: 13, color: colors.ink3, textAlign: 'center' },
 
   // Screener
   scanHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 12,
+    marginBottom: 16,
   },
   scanBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: colors.primary,
-    borderRadius: 10,
+    backgroundColor: colors.ink,
+    borderRadius: 2,
     paddingVertical: 10,
     paddingHorizontal: 18,
-  },
-  scanBtnDisabled: { opacity: 0.6 },
-  scanBtnText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 14,
-    color: colors.background,
-  },
-  refreshText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textSecondary,
-  },
-  scanningCard: {
-    padding: 32,
+    minWidth: 120,
     alignItems: 'center',
-    gap: 12,
-    marginBottom: 12,
   },
-  scanningText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 15,
-    color: colors.textPrimary,
-  },
-  scanningSubText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
-  },
+  scanBtnText: { fontFamily: fonts.sansMedium, fontSize: 14, color: colors.card },
+  refreshText: { fontFamily: fonts.mono, fontSize: 11, color: colors.ink3 },
+  scanningCard: { padding: 32, alignItems: 'center', gap: 10 },
+  scanningText: { fontFamily: fonts.serif, fontSize: 15, color: colors.ink },
+  scanningSubText: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink3 },
   errorBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    backgroundColor: 'rgba(255,71,87,0.1)',
-    borderRadius: 8,
+    backgroundColor: colors.negativeLight,
+    borderRadius: 2,
     padding: 12,
     marginBottom: 12,
   },
-  errorText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: colors.negative,
-    flex: 1,
-  },
+  errorText: { fontFamily: fonts.sans, fontSize: 13, color: colors.negative },
 
   // Result groups
-  resultGroup: { marginBottom: 16 },
-  groupLabel: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 15,
-    color: colors.textPrimary,
-    marginBottom: 8,
-  },
-  resultCard: { padding: 14, marginBottom: 8 },
-  resultHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 10,
-  },
-  resultSymbol: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 17,
-    color: colors.textPrimary,
-  },
-  resultPrice: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: colors.textSecondary,
-    marginTop: 2,
-  },
-  resultBadge: { alignItems: 'flex-end' },
-  badge: {
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 4,
-    borderWidth: 1,
-  },
-  badgeGreen: {
-    backgroundColor: 'rgba(0,230,118,0.1)',
-    borderColor: 'rgba(0,230,118,0.3)',
-  },
-  badgeNeutral: {
-    backgroundColor: colors.surfaceBorder,
-    borderColor: colors.separator,
-  },
-  badgeText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 12,
-  },
+  resultGroup: { marginBottom: 20 },
+  groupHeader: { flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 8 },
+  groupDot: { width: 6, height: 6, borderRadius: 3 },
+  groupLabel: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.ink, flex: 1 },
+  groupCount: { fontFamily: fonts.mono, fontSize: 11, color: colors.ink3 },
 
-  // RSI
-  rsiRow: {
+  screenerRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    paddingVertical: 12,
     gap: 8,
-    marginBottom: 8,
   },
-  indicatorLabel: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 11,
-    color: colors.textMuted,
-    width: 28,
-  },
-  rsiTrack: {
-    flex: 1,
-    height: 4,
-    backgroundColor: colors.surfaceBorder,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  rsiFill: { height: 4, borderRadius: 2 },
-  rsiValue: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 12,
-    width: 28,
-    textAlign: 'right',
-  },
+  screenerRowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
+  screenerRowLeft: { flex: 1 },
+  screenerTicker: { fontFamily: fonts.monoBold, fontSize: 13, color: colors.ink },
+  screenerMeta: { fontFamily: fonts.mono, fontSize: 10, color: colors.ink3, marginTop: 2 },
+  screenerRowRight: { alignItems: 'flex-end', gap: 4 },
+  screenerPrice: { fontFamily: fonts.mono, fontSize: 13, fontVariant: ['tabular-nums'], color: colors.ink },
+  emaChips: { flexDirection: 'row', gap: 4 },
+  chip: { borderRadius: 2, borderWidth: 1, paddingHorizontal: 5, paddingVertical: 2 },
+  chipText: { fontFamily: fonts.mono, fontSize: 9, letterSpacing: 0.5 },
 
-  // EMA chips
-  emaRow: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    gap: 6,
-    marginBottom: 10,
-  },
-  emaChip: {
-    borderRadius: 6,
-    paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
-  },
-  emaChipGreen: {
-    backgroundColor: 'rgba(0,230,118,0.08)',
-    borderColor: 'rgba(0,230,118,0.25)',
-  },
-  emaChipRed: {
-    backgroundColor: 'rgba(255,71,87,0.08)',
-    borderColor: 'rgba(255,71,87,0.25)',
-  },
-  emaChipText: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 11,
-  },
-
-  // Watchlist button
-  watchlistBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    paddingTop: 8,
-    borderTopWidth: 1,
-    borderTopColor: colors.separator,
-  },
-  watchlistBtnText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: colors.textSecondary,
-  },
-
-  naText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
-    marginBottom: 8,
-  },
-  cacheNote: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
-    textAlign: 'center',
-    marginTop: 8,
-    marginBottom: 4,
-  },
+  cacheNote: { fontFamily: fonts.mono, fontSize: 11, color: colors.ink3, textAlign: 'center', marginTop: 8 },
 });

@@ -58,6 +58,9 @@
     "zod-validation-error": "^3.4.0"
   },
   "dependencies": {
+    "@expo-google-fonts/inter-tight": "^0.4.2",
+    "@expo-google-fonts/jetbrains-mono": "^0.4.1",
+    "@expo-google-fonts/source-serif-4": "^0.4.1",
     "@shopify/react-native-skia": "^2.5.3",
     "expo-dev-client": "~6.0.20",
     "expo-document-picker": "^55.0.13",

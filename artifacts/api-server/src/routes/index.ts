@@ -14,6 +14,7 @@ import convictionsRouter from "./convictions";
 import snapshotsRouter from "./snapshots";
 import macroPostureRouter from "./macroPosture";
 import screenerRouter from "./screener";
+import flagsRouter from "./flags";
 
 const router: IRouter = Router();
 
@@ -32,5 +33,6 @@ router.use("/convictions", convictionsRouter);
 router.use("/snapshots", snapshotsRouter);
 router.use("/macro-posture", macroPostureRouter);
 router.use("/screener", screenerRouter);
+router.use("/flags", flagsRouter);
 
 export default router;

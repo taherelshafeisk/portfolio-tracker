@@ -28,6 +28,16 @@ const DISMISS_REASONS = [
   'No longer relevant',
 ] as const;
 
+// Trading days in a typical month (approx)
+const TRADING_DAYS_PER_MONTH = 21;
+
+function tradingDaysRemaining(targetDate: Date): number {
+  const now = new Date();
+  const diff = Math.max(0, targetDate.getTime() - now.getTime());
+  const calDays = Math.ceil(diff / 86400000);
+  return Math.round(calDays * (TRADING_DAYS_PER_MONTH / 30));
+}
+
 // ─── Types ────────────────────────────────────────────────────────────────────
 
 interface ApiAlert {
@@ -47,14 +57,19 @@ function MetricRow({
   label,
   value,
   color,
+  sub,
 }: {
   label: string;
   value: string;
   color?: string;
+  sub?: string;
 }) {
   return (
     <View style={styles.metricRow}>
-      <Text style={styles.metricLabel}>{label}</Text>
+      <View style={styles.metricLabelCol}>
+        <Text style={styles.metricLabel}>{label}</Text>
+        {sub ? <Text style={styles.metricSub}>{sub}</Text> : null}
+      </View>
       <Text style={[styles.metricValue, color ? { color } : undefined]}>{value}</Text>
     </View>
   );
@@ -64,12 +79,99 @@ function RowDivider() {
   return <View style={styles.rowDivider} />;
 }
 
+// ─── Cause explanation banner ─────────────────────────────────────────────────
+
+function CauseBanner({ explanation, cause }: { explanation: string; cause?: string }) {
+  const icon =
+    cause === 'winner_drift' ? '↑' :
+    cause === 'added_into_overweight' ? '+' :
+    cause === 'sleeve_shrank' ? '↓' : '!';
+  return (
+    <View style={styles.causeBanner}>
+      <Text style={styles.causeIcon}>{icon}</Text>
+      <Text style={styles.causeText}>{explanation}</Text>
+    </View>
+  );
+}
+
+// ─── Glide path card ──────────────────────────────────────────────────────────
+
+function GlidePathCard({
+  leverageRatio,
+  ceiling,
+  borrowed,
+  positions,
+}: {
+  leverageRatio: number;
+  ceiling: number;
+  borrowed: number;
+  positions: { symbol: string; marketValue: number; positionBucket?: string | null; unrealizedPnlPct: number }[];
+}) {
+  // Default 10 trading days to reduce to ceiling
+  const targetDays = 10;
+  const excessLeverage = leverageRatio - ceiling;
+  // Amount to reduce: (excess / leverageRatio) × total gross exposure ≈ borrowed reduction needed
+  // Simplified: borrowed × (excessLeverage / leverageRatio) to bring ratio to ceiling
+  // ceiling = (nav + remaining) / nav → remaining = ceiling × nav - nav = nav × (ceiling - 1)
+  // current borrowed = nav × (leverageRatio - 1)
+  // dollars to cut = borrowed - nav × (ceiling - 1) = nav × (leverageRatio - ceiling)
+  // nav = (borrowed) / (leverageRatio - 1) when leverageRatio > 1
+  const nav = leverageRatio > 1 ? borrowed / (leverageRatio - 1) : 0;
+  const dollarsToCut = nav > 0 ? nav * (leverageRatio - ceiling) : 0;
+  const perSession = targetDays > 0 ? dollarsToCut / targetDays : dollarsToCut;
+
+  // Suggested reduction buckets: cut-list first, then lowest conviction, then largest losers
+  const cutList = positions
+    .filter(p => p.positionBucket === 'cut')
+    .sort((a, b) => b.marketValue - a.marketValue);
+
+  const lowConviction = positions
+    .filter(p => p.positionBucket === 'spec' && !cutList.find(c => c.symbol === p.symbol))
+    .sort((a, b) => a.unrealizedPnlPct - b.unrealizedPnlPct)
+    .slice(0, 3);
+
+  const suggestedBuckets = [...cutList, ...lowConviction];
+
+  return (
+    <Card style={styles.glideCard}>
+      <Text style={styles.glideTitle}>Glide path to {ceiling.toFixed(1)}x</Text>
+      <Text style={styles.glideSub}>
+        To reach {ceiling.toFixed(1)}x in {targetDays} trading sessions, reduce exposure by approximately{' '}
+        <Text style={styles.glideHighlight}>{formatCurrency(dollarsToCut)}</Text>
+        {' '}({formatCurrency(perSession)}/session).
+      </Text>
+
+      {suggestedBuckets.length > 0 && (
+        <>
+          <View style={styles.glideDivider} />
+          <Text style={styles.glideBucketLabel}>SUGGESTED REDUCTION SEQUENCE</Text>
+          {suggestedBuckets.map((p, i) => (
+            <View key={p.symbol} style={styles.glideBucketRow}>
+              <Text style={styles.glideBucketNum}>{i + 1}</Text>
+              <View style={styles.glideBucketInfo}>
+                <Text style={styles.glideBucketSymbol}>{p.symbol}</Text>
+                <Text style={styles.glideBucketMeta}>
+                  {p.positionBucket === 'cut' ? 'Cut list' : 'Low conviction'} · {formatCurrency(p.marketValue)}
+                </Text>
+              </View>
+              <Text style={[
+                styles.glideBucketPnl,
+                { color: p.unrealizedPnlPct >= 0 ? colors.positive : colors.negative },
+              ]}>
+                {p.unrealizedPnlPct >= 0 ? '+' : ''}{p.unrealizedPnlPct.toFixed(1)}%
+              </Text>
+            </View>
+          ))}
+        </>
+      )}
+    </Card>
+  );
+}
+
 // ─── Custom slider ────────────────────────────────────────────────────────────
 
 interface SliderProps {
-  /** 0..1 fraction (0 = sell everything, 1 = keep at current) */
   value: number;
-  /** default target fraction (e.g. 0.20 for concentrationLimit) */
   defaultMark: number;
   onChange: (v: number) => void;
 }
@@ -99,11 +201,8 @@ function SliderTrack({ value, defaultMark, onChange }: SliderProps) {
       onResponderGrant={handleTouch}
       onResponderMove={handleTouch}
     >
-      {/* Filled portion */}
       <View style={[styles.sliderFill, { width: `${filledPct}%` }]} />
-      {/* Default mark line */}
       <View style={[styles.sliderMark, { left: `${markPct}%` }]} />
-      {/* Thumb */}
       <View style={[styles.sliderThumb, { left: `${filledPct}%`, marginLeft: -10 }]} />
     </View>
   );
@@ -156,8 +255,6 @@ export default function ActionDetailScreen() {
   const insets = useSafeAreaInsets();
   const { accounts, positions, summary } = usePortfolio();
 
-  // Slider: 0 = 0% target (exit full), 1 = keep at current level
-  // Default = concentrationLimit expressed as fraction of current position %
   const [trimFraction, setTrimFraction] = useState<number | null>(null);
   const [trancheExecuted, setTrancheExecuted] = useState([false, false, false]);
   const [showDismissModal, setShowDismissModal] = useState(false);
@@ -198,16 +295,13 @@ export default function ActionDetailScreen() {
   const concentrationLimit = account?.concentrationLimit ?? DEFAULT_CONCENTRATION_LIMIT;
   const leverageCeiling = account?.leverageCeiling ?? DEFAULT_LEVERAGE_CEILING;
 
-  // Slider state: fraction of the track (0 = trim to 0%, 1 = keep current %)
   const concentrationPct =
     sleeveNav > 0 && position ? (position.marketValue / sleeveNav) * 100 : 0;
 
-  // Default mark on slider corresponds to concentrationLimit as a fraction of current %
   const defaultMark =
     concentrationPct > 0 ? concentrationLimit / (concentrationPct / 100) : 0.5;
   const clampedDefaultMark = Math.min(1, Math.max(0, defaultMark));
 
-  // Effective trim target %: slider value → target sleeve % for this position
   const effectiveTrimTargetPct =
     trimFraction !== null
       ? trimFraction * concentrationPct
@@ -222,8 +316,8 @@ export default function ActionDetailScreen() {
     const estValue = qtyToSell * position.currentPrice;
     const pctAfter = sleeveNav > 0 ? ((position.marketValue - estValue) / sleeveNav) * 100 : 0;
     const t1Price = position.currentPrice;
-    const t2Price = position.currentPrice * 1.01;
-    const t3Price = position.currentPrice * 1.02;
+    const t2Price = position.currentPrice * 0.97;
+    const t3Price = position.currentPrice * 0.94;
     return {
       qtyToSell,
       estValue,
@@ -235,6 +329,21 @@ export default function ActionDetailScreen() {
       ],
     };
   }, [action?.type, position, sleeveNav, effectiveTrimTargetPct]);
+
+  // ── Leverage ratio + glide path inputs ────────────────────────────────────
+
+  const leverageRatio = useMemo(() => {
+    if (!account || account.currentBalance >= 0) return null;
+    const nav = sleeveNav;
+    if (nav <= 0) return null;
+    const borrowed = Math.abs(account.currentBalance);
+    return (nav + borrowed) / nav;
+  }, [account, sleeveNav]);
+
+  const accountPositions = useMemo(
+    () => positions.filter(p => p.accountId === action?.accountId),
+    [positions, action?.accountId],
+  );
 
   // ── DB alerts (for dismiss) ────────────────────────────────────────────────
 
@@ -301,16 +410,6 @@ export default function ActionDetailScreen() {
       });
   }, [position, positions, accounts]);
 
-  // ── Leverage ratio ─────────────────────────────────────────────────────────
-
-  const leverageRatio = useMemo(() => {
-    if (!account || account.currentBalance >= 0) return null;
-    const nav = sleeveNav;
-    if (nav <= 0) return null;
-    const borrowed = Math.abs(account.currentBalance);
-    return (nav + borrowed) / nav;
-  }, [account, sleeveNav]);
-
   // ── Render ─────────────────────────────────────────────────────────────────
 
   if (!action) {
@@ -331,9 +430,7 @@ export default function ActionDetailScreen() {
   const title = position?.symbol ?? account?.name ?? '—';
   const severityColor = action.severity === 'red' ? colors.negative : '#F59E0B';
   const { concentrationRule, drawdownRule } = defaultStrategyProfile;
-
-  const sliderValue =
-    trimFraction !== null ? trimFraction : clampedDefaultMark;
+  const sliderValue = trimFraction !== null ? trimFraction : clampedDefaultMark;
 
   return (
     <View style={[styles.container, { paddingTop: Platform.OS === 'web' ? 67 : insets.top }]}>
@@ -355,7 +452,6 @@ export default function ActionDetailScreen() {
         <View style={styles.backBtn} />
       </View>
 
-      {/* Sub-title */}
       {position?.name ? (
         <Text style={styles.subTitle} numberOfLines={1}>{position.name}</Text>
       ) : account?.name && action.type !== 'concentration' ? (
@@ -369,12 +465,15 @@ export default function ActionDetailScreen() {
           { paddingBottom: Platform.OS === 'web' ? 120 : insets.bottom + 120 },
         ]}
       >
-        {/* ── Section 1: The Issue ──────────────────────────────────────────── */}
+        {/* ── The Issue ── */}
         <SectionLabel title="The Issue" />
         <Card style={styles.issueCard}>
           <View style={[styles.issueSeverityBar, { backgroundColor: severityColor }]} />
           <Text style={styles.issueText}>{action.label}</Text>
         </Card>
+
+        {/* ── Why (cause explanation) ── */}
+        <CauseBanner explanation={action.explanation} cause={action.cause} />
 
         {/* Trigger levels for concentration */}
         {action.type === 'concentration' && position && (
@@ -393,7 +492,7 @@ export default function ActionDetailScreen() {
           />
         )}
 
-        {/* Leverage context */}
+        {/* Leverage context + glide path */}
         {action.type === 'leverage' && account && (
           <>
             <SectionLabel title="Context" />
@@ -411,7 +510,30 @@ export default function ActionDetailScreen() {
                 value={formatCurrency(account.currentBalance)}
                 color={colors.negative}
               />
+              <RowDivider />
+              <MetricRow
+                label="Borrowed"
+                value={formatCurrency(Math.abs(account.currentBalance))}
+                color={colors.negative}
+              />
             </Card>
+
+            {leverageRatio != null && leverageRatio > leverageCeiling && (
+              <>
+                <SectionLabel title="Reduction Plan" />
+                <GlidePathCard
+                  leverageRatio={leverageRatio}
+                  ceiling={leverageCeiling}
+                  borrowed={Math.abs(account.currentBalance)}
+                  positions={accountPositions.map(p => ({
+                    symbol: p.symbol,
+                    marketValue: p.marketValue,
+                    positionBucket: p.positionBucket,
+                    unrealizedPnlPct: p.unrealizedPnlPct,
+                  }))}
+                />
+              </>
+            )}
           </>
         )}
 
@@ -428,7 +550,7 @@ export default function ActionDetailScreen() {
           </>
         )}
 
-        {/* ── Section 2: Position Context (concentration only) ──────────────── */}
+        {/* ── Position context (concentration) ── */}
         {action.type === 'concentration' && position && (
           <>
             <SectionLabel title="Position" />
@@ -477,26 +599,19 @@ export default function ActionDetailScreen() {
           </>
         )}
 
-        {/* ── Section 3: Resolution (concentration) ─────────────────────────── */}
+        {/* ── Resolution (concentration) ── */}
         {action.type === 'concentration' && position && concCalcs && (
           <>
             <SectionLabel title="Resolution" />
 
-            {/* Target label */}
             <Card style={styles.targetCard}>
               <Text style={styles.targetText}>
                 To reach{' '}
-                <Text style={styles.targetHighlight}>
-                  {effectiveTrimTargetPct.toFixed(0)}%
-                </Text>
+                <Text style={styles.targetHighlight}>{effectiveTrimTargetPct.toFixed(0)}%</Text>
                 , sell{' '}
-                <Text style={styles.targetHighlight}>
-                  {concCalcs.qtyToSell.toFixed(2)} shares
-                </Text>
+                <Text style={styles.targetHighlight}>{concCalcs.qtyToSell.toFixed(2)} shares</Text>
                 {' '}(est.{' '}
-                <Text style={styles.targetHighlight}>
-                  {formatCurrency(concCalcs.estValue)}
-                </Text>
+                <Text style={styles.targetHighlight}>{formatCurrency(concCalcs.estValue)}</Text>
                 )
               </Text>
               <Text style={styles.targetAfter}>
@@ -504,7 +619,6 @@ export default function ActionDetailScreen() {
               </Text>
             </Card>
 
-            {/* Slider */}
             <Card style={styles.sliderCard}>
               <View style={styles.sliderLabelRow}>
                 <Text style={styles.sliderLabel}>Trim to</Text>
@@ -525,16 +639,11 @@ export default function ActionDetailScreen() {
               </View>
             </Card>
 
-            {/* Exit fully */}
-            <Pressable
-              style={styles.exitFullyBtn}
-              onPress={() => setTrimFraction(0)}
-            >
+            <Pressable style={styles.exitFullyBtn} onPress={() => setTrimFraction(0)}>
               <Text style={styles.exitFullyText}>Exit fully</Text>
             </Pressable>
 
-            {/* Tranches — sell into strength, limit orders at or above current price */}
-            <SectionLabel title="Tranches (at or above current price)" />
+            <SectionLabel title="Tranches (current · −3% · −6%)" />
             {concCalcs.tranches.map((t, i) => (
               <TrancheRow
                 key={i}
@@ -580,9 +689,7 @@ export default function ActionDetailScreen() {
           <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />
             <Text style={styles.modalTitle}>Why are you dismissing this?</Text>
-            <Text style={styles.modalSub} numberOfLines={2}>
-              {action.label}
-            </Text>
+            <Text style={styles.modalSub} numberOfLines={2}>{action.label}</Text>
             {DISMISS_REASONS.map(reason => (
               <Pressable
                 key={reason}
@@ -593,10 +700,7 @@ export default function ActionDetailScreen() {
                 <Feather name="chevron-right" size={16} color={colors.textMuted} />
               </Pressable>
             ))}
-            <Pressable
-              style={styles.cancelBtn}
-              onPress={() => setShowDismissModal(false)}
-            >
+            <Pressable style={styles.cancelBtn} onPress={() => setShowDismissModal(false)}>
               <Text style={styles.cancelText}>Cancel</Text>
             </Pressable>
           </View>
@@ -609,20 +713,14 @@ export default function ActionDetailScreen() {
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: colors.background,
-  },
+  container: { flex: 1, backgroundColor: colors.background },
   navbar: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingHorizontal: 16,
     paddingVertical: 12,
   },
-  backBtn: {
-    width: 36,
-    alignItems: 'center',
-  },
+  backBtn: { width: 36, alignItems: 'center' },
   navTitle: {
     flex: 1,
     flexDirection: 'row',
@@ -630,26 +728,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     gap: 8,
   },
-  navSymbol: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 20,
-    color: colors.textPrimary,
-  },
-  sideBadge: {
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    borderRadius: 6,
-  },
-  sideText: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 12,
-    letterSpacing: 0.5,
-  },
-  severityDot: {
-    width: 10,
-    height: 10,
-    borderRadius: 5,
-  },
+  navSymbol: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary },
+  sideBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6 },
+  sideText: { fontFamily: 'Inter_700Bold', fontSize: 12, letterSpacing: 0.5 },
+  severityDot: { width: 10, height: 10, borderRadius: 5 },
   subTitle: {
     fontFamily: 'Inter_400Regular',
     fontSize: 13,
@@ -658,20 +740,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     marginBottom: 8,
   },
-  loadingCenter: {
-    flex: 1,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  notFound: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 15,
-    color: colors.textMuted,
-  },
-  scroll: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
-  },
+  loadingCenter: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  notFound: { fontFamily: 'Inter_400Regular', fontSize: 15, color: colors.textMuted },
+  scroll: { paddingHorizontal: 16, paddingTop: 4 },
+
   sectionLabel: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: 12,
@@ -681,6 +753,89 @@ const styles = StyleSheet.create({
     marginTop: 20,
     marginBottom: 8,
   },
+
+  // Cause banner
+  causeBanner: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 10,
+    backgroundColor: `${colors.gold}15`,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.gold,
+    padding: 12,
+    borderRadius: 2,
+    marginTop: 10,
+    marginBottom: 4,
+  },
+  causeIcon: {
+    fontFamily: 'Inter_700Bold',
+    fontSize: 14,
+    color: colors.gold,
+    lineHeight: 20,
+  },
+  causeText: {
+    flex: 1,
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 19,
+  },
+
+  // Glide path card
+  glideCard: { gap: 0, padding: 14 },
+  glideTitle: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 14,
+    color: colors.textPrimary,
+    marginBottom: 6,
+  },
+  glideSub: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 13,
+    color: colors.textSecondary,
+    lineHeight: 20,
+  },
+  glideHighlight: { fontFamily: 'Inter_600SemiBold', color: colors.textPrimary },
+  glideDivider: { height: 1, backgroundColor: colors.separator, marginVertical: 12 },
+  glideBucketLabel: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 10,
+    color: colors.textMuted,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  glideBucketRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    borderTopWidth: 0.5,
+    borderTopColor: colors.separator,
+  },
+  glideBucketNum: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 12,
+    color: colors.textMuted,
+    width: 20,
+  },
+  glideBucketInfo: { flex: 1 },
+  glideBucketSymbol: {
+    fontFamily: 'Inter_600SemiBold',
+    fontSize: 13,
+    color: colors.textPrimary,
+  },
+  glideBucketMeta: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
+  },
+  glideBucketPnl: {
+    fontFamily: 'Inter_500Medium',
+    fontSize: 12,
+    fontVariant: ['tabular-nums'],
+  },
+
   // Issue card
   issueCard: {
     flexDirection: 'row',
@@ -706,11 +861,9 @@ const styles = StyleSheet.create({
     paddingVertical: 14,
     paddingRight: 14,
   },
+
   // Metric card
-  metricCard: {
-    padding: 0,
-    overflow: 'hidden',
-  },
+  metricCard: { padding: 0, overflow: 'hidden' },
   metricRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -718,10 +871,17 @@ const styles = StyleSheet.create({
     paddingHorizontal: 16,
     paddingVertical: 13,
   },
+  metricLabelCol: { flex: 1 },
   metricLabel: {
     fontFamily: 'Inter_400Regular',
     fontSize: 14,
     color: colors.textSecondary,
+  },
+  metricSub: {
+    fontFamily: 'Inter_400Regular',
+    fontSize: 11,
+    color: colors.textMuted,
+    marginTop: 1,
   },
   metricValue: {
     fontFamily: 'Inter_600SemiBold',
@@ -731,35 +891,21 @@ const styles = StyleSheet.create({
     flexShrink: 1,
     marginLeft: 12,
   },
-  rowDivider: {
-    height: 0.5,
-    backgroundColor: colors.separator,
-    marginHorizontal: 16,
-  },
+  rowDivider: { height: 0.5, backgroundColor: colors.separator, marginHorizontal: 16 },
+
   // Target card
-  targetCard: {
-    gap: 4,
-  },
+  targetCard: { gap: 4 },
   targetText: {
     fontFamily: 'Inter_400Regular',
     fontSize: 14,
     color: colors.textSecondary,
     lineHeight: 22,
   },
-  targetHighlight: {
-    fontFamily: 'Inter_600SemiBold',
-    color: colors.textPrimary,
-  },
-  targetAfter: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
-  },
+  targetHighlight: { fontFamily: 'Inter_600SemiBold', color: colors.textPrimary },
+  targetAfter: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted },
+
   // Slider
-  sliderCard: {
-    gap: 12,
-    marginTop: 8,
-  },
+  sliderCard: { gap: 12, marginTop: 8 },
   sliderLabelRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -811,10 +957,7 @@ const styles = StyleSheet.create({
     shadowRadius: 4,
     elevation: 4,
   },
-  sliderLimits: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-  },
+  sliderLimits: { flexDirection: 'row', justifyContent: 'space-between' },
   sliderLimitText: {
     fontFamily: 'Inter_400Regular',
     fontSize: 11,
@@ -835,6 +978,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.textSecondary,
   },
+
   // Tranche rows
   trancheRow: {
     flexDirection: 'row',
@@ -847,13 +991,8 @@ const styles = StyleSheet.create({
     padding: 14,
     marginBottom: 8,
   },
-  trancheExecuted: {
-    opacity: 0.5,
-  },
-  trancheLeft: {
-    flex: 1,
-    gap: 2,
-  },
+  trancheExecuted: { opacity: 0.5 },
+  trancheLeft: { flex: 1, gap: 2 },
   trancheLabel: {
     fontFamily: 'Inter_600SemiBold',
     fontSize: 13,
@@ -881,6 +1020,7 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.background,
   },
+
   // Bottom bar
   bottomBar: {
     paddingHorizontal: 16,
@@ -905,6 +1045,7 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: colors.textSecondary,
   },
+
   // Dismiss modal
   modalOverlay: {
     flex: 1,

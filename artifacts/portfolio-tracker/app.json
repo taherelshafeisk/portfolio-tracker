@@ -20,7 +20,9 @@
         "ITSAppUsesNonExemptEncryption": false
       }
     },
-    "android": {},
+    "android": {
+      "package": "com.taherelshafei.portfoliotracker"
+    },
     "web": {
       "favicon": "./assets/images/icon.png"
     },

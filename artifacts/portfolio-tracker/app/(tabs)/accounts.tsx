@@ -4,15 +4,12 @@ import {
   Pressable, Modal, TextInput, Alert, Platform, Share,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Feather } from '@expo/vector-icons';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
 import { colors } from '@/constants/colors';
+import { fonts } from '@/constants/fonts';
 import { usePortfolio, apiPost, apiPut, apiDelete, Account } from '@/context/PortfolioContext';
-import { Card } from '@/components/ui/Card';
-import { AccountTypeBadge } from '@/components/ui/AccountTypeBadge';
 import { formatCurrency } from '@/components/ui/PnlBadge';
-import { Skeleton } from '@/components/ui/Skeleton';
 
 const DEFAULT_CONCENTRATION_LIMIT = 0.20;
 const DEFAULT_LEVERAGE_CEILING = 1.50;
@@ -24,7 +21,7 @@ const ACCOUNT_TYPES = [
   { key: 'savings', label: 'Savings / Cash' },
 ];
 
-// ─── Compliance logic ─────────────────────────────────────────────────────────
+// ─── Compliance ───────────────────────────────────────────────────────────────
 
 type ComplianceSeverity = 'green' | 'amber' | 'red';
 
@@ -47,12 +44,12 @@ function computeCompliance(
       const fraction = p.marketValue / nav;
       if (fraction > 2 * limit) {
         issues.push({
-          label: `${p.symbol} is ${(fraction * 100).toFixed(1)}% of this sleeve — over 2× the ${(limit * 100).toFixed(0)}% limit`,
+          label: `${p.symbol} is ${(fraction * 100).toFixed(1)}% — over 2× the ${(limit * 100).toFixed(0)}% limit`,
           severity: 'red',
         });
       } else if (fraction > limit) {
         issues.push({
-          label: `${p.symbol} is ${(fraction * 100).toFixed(1)}% of this sleeve — above the ${(limit * 100).toFixed(0)}% limit`,
+          label: `${p.symbol} is ${(fraction * 100).toFixed(1)}% — above the ${(limit * 100).toFixed(0)}% limit`,
           severity: 'amber',
         });
       }
@@ -64,12 +61,12 @@ function computeCompliance(
     const leverageRatio = nav > 0 ? (nav + borrowed) / nav : 99;
     if (leverageRatio > ceiling) {
       issues.push({
-        label: `Leverage ratio ${leverageRatio.toFixed(2)}x exceeds the ${ceiling.toFixed(1)}x ceiling — ${formatCurrency(borrowed)} borrowed`,
+        label: `Leverage ${leverageRatio.toFixed(2)}× exceeds ${ceiling.toFixed(1)}× ceiling`,
         severity: 'red',
       });
     } else {
       issues.push({
-        label: `Leverage active — ${formatCurrency(borrowed)} borrowed, ratio ${leverageRatio.toFixed(2)}x (within ${ceiling.toFixed(1)}x ceiling)`,
+        label: `Leverage active — ${formatCurrency(borrowed)} borrowed, ${leverageRatio.toFixed(2)}×`,
         severity: 'amber',
       });
     }
@@ -84,96 +81,79 @@ function computeCompliance(
   return { dot, issues };
 }
 
-// ─── Components ───────────────────────────────────────────────────────────────
+// ─── Sleeve row ───────────────────────────────────────────────────────────────
 
-interface AccountCardProps {
+interface SleeveRowProps {
   account: Account;
   nav: number;
-  dayChange: number;
   dayChangePct: number;
   positionCount: number;
   accountPositions: { symbol: string; marketValue: number }[];
+  isFirst: boolean;
   onLongPress: () => void;
 }
 
-function AccountCard({
-  account,
-  nav,
-  dayChange,
-  dayChangePct,
-  positionCount,
-  accountPositions,
-  onLongPress,
-}: AccountCardProps) {
+function SleeveRow({
+  account, nav, dayChangePct, positionCount, accountPositions, isFirst, onLongPress,
+}: SleeveRowProps) {
   const [expanded, setExpanded] = useState(false);
   const { dot, issues } = computeCompliance(account, accountPositions, nav);
-  const isDayUp = dayChangePct >= 0;
 
-  const dotColor = dot === 'red' ? colors.negative : dot === 'amber' ? '#F59E0B' : colors.positive;
+  const dotColor = dot === 'red' ? colors.negative : dot === 'amber' ? colors.amber : colors.positive;
+  const dayColor = dayChangePct >= 0 ? colors.positive : colors.negative;
 
   return (
-    <Pressable
-      onPress={() => router.push({ pathname: '/account/[id]', params: { id: account.id } })}
-      onLongPress={onLongPress}
-      style={({ pressed }) => [styles.accountCardPressable, pressed && { opacity: 0.85 }]}
-    >
-    <Card
-      style={styles.accountCard}
-    >
-      {/* Row 1: name + type badge — compliance dot */}
-      <View style={styles.cardRow1}>
-        <View style={styles.cardRow1Left}>
-          <Text style={styles.accountName} numberOfLines={1}>{account.name}</Text>
-          <AccountTypeBadge type={account.accountType as any} size="sm" />
-        </View>
+    <View style={[styles.sleeveRow, !isFirst && styles.sleeveRowBorder]}>
+      <Pressable
+        style={styles.sleeveRowMain}
+        onPress={() => router.push({ pathname: '/account/[id]', params: { id: account.id } })}
+        onLongPress={onLongPress}
+      >
+        {/* Compliance indicator */}
         <Pressable
           onPress={(e) => {
             if ('stopPropagation' in e) (e as any).stopPropagation();
             setExpanded(v => !v);
           }}
           hitSlop={8}
-          style={styles.complianceDotBtn}
+          style={styles.dotBtn}
         >
           <View style={[styles.complianceDot, { backgroundColor: dotColor }]} />
         </Pressable>
-      </View>
 
-      {/* Row 2: total value — daily change */}
-      <View style={styles.cardRow2}>
-        <Text style={styles.navValue}>{formatCurrency(nav, 'compact')}</Text>
-        <View style={styles.dailyChange}>
-          <Text style={[styles.dailyChangeText, { color: isDayUp ? colors.positive : colors.negative }]}>
-            {isDayUp ? '+' : ''}{formatCurrency(Math.abs(dayChange))}
-          </Text>
-          <Text style={[styles.dailyChangePct, { color: isDayUp ? colors.positive : colors.negative }]}>
-            {isDayUp ? '+' : ''}{dayChangePct.toFixed(2)}%
-          </Text>
+        <View style={styles.sleeveRowLeft}>
+          <Text style={styles.sleeveName} numberOfLines={1}>{account.name}</Text>
+          <Text style={styles.sleeveMeta}>{positionCount} pos</Text>
         </View>
-      </View>
 
-      {/* Row 3: position count */}
-      <Text style={styles.positionCount}>
-        {positionCount} position{positionCount !== 1 ? 's' : ''}
-      </Text>
+        <View style={styles.sleeveRowRight}>
+          <Text style={styles.sleeveNav}>
+            ${nav.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+          </Text>
+          <Text style={[styles.sleeveDayPct, { color: dayColor }]}>
+            {dayChangePct >= 0 ? '+' : ''}{dayChangePct.toFixed(2)}%
+          </Text>
+          <Text style={styles.chevron}>›</Text>
+        </View>
+      </Pressable>
 
-      {/* Inline compliance expansion */}
-      {expanded && issues.length > 0 && (
+      {expanded && (
         <View style={styles.complianceExpanded}>
-          {issues.map((issue, i) => (
-            <View key={i} style={styles.complianceIssueRow}>
-              <View style={[styles.issueDot, { backgroundColor: issue.severity === 'red' ? colors.negative : '#F59E0B' }]} />
-              <Text style={styles.complianceIssueText}>{issue.label}</Text>
-            </View>
-          ))}
+          {issues.length === 0 ? (
+            <Text style={[styles.complianceText, { color: colors.positive }]}>
+              All thresholds met
+            </Text>
+          ) : (
+            issues.map((issue, i) => (
+              <View key={i} style={styles.issueRow}>
+                <View style={[styles.issueDot, { backgroundColor: issue.severity === 'red' ? colors.negative : colors.amber }]} />
+                <Text style={styles.complianceText}>{issue.label}</Text>
+              </View>
+            ))
+          )}
         </View>
       )}
-      {expanded && issues.length === 0 && (
-        <View style={styles.complianceExpanded}>
-          <Text style={styles.complianceCleanText}>No compliance issues — all thresholds met</Text>
-        </View>
-      )}
-    </Card>
-    </Pressable>
+    </View>
   );
 }
 
@@ -182,24 +162,18 @@ function AccountCard({
 export default function AccountsScreen() {
   const insets = useSafeAreaInsets();
   const { accounts, positions, summary, isLoading, refreshAll } = usePortfolio();
-  const topPad = Platform.OS === 'web' ? 67 : insets.top;
+  const topPad = Platform.OS === 'web' ? 20 : insets.top;
+
   const [showAdd, setShowAdd] = useState(false);
   const [menuAccount, setMenuAccount] = useState<{ id: number; name: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [form, setForm] = useState({
-    name: '',
-    broker: '',
-    accountType: 'long_term',
-    currency: 'USD',
-    initialBalance: '',
-    sleeveKey: '',
-    maxLeverageRatio: '',
+    name: '', broker: '', accountType: 'long_term', currency: 'USD',
+    initialBalance: '', sleeveKey: '', maxLeverageRatio: '',
   });
 
-  useEffect(() => {
-    refreshAll();
-  }, []);
+  useEffect(() => { refreshAll(); }, []);
 
   const canSubmit = !!(form.name.trim() && form.broker.trim());
 
@@ -243,7 +217,7 @@ export default function AccountsScreen() {
       setForm({ name: '', broker: '', accountType: 'long_term', currency: 'USD', initialBalance: '', sleeveKey: '', maxLeverageRatio: '' });
       Haptics.notificationAsync(Haptics.NotificationFeedbackType.Success);
       await refreshAll();
-    } catch (e) {
+    } catch {
       Alert.alert('Error', 'Failed to create account');
     } finally {
       setIsSubmitting(false);
@@ -267,92 +241,97 @@ export default function AccountsScreen() {
     }
   };
 
+  const bottomPad = Platform.OS === 'web' ? 100 : insets.bottom + 80;
+
   return (
-    <View style={[styles.container, { paddingTop: topPad }]}>
+    <View style={[styles.root, { paddingTop: topPad }]}>
       {/* Header */}
       <View style={styles.header}>
-        <Text style={styles.title}>Accounts</Text>
-        <View style={{ flexDirection: 'row', gap: 8, alignItems: 'center' }}>
+        <View>
+          <Text style={styles.eyebrow}>PORTFOLIO</Text>
+          <Text style={styles.title}>Sleeves</Text>
+        </View>
+        <View style={styles.headerActions}>
           {positions.length > 0 && (
-            <Pressable style={styles.exportBtn} onPress={exportAllCSV}>
-              <Feather name="download" size={15} color={colors.textSecondary} />
+            <Pressable style={styles.iconBtn} onPress={exportAllCSV}>
+              <Text style={styles.iconBtnText}>↓</Text>
             </Pressable>
           )}
           <Pressable
             style={styles.addBtn}
             onPress={() => { Haptics.selectionAsync(); setShowAdd(true); }}
           >
-            <Feather name="plus" size={20} color={colors.background} />
+            <Text style={styles.addBtnText}>+</Text>
           </Pressable>
         </View>
       </View>
 
       <ScrollView
         showsVerticalScrollIndicator={false}
-        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refreshAll} tintColor={colors.primary} />}
-        contentContainerStyle={[styles.scroll, {
-          paddingBottom: Platform.OS === 'web' ? 100 : (insets.bottom + 90)
-        }]}
+        refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refreshAll} tintColor={colors.ink3} />}
+        contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: bottomPad }}
       >
-        {isLoading && accounts.length === 0 ? (
-          [1, 2, 3].map(i => (
-            <View key={i} style={[styles.skeletonCard, { marginBottom: 12 }]}>
-              <Skeleton height={14} width="30%" />
-              <Skeleton height={20} width="50%" style={{ marginTop: 8 }} />
-              <Skeleton height={12} width="70%" style={{ marginTop: 8 }} />
-            </View>
-          ))
-        ) : accounts.length === 0 ? (
+        {accounts.length === 0 ? (
           <View style={styles.emptyState}>
-            <Feather name="briefcase" size={48} color={colors.textMuted} />
-            <Text style={styles.emptyTitle}>No accounts yet</Text>
+            <Text style={styles.emptyTitle}>No sleeves yet</Text>
             <Text style={styles.emptyText}>Add your trading or savings accounts to start tracking</Text>
           </View>
         ) : (
-          accounts.map(account => {
-            const accSummary = summary?.accounts.find(a => a.id === account.id);
-            const accountPositions = positions
-              .filter(p => p.accountId === account.id)
-              .map(p => ({ symbol: p.symbol, marketValue: p.marketValue }));
-            return (
-              <AccountCard
-                key={account.id}
-                account={account}
-                nav={accSummary?.nav ?? account.currentBalance}
-                dayChange={accSummary?.dayChange ?? 0}
-                dayChangePct={accSummary?.dayChangePct ?? 0}
-                positionCount={accountPositions.length}
-                accountPositions={accountPositions}
-                onLongPress={() => setMenuAccount({ id: account.id, name: account.name })}
-              />
-            );
-          })
+          <View style={styles.ledgerTable}>
+            {accounts.map((account, i) => {
+              const accSummary = summary?.accounts.find(a => a.id === account.id);
+              const accountPositions = positions
+                .filter(p => p.accountId === account.id)
+                .map(p => ({ symbol: p.symbol, marketValue: p.marketValue }));
+              return (
+                <SleeveRow
+                  key={account.id}
+                  account={account}
+                  nav={accSummary?.nav ?? account.currentBalance}
+                  dayChangePct={accSummary?.dayChangePct ?? 0}
+                  positionCount={accountPositions.length}
+                  accountPositions={accountPositions}
+                  isFirst={i === 0}
+                  onLongPress={() => setMenuAccount({ id: account.id, name: account.name })}
+                />
+              );
+            })}
+          </View>
         )}
+
+        {/* Import activity */}
+        <Pressable
+          style={styles.importRow}
+          onPress={() => router.push('/(tabs)/activity')}
+        >
+          <Text style={styles.importRowText}>Import activity</Text>
+          <Text style={styles.chevron}>›</Text>
+        </Pressable>
       </ScrollView>
 
       {/* Add Account Modal */}
       <Modal visible={showAdd} animationType="slide" presentationStyle="pageSheet">
         <View style={styles.modalOverlay}>
-          <View style={[styles.modalContainer, { paddingBottom: insets.bottom + 16 }]}>
+          <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>New Account</Text>
+            <Text style={styles.modalTitle}>New Sleeve</Text>
 
             <TextInput
               style={styles.input}
               placeholder="Account name"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.ink3}
               value={form.name}
               onChangeText={t => setForm(f => ({ ...f, name: t }))}
             />
             <TextInput
               style={styles.input}
               placeholder="Broker / Institution"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.ink3}
               value={form.broker}
               onChangeText={t => setForm(f => ({ ...f, broker: t }))}
             />
 
-            <Text style={styles.inputLabel}>Account Type</Text>
+            <Text style={styles.inputLabel}>Type</Text>
             <View style={styles.typeGrid}>
               {ACCOUNT_TYPES.map(t => (
                 <Pressable
@@ -370,7 +349,7 @@ export default function AccountsScreen() {
             <TextInput
               style={styles.input}
               placeholder="Initial balance (USD)"
-              placeholderTextColor={colors.textMuted}
+              placeholderTextColor={colors.ink3}
               keyboardType="decimal-pad"
               value={form.initialBalance}
               onChangeText={t => setForm(f => ({ ...f, initialBalance: t }))}
@@ -379,7 +358,7 @@ export default function AccountsScreen() {
               <TextInput
                 style={[styles.input, { flex: 1 }]}
                 placeholder="Sleeve key (A–H)"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={colors.ink3}
                 autoCapitalize="characters"
                 maxLength={1}
                 value={form.sleeveKey}
@@ -388,59 +367,69 @@ export default function AccountsScreen() {
               <TextInput
                 style={[styles.input, { flex: 1 }]}
                 placeholder="Max leverage (e.g. 1.5)"
-                placeholderTextColor={colors.textMuted}
+                placeholderTextColor={colors.ink3}
                 keyboardType="decimal-pad"
                 value={form.maxLeverageRatio}
                 onChangeText={t => setForm(f => ({ ...f, maxLeverageRatio: t }))}
               />
             </View>
 
-            <View style={styles.modalButtons}>
-              <Pressable style={styles.cancelModalBtn} onPress={() => setShowAdd(false)}>
+            <View style={styles.modalBtns}>
+              <Pressable style={styles.cancelBtn} onPress={() => setShowAdd(false)}>
                 <Text style={styles.cancelText}>Cancel</Text>
               </Pressable>
-              <Pressable style={[styles.saveBtn, (!canSubmit || isSubmitting) && { opacity: 0.4 }]} onPress={handleAdd} disabled={!canSubmit || isSubmitting}>
-                <Text style={styles.saveText}>{isSubmitting ? 'Adding…' : 'Add Account'}</Text>
+              <Pressable
+                style={[styles.saveBtn, (!canSubmit || isSubmitting) && { opacity: 0.4 }]}
+                onPress={handleAdd}
+                disabled={!canSubmit || isSubmitting}
+              >
+                <Text style={styles.saveBtnText}>{isSubmitting ? 'Adding…' : 'Add Sleeve'}</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Confirm delete modal */}
+      {/* Confirm delete */}
       <Modal visible={!!confirmDelete} animationType="fade" transparent>
         <View style={styles.menuOverlay}>
           <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
-            <View style={styles.menuHandle} />
-            <Text style={styles.menuTitle}>Delete Account</Text>
-            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary, marginBottom: 20 }}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Delete Sleeve</Text>
+            <Text style={styles.deleteText}>
               Delete "{confirmDelete?.name}" and all its positions and activities? This cannot be undone.
             </Text>
-            <View style={{ flexDirection: 'row', gap: 12 }}>
-              <Pressable style={[styles.confirmBtn, { flex: 1, backgroundColor: colors.surfaceElevated }]} onPress={() => setConfirmDelete(null)}>
-                <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary }}>Cancel</Text>
+            <View style={{ flexDirection: 'row', gap: 12, marginTop: 4 }}>
+              <Pressable style={[styles.confirmBtn, { borderWidth: 1, borderColor: colors.hair2 }]} onPress={() => setConfirmDelete(null)}>
+                <Text style={[styles.confirmBtnText, { color: colors.ink2 }]}>Cancel</Text>
               </Pressable>
-              <Pressable style={[styles.confirmBtn, { flex: 1, backgroundColor: colors.negative }]} onPress={doDelete}>
-                <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: '#fff' }}>Delete</Text>
+              <Pressable style={[styles.confirmBtn, { backgroundColor: colors.negative }]} onPress={doDelete}>
+                <Text style={[styles.confirmBtnText, { color: '#fff' }]}>Delete</Text>
               </Pressable>
             </View>
           </View>
         </View>
       </Modal>
 
-      {/* Account context menu */}
+      {/* Context menu */}
       <Modal visible={!!menuAccount} animationType="fade" transparent>
         <Pressable style={styles.menuOverlay} onPress={() => setMenuAccount(null)}>
           <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
-            <View style={styles.menuHandle} />
+            <View style={styles.modalHandle} />
             <Text style={styles.menuTitle}>{menuAccount?.name}</Text>
-            <Pressable style={styles.menuItem} onPress={() => { setMenuAccount(null); router.push({ pathname: '/account/[id]', params: { id: menuAccount!.id } }); }}>
-              <Feather name="eye" size={18} color={colors.textPrimary} />
+            <Pressable
+              style={styles.menuItem}
+              onPress={() => { setMenuAccount(null); router.push({ pathname: '/account/[id]', params: { id: menuAccount!.id } }); }}
+            >
               <Text style={styles.menuItemText}>View Details</Text>
+              <Text style={styles.menuItemChevron}>›</Text>
             </Pressable>
-            <Pressable style={[styles.menuItem, { borderTopWidth: 1, borderTopColor: colors.separator }]} onPress={() => { const a = menuAccount!; setMenuAccount(null); setConfirmDelete({ id: a.id, name: a.name }); }}>
-              <Feather name="trash-2" size={18} color={colors.negative} />
-              <Text style={[styles.menuItemText, { color: colors.negative }]}>Delete Account</Text>
+            <Pressable
+              style={[styles.menuItem, styles.menuItemBorder]}
+              onPress={() => { const a = menuAccount!; setMenuAccount(null); setConfirmDelete({ id: a.id, name: a.name }); }}
+            >
+              <Text style={[styles.menuItemText, { color: colors.negative }]}>Delete Sleeve</Text>
+              <Text style={[styles.menuItemChevron, { color: colors.negative }]}>›</Text>
             </Pressable>
           </View>
         </Pressable>
@@ -449,166 +438,154 @@ export default function AccountsScreen() {
   );
 }
 
+// ─── Styles ───────────────────────────────────────────────────────────────────
+
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  root: { flex: 1, backgroundColor: colors.bg },
+
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 20,
-    paddingBottom: 12,
-    paddingTop: 4,
-  },
-  title: { fontFamily: 'Inter_700Bold', fontSize: 26, color: colors.textPrimary },
-  exportBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    borderWidth: 1, borderColor: colors.separator,
-    alignItems: 'center', justifyContent: 'center',
-    backgroundColor: colors.surfaceElevated,
-  },
-  addBtn: {
-    width: 36, height: 36, borderRadius: 18,
-    backgroundColor: colors.primary,
-    alignItems: 'center', justifyContent: 'center',
-  },
-  scroll: { paddingHorizontal: 16 },
-  skeletonCard: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
-    padding: 16,
-    borderWidth: 1,
-    borderColor: colors.separator,
-  },
-  accountCardPressable: { marginBottom: 12 },
-  accountCard: { padding: 16 },
-  // Card rows
-  cardRow1: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  cardRow1Left: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    flex: 1,
-    flexWrap: 'wrap',
-  },
-  accountName: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 16,
-    color: colors.textPrimary,
-  },
-  complianceDotBtn: {
-    padding: 4,
-  },
-  complianceDot: {
-    width: 11,
-    height: 11,
-    borderRadius: 6,
-  },
-  cardRow2: {
-    flexDirection: 'row',
-    alignItems: 'baseline',
-    justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  navValue: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 22,
-    color: colors.textPrimary,
-  },
-  dailyChange: {
     alignItems: 'flex-end',
-    gap: 1,
+    paddingHorizontal: 22,
+    paddingTop: 18,
+    paddingBottom: 16,
   },
-  dailyChangeText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 14,
+  eyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 10,
+    letterSpacing: 2.2,
+    textTransform: 'uppercase',
+    color: colors.ink3,
   },
-  dailyChangePct: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 12,
+  title: {
+    fontFamily: fonts.serif,
+    fontSize: 26,
+    letterSpacing: -0.02 * 26,
+    color: colors.ink,
+    marginTop: 4,
   },
-  positionCount: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.textMuted,
+  headerActions: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  iconBtn: {
+    width: 34, height: 34,
+    borderRadius: 2,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  // Compliance expansion
-  complianceExpanded: {
-    marginTop: 12,
-    paddingTop: 12,
+  iconBtnText: { fontFamily: fonts.mono, fontSize: 16, color: colors.ink2 },
+  addBtn: {
+    width: 34, height: 34,
+    borderRadius: 2,
+    backgroundColor: colors.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  addBtnText: { fontSize: 20, color: colors.card, lineHeight: 22 },
+
+  // Ledger
+  ledgerTable: {
     borderTopWidth: 1,
-    borderTopColor: colors.separator,
-    gap: 8,
+    borderTopColor: colors.ink,
   },
-  complianceIssueRow: {
+  sleeveRow: {
+    paddingVertical: 2,
+  },
+  sleeveRowBorder: {
+    borderTopWidth: 1,
+    borderTopColor: colors.hair,
+  },
+  sleeveRowMain: {
     flexDirection: 'row',
-    alignItems: 'flex-start',
-    gap: 8,
+    alignItems: 'center',
+    paddingVertical: 12,
   },
-  issueDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-    marginTop: 5,
-    flexShrink: 0,
+  dotBtn: { marginRight: 10 },
+  complianceDot: { width: 8, height: 8, borderRadius: 4 },
+  sleeveRowLeft: { flex: 1 },
+  sleeveName: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.ink },
+  sleeveMeta: { fontFamily: fonts.mono, fontSize: 10, color: colors.ink3, marginTop: 2 },
+  sleeveRowRight: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  sleeveNav: { fontFamily: fonts.mono, fontSize: 13, fontVariant: ['tabular-nums'], color: colors.ink },
+  sleeveDayPct: { fontFamily: fonts.mono, fontSize: 12, fontVariant: ['tabular-nums'] },
+  chevron: { fontSize: 16, color: colors.ink3 },
+
+  complianceExpanded: {
+    marginLeft: 18,
+    marginBottom: 10,
+    gap: 6,
   },
-  complianceIssueText: {
+  issueRow: { flexDirection: 'row', alignItems: 'flex-start', gap: 8 },
+  issueDot: { width: 5, height: 5, borderRadius: 3, marginTop: 5, flexShrink: 0 },
+  complianceText: {
     flex: 1,
-    fontFamily: 'Inter_400Regular',
+    fontFamily: fonts.sans,
     fontSize: 12,
-    color: colors.textSecondary,
+    color: colors.ink2,
     lineHeight: 17,
   },
-  complianceCleanText: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 12,
-    color: colors.positive,
+
+  // Import row
+  importRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingVertical: 14,
+    borderTopWidth: 1,
+    borderTopColor: colors.hair,
+    marginTop: 4,
   },
-  // Empty state
-  emptyState: { alignItems: 'center', paddingTop: 80, gap: 12 },
-  emptyTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 18, color: colors.textSecondary },
-  emptyText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textMuted, textAlign: 'center', paddingHorizontal: 40 },
+  importRowText: {
+    fontFamily: fonts.sans,
+    fontSize: 13,
+    color: colors.accent,
+  },
+
+  // Empty
+  emptyState: { alignItems: 'center', paddingTop: 80, gap: 10 },
+  emptyTitle: { fontFamily: fonts.serif, fontSize: 20, color: colors.ink },
+  emptyText: { fontFamily: fonts.sans, fontSize: 13, color: colors.ink3, textAlign: 'center', paddingHorizontal: 40 },
+
   // Modals
-  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.6)' },
-  modalContainer: { backgroundColor: colors.surface, borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 20 },
-  modalHandle: { width: 36, height: 4, backgroundColor: colors.separator, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  modalTitle: { fontFamily: 'Inter_700Bold', fontSize: 20, color: colors.textPrimary, marginBottom: 16 },
+  modalOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(21,18,12,0.5)' },
+  modalSheet: { backgroundColor: colors.card, borderTopLeftRadius: 12, borderTopRightRadius: 12, padding: 20 },
+  modalHandle: { width: 36, height: 4, backgroundColor: colors.hair2, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
+  modalTitle: { fontFamily: fonts.serif, fontSize: 20, color: colors.ink, marginBottom: 16 },
   input: {
-    backgroundColor: colors.surfaceElevated,
-    borderRadius: 12,
+    backgroundColor: colors.bgInset,
+    borderRadius: 2,
     padding: 14,
-    color: colors.textPrimary,
-    fontFamily: 'Inter_400Regular',
+    color: colors.ink,
+    fontFamily: fonts.sans,
     fontSize: 15,
     marginBottom: 12,
     borderWidth: 1,
-    borderColor: colors.separator,
+    borderColor: colors.hair2,
   },
-  inputLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary, marginBottom: 8 },
+  inputLabel: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 2, textTransform: 'uppercase', color: colors.ink3, marginBottom: 8 },
   typeGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 16 },
   typeOption: {
-    paddingHorizontal: 14, paddingVertical: 8,
-    borderRadius: 20, borderWidth: 1,
-    borderColor: colors.separator,
-    backgroundColor: colors.surfaceElevated,
+    paddingHorizontal: 12, paddingVertical: 7,
+    borderRadius: 2, borderWidth: 1,
+    borderColor: colors.hair2,
   },
-  typeSelected: { borderColor: colors.primary, backgroundColor: 'rgba(0,212,255,0.1)' },
-  typeText: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textSecondary },
-  typeTextSelected: { color: colors.primary },
-  modalButtons: { flexDirection: 'row', gap: 12, marginTop: 8 },
-  cancelModalBtn: { flex: 1, padding: 16, borderRadius: 12, borderWidth: 1, borderColor: colors.separator, alignItems: 'center' },
-  cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary },
-  saveBtn: { flex: 2, padding: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center' },
-  saveText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.background },
-  menuOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(0,0,0,0.5)' },
-  menuSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
-  menuHandle: { width: 36, height: 4, backgroundColor: colors.separator, borderRadius: 2, alignSelf: 'center', marginBottom: 16 },
-  menuTitle: { fontFamily: 'Inter_700Bold', fontSize: 16, color: colors.textPrimary, marginBottom: 12 },
-  menuItem: { flexDirection: 'row', alignItems: 'center', gap: 12, paddingVertical: 14 },
-  menuItemText: { fontFamily: 'Inter_500Medium', fontSize: 16, color: colors.textPrimary },
-  confirmBtn: { padding: 14, borderRadius: 12, alignItems: 'center' },
+  typeSelected: { borderColor: colors.ink, backgroundColor: colors.bgInset },
+  typeText: { fontFamily: fonts.sans, fontSize: 13, color: colors.ink2 },
+  typeTextSelected: { color: colors.ink, fontFamily: fonts.sansMedium },
+  modalBtns: { flexDirection: 'row', gap: 12, marginTop: 8 },
+  cancelBtn: { flex: 1, padding: 14, borderRadius: 2, borderWidth: 1, borderColor: colors.hair2, alignItems: 'center' },
+  cancelText: { fontFamily: fonts.sansSemiBold, fontSize: 15, color: colors.ink2 },
+  saveBtn: { flex: 2, padding: 14, borderRadius: 2, backgroundColor: colors.ink, alignItems: 'center' },
+  saveBtnText: { fontFamily: fonts.sansSemiBold, fontSize: 15, color: colors.card },
+  deleteText: { fontFamily: fonts.sans, fontSize: 14, color: colors.ink2, marginBottom: 20, lineHeight: 20 },
+  confirmBtn: { flex: 1, padding: 14, borderRadius: 2, alignItems: 'center' },
+  confirmBtnText: { fontFamily: fonts.sansSemiBold, fontSize: 15 },
+  menuOverlay: { flex: 1, justifyContent: 'flex-end', backgroundColor: 'rgba(21,18,12,0.5)' },
+  menuSheet: { backgroundColor: colors.card, borderTopLeftRadius: 12, borderTopRightRadius: 12, padding: 20 },
+  menuTitle: { fontFamily: fonts.serif, fontSize: 17, color: colors.ink, marginBottom: 12 },
+  menuItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14 },
+  menuItemBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
+  menuItemText: { fontFamily: fonts.sansMedium, fontSize: 15, color: colors.ink },
+  menuItemChevron: { fontSize: 18, color: colors.ink3 },
 });

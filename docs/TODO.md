@@ -14,3 +14,4 @@
 - Opportunity pipeline
 - IBKR integration
 - Manual Wio/Expat workflows
+- Go over the constnts in the backend (tickers, order percentages, etc...)

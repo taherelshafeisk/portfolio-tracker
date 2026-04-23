@@ -18,7 +18,8 @@ interface Props {
 }
 
 export function ActionableNowSection({ actions, onPressItem }: Props) {
-  if (actions.length === 0) return null;
+  const filtered = actions.filter(a => a.type !== 'drawdown');
+  if (filtered.length === 0) return null;
 
   return (
     <View style={styles.container}>
@@ -27,7 +28,7 @@ export function ActionableNowSection({ actions, onPressItem }: Props) {
         <Text style={styles.headerText}>Actionable Now</Text>
       </View>
 
-      {actions.map(action => {
+      {filtered.map(action => {
         const barColor = action.severity === 'red' ? colors.negative : '#F59E0B';
         const typeLabel =
           action.type === 'concentration'

@@ -337,7 +337,15 @@ export default function AIScreen() {
         conv = await createConversation(content.slice(0, 40));
       }
 
-      if (!conv) throw new Error('No conversation');
+      if (!conv) {
+        setMessages(prev => [...prev, {
+          id: msgIdCounter.current++,
+          role: 'assistant' as const,
+          content: 'Error: Failed to create conversation',
+          createdAt: new Date().toISOString(),
+        }]);
+        return;
+      }
       const response = await fetch(`${BASE_URL}/api/anthropic/conversations/${conv.id}/messages`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -375,7 +383,9 @@ export default function AIScreen() {
                 setMessages(prev => [...prev, aiMsg]);
                 setStreamingContent('');
               }
-            } catch {}
+            } catch {
+              console.error('Failed to parse SSE event:', line.slice(0, 500));
+            }
           }
         }
       }

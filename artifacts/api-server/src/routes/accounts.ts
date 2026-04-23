@@ -110,13 +110,18 @@ router.get("/:id/positions", async (req, res) => {
 
     if (positions.length === 0) return res.json([]);
 
-    // Fetch live prices from Yahoo Finance
-    const symbols = positions.map(p => p.symbol);
-    const priceMap = await fetchLivePrices(symbols);
+    // Closed tombstones (qty=0) are returned for activity linking but get no live price fetch.
+    const activePositions = positions.filter(p => parseFloat(p.quantity) > 0);
+    const closedPositions = positions.filter(p => parseFloat(p.quantity) <= 0);
+
+    // Fetch live prices only for active positions
+    const priceMap = activePositions.length > 0
+      ? await fetchLivePrices(activePositions.map(p => p.symbol))
+      : {};
 
     // Persist updated prices to DB in the background
     await Promise.allSettled(
-      positions
+      activePositions
         .filter(p => priceMap[p.symbol] !== undefined)
         .map(p =>
           db.update(positionsTable)
@@ -125,16 +130,16 @@ router.get("/:id/positions", async (req, res) => {
         )
     );
 
-    const result = positions.map(p => {
+    const mapPosition = (p: typeof positions[number], live: boolean) => {
       const qty = parseFloat(p.quantity);
       const avg = parseFloat(p.avgCost);
-      const cur = priceMap[p.symbol]?.price ?? parseFloat(p.currentPrice);
+      const cur = live ? (priceMap[p.symbol]?.price ?? parseFloat(p.currentPrice)) : parseFloat(p.currentPrice);
       const marketValue = qty * cur;
       const unrealizedPnl = marketValue - qty * avg;
       const unrealizedPnlPct = qty * avg > 0 ? (unrealizedPnl / (qty * avg)) * 100 : 0;
-      const prevPrice = priceMap[p.symbol]?.previousClose ?? cur;
+      const prevPrice = live ? (priceMap[p.symbol]?.previousClose ?? cur) : cur;
       const dayChange = qty * (cur - prevPrice);
-      const dayChangePct = priceMap[p.symbol]?.changePercent ?? 0;
+      const dayChangePct = live ? (priceMap[p.symbol]?.changePercent ?? 0) : 0;
       return {
         id: p.id,
         accountId: p.accountId,
@@ -148,6 +153,7 @@ router.get("/:id/positions", async (req, res) => {
         unrealizedPnlPct,
         dayChange,
         dayChangePct,
+        closed: !live,
         assetType: p.assetType ?? undefined,
         sector: p.sector ?? undefined,
         notes: p.notes ?? undefined,
@@ -162,7 +168,12 @@ router.get("/:id/positions", async (req, res) => {
         createdAt: p.createdAt.toISOString(),
         updatedAt: p.updatedAt.toISOString(),
       };
-    });
+    };
+
+    const result = [
+      ...activePositions.map(p => mapPosition(p, true)),
+      ...closedPositions.map(p => mapPosition(p, false)),
+    ];
     res.json(result);
   } catch (error) {
     console.error(`[accounts GET /:id/positions] Error:`, error);

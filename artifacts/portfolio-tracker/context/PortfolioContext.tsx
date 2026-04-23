@@ -106,6 +106,7 @@ export interface Position {
   unrealizedPnlPct: number;
   dayChange: number;
   dayChangePct: number;
+  closed?: boolean;
   assetType?: string;
   sector?: string;
   notes?: string;

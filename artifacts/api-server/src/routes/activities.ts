@@ -148,9 +148,23 @@ async function reconcilePosition(
       });
     }
   } else {
-    await db
-      .delete(positionsTable)
-      .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.symbol, symbol)));
+    // Keep a closed tombstone (qty=0) so activity history links remain valid.
+    if (existing) {
+      await db
+        .update(positionsTable)
+        .set({ quantity: "0", updatedAt: new Date() })
+        .where(eq(positionsTable.id, existing.id));
+    } else {
+      // No row existed (e.g. SELL imported without a prior position row) — create a tombstone.
+      await db.insert(positionsTable).values({
+        accountId,
+        symbol,
+        name: symbol,
+        quantity: "0",
+        avgCost: avgCost.toFixed(4),
+        currentPrice: "0",
+      });
+    }
   }
 
   return { qty: currentQty, avgCost, symbol, accountId };
@@ -189,11 +203,11 @@ router.get("/", async (req, res) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
     const accountId = req.query.accountId ? parseInt(req.query.accountId as string) : undefined;
-    let query = db.select().from(activitiesTable).orderBy(desc(activitiesTable.tradeDate)).limit(limit);
+    let query = db.select().from(activitiesTable).orderBy(desc(activitiesTable.tradeDate), desc(activitiesTable.id)).limit(limit);
     if (accountId) {
       const activities = await db.select().from(activitiesTable)
         .where(eq(activitiesTable.accountId, accountId))
-        .orderBy(desc(activitiesTable.tradeDate))
+        .orderBy(desc(activitiesTable.tradeDate), desc(activitiesTable.id))
         .limit(limit);
       return res.json(activities.map(toResponse));
     }

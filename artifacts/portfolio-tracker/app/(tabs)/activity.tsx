@@ -172,6 +172,8 @@ export default function ActivityScreen() {
 
       if (!asset.base64) continue;
 
+      const abortCtrl = new AbortController();
+      const abortTimer = setTimeout(() => abortCtrl.abort(), 60_000);
       try {
         const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
           method: 'POST',
@@ -181,7 +183,9 @@ export default function ActivityScreen() {
             mediaType: asset.mimeType || 'image/jpeg',
             parseType: 'activities',
           }),
+          signal: abortCtrl.signal,
         });
+        clearTimeout(abortTimer);
         if (!resp.ok) {
           // Non-fatal: skip this file and continue with the batch
           console.warn(`[import] File ${i + 1} failed: HTTP ${resp.status}`);
@@ -222,8 +226,10 @@ export default function ActivityScreen() {
         });
 
         allNewTrades.push(...mapped);
-      } catch (err) {
-        console.warn(`[import] File ${i + 1} threw:`, err);
+      } catch (err: any) {
+        clearTimeout(abortTimer);
+        const label = err?.name === 'AbortError' ? 'timed out after 60s' : String(err);
+        console.warn(`[import] File ${i + 1} threw: ${label}`);
         // Non-fatal: continue with remaining files
       }
     }
@@ -544,7 +550,10 @@ export default function ActivityScreen() {
         </View>
       ) : (
         <FlatList
-          data={activities}
+          data={[...activities].sort((a, b) => {
+            const d = new Date(b.tradeDate).getTime() - new Date(a.tradeDate).getTime();
+            return d !== 0 ? d : b.id - a.id;
+          })}
           keyExtractor={item => item.id.toString()}
           renderItem={renderItem}
           refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refreshAll} tintColor={colors.primary} />}

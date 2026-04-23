@@ -111,7 +111,7 @@ export default function AccountDetailScreen() {
 
   const account = accounts.find(a => a.id === accountId);
   const positions = allPositions
-    .filter(p => p.accountId === accountId)
+    .filter(p => p.accountId === accountId && !p.closed)
     .sort((a, b) => b.marketValue - a.marketValue);
 
   // ─── Filter / Sort / Search ───────────────────────────────────────────────
@@ -157,6 +157,31 @@ export default function AccountDetailScreen() {
   const [isLoading, setIsLoading] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showAddPos, setShowAddPos] = useState(false);
+
+  // Cash adjustment
+  const [showCashEdit, setShowCashEdit] = useState(false);
+  const [cashInput, setCashInput] = useState('');
+  const [isCashSaving, setIsCashSaving] = useState(false);
+
+  const openCashEdit = () => {
+    setCashInput(cashBalance.toString());
+    setShowCashEdit(true);
+  };
+
+  const saveCash = async () => {
+    const val = parseFloat(cashInput);
+    if (isNaN(val)) { Alert.alert('Invalid', 'Enter a valid number.'); return; }
+    setIsCashSaving(true);
+    try {
+      await apiPut(`/accounts/${accountId}`, { currentBalance: val });
+      await refreshAll();
+      setShowCashEdit(false);
+    } catch {
+      Alert.alert('Error', 'Failed to update cash balance.');
+    } finally {
+      setIsCashSaving(false);
+    }
+  };
   const [form, setForm] = useState({ symbol: '', name: '', quantity: '', avgCost: '', assetType: '', sector: '', notes: '', positionBucket: '', ipsAction: '', stopPrice: '', addZoneLow: '', addZoneHigh: '', policyNote: '' });
 
   // 3-dot context menu
@@ -807,12 +832,15 @@ export default function AccountDetailScreen() {
                 </Text>
               </View>
             )}
-            <View style={styles.cashRow}>
+            <Pressable style={styles.cashRow} onPress={openCashEdit} hitSlop={8}>
               <Text style={styles.cashLabel}>Cash</Text>
-              <Text style={[styles.cashValue, cashBalance < 0 && { color: colors.negative }]}>
-                {formatCurrency(cashBalance)}
-              </Text>
-            </View>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.cashValue, cashBalance < 0 && { color: colors.negative }]}>
+                  {formatCurrency(cashBalance)}
+                </Text>
+                <Feather name="edit-2" size={11} color={colors.textMuted} />
+              </View>
+            </Pressable>
             {leverageRatio !== null && (
               <View style={[styles.cashRow, { borderTopWidth: 0, marginTop: 4 }]}>
                 <Text style={styles.cashLabel}>Leverage</Text>
@@ -1436,6 +1464,40 @@ export default function AccountDetailScreen() {
             )}
           </View>
         </Pressable>
+      </Modal>
+
+      {/* ── Cash Adjustment Modal ── */}
+      <Modal visible={showCashEdit} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { paddingBottom: insets.bottom + 16, borderRadius: 20 }]}>
+            <View style={styles.modalHandle} />
+            <Text style={styles.modalTitle}>Adjust Cash Balance</Text>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textSecondary, marginBottom: 16 }}>
+              Set the current cash balance for this sleeve.
+            </Text>
+            <TextInput
+              style={styles.input}
+              value={cashInput}
+              onChangeText={setCashInput}
+              keyboardType="decimal-pad"
+              placeholder="0.00"
+              placeholderTextColor={colors.textMuted}
+              autoFocus
+            />
+            <Pressable
+              style={[styles.saveBtn, { flex: 0, marginBottom: 8 }, isCashSaving && { opacity: 0.6 }]}
+              onPress={saveCash}
+              disabled={isCashSaving}
+            >
+              <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.background }}>
+                {isCashSaving ? 'Saving…' : 'Save'}
+              </Text>
+            </Pressable>
+            <Pressable style={styles.cancelBtn} onPress={() => setShowCashEdit(false)}>
+              <Text style={styles.cancelText}>Cancel</Text>
+            </Pressable>
+          </View>
+        </View>
       </Modal>
 
       {/* ── Duplicate Resolution Modal (rendered last so it appears on top) ── */}

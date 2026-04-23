@@ -231,28 +231,25 @@ export default function DailyReviewScreen() {
     staleTime: 60_000,
   });
 
-  // Split newToday into hard rules vs informational
+  // Merge newToday + stillOpen, deduplicate by id, exclude acted-on items
   const requiresAction = useMemo(() => {
     if (!data) return [];
     const actedIds = new Set(data.actedOn.alerts.map(a => a.id));
-    return data.newToday.filter(a => a.category === 'hard_rule' && !actedIds.has(a.id));
+    const seen = new Set<number>();
+    return [...data.newToday, ...data.stillOpen]
+      .filter(a => a.category === 'hard_rule' && !actedIds.has(a.id))
+      .filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; });
   }, [data]);
 
   const worthNoting = useMemo(() => {
     if (!data) return [];
     const actedIds = new Set(data.actedOn.alerts.map(a => a.id));
-    return data.newToday.filter(a => a.category !== 'hard_rule' && !actedIds.has(a.id));
+    const seen = new Set<number>();
+    return [...data.newToday, ...data.stillOpen]
+      .filter(a => a.category !== 'hard_rule' && !actedIds.has(a.id))
+      .filter(a => { if (seen.has(a.id)) return false; seen.add(a.id); return true; });
   }, [data]);
 
-  // Still open: split same way
-  const openHardRules = useMemo(
-    () => data?.stillOpen.filter(a => a.category === 'hard_rule') ?? [],
-    [data],
-  );
-  const openInfo = useMemo(
-    () => data?.stillOpen.filter(a => a.category !== 'hard_rule') ?? [],
-    [data],
-  );
 
   const totalActed = (data?.actedOn.alerts.length ?? 0) + (data?.actedOn.flags.length ?? 0);
   const dayPositive = (data?.nav.dayChange ?? 0) >= 0;
@@ -302,23 +299,22 @@ export default function DailyReviewScreen() {
           {/* ── Requires action ── */}
           <Section
             title="Requires action"
-            count={requiresAction.length + openHardRules.length}
-            accentColor={requiresAction.length + openHardRules.length > 0 ? colors.negative : colors.ink3}
+            count={requiresAction.length}
+            accentColor={requiresAction.length > 0 ? colors.negative : colors.ink3}
             empty="No rule violations today."
           >
             {requiresAction.map(a => <ActionRow key={a.id} item={a} />)}
-            {openHardRules.map(a => <ActionRow key={a.id} item={a} />)}
           </Section>
 
           {/* ── Worth noting ── */}
-          {(worthNoting.length + openInfo.length) > 0 && (
+          {worthNoting.length > 0 && (
             <Section
               title="Worth noting"
-              count={worthNoting.length + openInfo.length}
+              count={worthNoting.length}
               accentColor={colors.ink3}
               empty=""
             >
-              {[...worthNoting, ...openInfo].map(a => <InfoRow key={a.id} item={a} />)}
+              {worthNoting.map(a => <InfoRow key={a.id} item={a} />)}
             </Section>
           )}
 
@@ -350,8 +346,8 @@ export default function DailyReviewScreen() {
             <Text style={s.tomorrowLabel}>TOMORROW</Text>
             <Text style={s.tomorrowText}>
               {[
-                openHardRules.length > 0
-                  ? `${openHardRules.length} rule${openHardRules.length > 1 ? 's' : ''} still breached`
+                requiresAction.length > 0
+                  ? `${requiresAction.length} rule${requiresAction.length > 1 ? 's' : ''} still breached`
                   : null,
                 data.carryForward.length > 0
                   ? `${data.carryForward.length} open commitment${data.carryForward.length > 1 ? 's' : ''}`

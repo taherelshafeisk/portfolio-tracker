@@ -202,6 +202,41 @@ export function computeActions(
     });
   }
 
+  // 3. Drawdown per position — informational, below -10% from cost
+  for (const account of accounts) {
+    const nav = sleeveNavMap.get(account.id) ?? 0;
+    const acctPositions = positions.filter(p => p.accountId === account.id);
+
+    for (const p of acctPositions) {
+      if (p.unrealizedPnlPct >= DRAWDOWN_THRESHOLD_AMBER * 100) continue;
+
+      const drawdownPct = p.unrealizedPnlPct; // already in percent (e.g. -14.2)
+      const severity: Action['severity'] = drawdownPct < -20 ? 'red' : 'amber';
+      // breachDepth = how far past -10% threshold, normalised
+      const breachDepth = Math.abs(drawdownPct / 10) - 1;
+      const unrealizedDollar = p.marketValue - p.avgCost * p.quantity;
+      const dollarScope = Math.abs(unrealizedDollar);
+
+      const explanation = drawdownPct < -20
+        ? `${p.symbol} is down ${Math.abs(drawdownPct).toFixed(1)}% from cost (${fmtCurrency(unrealizedDollar)}). Past your typical review threshold — is the original thesis still intact?`
+        : `${p.symbol} is down ${Math.abs(drawdownPct).toFixed(1)}% from cost (${fmtCurrency(unrealizedDollar)}).`;
+
+      actions.push({
+        id: `draw-${p.id}`,
+        type: 'drawdown',
+        category: 'informational',
+        severity,
+        accountId: account.id,
+        symbol: p.symbol,
+        positionId: p.id,
+        label: `${p.symbol} is down ${Math.abs(drawdownPct).toFixed(1)}% from cost`,
+        explanation,
+        priorityScore: computePriorityScore('informational', breachDepth, dollarScope, nav, totalNav),
+        fingerprints: [`drawdown:${p.id}`],
+      });
+    }
+  }
+
   // Sort: category first (hard_rule → commitment → threshold → informational),
   // then priorityScore descending within each category.
   const categoryOrder: Record<ActionCategory, number> = {

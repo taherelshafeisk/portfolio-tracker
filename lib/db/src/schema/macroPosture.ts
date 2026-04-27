@@ -10,6 +10,7 @@ export const macroPostureTable = pgTable("macro_posture", {
   isActive: boolean("is_active").default(true).notNull(),
   setAt: timestamp("set_at", { withTimezone: true }).defaultNow().notNull(),
   supersededAt: timestamp("superseded_at", { withTimezone: true }),
+  userId: text("user_id").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
 });
 

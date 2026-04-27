@@ -12,6 +12,7 @@ export const activitiesTable = pgTable("activities", {
   totalAmount: numeric("total_amount", { precision: 20, scale: 4 }),
   notes: text("notes"),
   tradeDate: timestamp("trade_date").notNull(),
+  userId: text("user_id").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
 });
 

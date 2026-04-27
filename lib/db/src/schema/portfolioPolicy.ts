@@ -18,6 +18,7 @@ export const portfolioPolicyTable = pgTable("portfolio_policy", {
   macroPosture:        text("macro_posture"),                                          // freeform narrative
   ipsVersion:          text("ips_version"),                                            // e.g. 'v4.8'
   ipsDate:             date("ips_date"),                                               // e.g. 2026-03-26
+  userId:              text("user_id").notNull(),
   updatedAt:           timestamp("updated_at").notNull().defaultNow(),
 });
 

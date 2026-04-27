@@ -15,6 +15,7 @@ export const positionFlagsTable = pgTable("position_flags", {
   resolutionNote:              text("resolution_note"),
   appGeneratedReasonSnapshot:  text("app_generated_reason_snapshot"),
   userConfirmed:               boolean("user_confirmed").notNull().default(false),
+  userId:                      text("user_id").notNull(),
 });
 
 export const insertPositionFlagSchema = createInsertSchema(positionFlagsTable).omit({

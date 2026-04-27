@@ -22,6 +22,7 @@ export const orderSuggestionsTable = pgTable("order_suggestions", {
   status:         text("status").notNull().default("pending"), // 'pending' | 'dismissed' | 'executed'
   generatedAt:    timestamp("generated_at").notNull().defaultNow(),
   expiresAt:      timestamp("expires_at"),
+  userId:         text("user_id").notNull(),
   createdAt:      timestamp("created_at").notNull().defaultNow(),
   updatedAt:      timestamp("updated_at").notNull().defaultNow(),
 });

@@ -9,6 +9,7 @@ export const priceAlertsTable = pgTable("price_alerts", {
   direction: text("direction").notNull(), // 'above' | 'below'
   note: text("note"),
   status: text("status").notNull().default("active"), // 'active' | 'triggered' | 'dismissed'
+  userId: text("user_id").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   triggeredAt: timestamp("triggered_at"),
 });

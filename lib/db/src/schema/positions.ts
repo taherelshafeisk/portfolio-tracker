@@ -13,6 +13,7 @@ export const positionsTable = pgTable("positions", {
   assetType: text("asset_type"),
   sector: text("sector"),
   notes: text("notes"),
+  notesUpdatedAt: timestamp("notes_updated_at"),
   // IPS / policy fields (all nullable — additive, no breaking change)
   positionBucket: text("position_bucket"),   // 'core'|'swing'|'spec'|'def'|'anchor'|'inc'|'cut'
   ipsAction: text("ips_action"),             // 'hold'|'add'|'trim'|'monitor'|'cut'|'exit'
@@ -26,6 +27,7 @@ export const positionsTable = pgTable("positions", {
   exitReason: text("exit_reason"),   // 'IPS_RULE'|'STOP_LOSS'|'ALERT_TRIGGERED'|'MANUAL'|'CUT_LIST'
   secondaryBucket: text("secondary_bucket"),
   splitRatio: numeric("split_ratio", { precision: 4, scale: 3 }),
+  userId: text("user_id").notNull(),
   createdAt: timestamp("created_at").notNull().defaultNow(),
   updatedAt: timestamp("updated_at").notNull().defaultNow(),
 }, (t) => [

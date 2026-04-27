@@ -1,4 +1,4 @@
-import { pgTable, serial, integer, numeric, timestamp, date, uniqueIndex } from "drizzle-orm/pg-core";
+import { pgTable, serial, integer, numeric, timestamp, date, uniqueIndex, text } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -15,6 +15,7 @@ export const portfolioSnapshotsTable = pgTable("portfolio_snapshots", {
   dayChangePct: numeric("day_change_pct", { precision: 10, scale: 6 }).notNull().default("0"),
   aedUsdRate: numeric("aed_usd_rate", { precision: 10, scale: 6 }).notNull().default("1"),
   positionCount: integer("position_count").notNull().default(0),
+  userId: text("user_id").notNull(),
 }, (t) => [
   // One row per account (or null rollup) per day
   uniqueIndex("portfolio_snapshots_date_account_idx").on(t.snapshotDate, t.accountId),

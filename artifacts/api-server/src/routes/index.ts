@@ -15,6 +15,7 @@ import snapshotsRouter from "./snapshots";
 import macroPostureRouter from "./macroPosture";
 import screenerRouter from "./screener";
 import flagsRouter from "./flags";
+import priceAlertsRouter from "./priceAlerts";
 
 const router: IRouter = Router();
 
@@ -34,5 +35,6 @@ router.use("/snapshots", snapshotsRouter);
 router.use("/macro-posture", macroPostureRouter);
 router.use("/screener", screenerRouter);
 router.use("/flags", flagsRouter);
+router.use("/price-alerts", priceAlertsRouter);
 
 export default router;

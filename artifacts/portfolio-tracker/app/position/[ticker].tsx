@@ -6,7 +6,7 @@ import {
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
-import { useQueryClient, useQuery } from '@tanstack/react-query';
+import { useQueryClient, useQuery, useMutation } from '@tanstack/react-query';
 import { LinearGradient } from 'expo-linear-gradient';
 import Svg, {
   Path, Line, Rect, Defs,
@@ -15,7 +15,7 @@ import Svg, {
   Text as SvgText,
 } from 'react-native-svg';
 import { colors } from '@/constants/colors';
-import { usePortfolio, apiPut, apiGet } from '@/context/PortfolioContext';
+import { usePortfolio, apiPut, apiGet, apiPost, apiDelete, apiPatch } from '@/context/PortfolioContext';
 import { useAIContext } from '@/hooks/useAIContext';
 import { Card } from '@/components/ui/Card';
 import { formatCurrency } from '@/components/ui/PnlBadge';
@@ -128,6 +128,9 @@ export default function PositionDetailScreen() {
   const [editingTarget, setEditingTarget] = useState(false);
   const [stopInputVal, setStopInputVal] = useState('');
   const [targetInputVal, setTargetInputVal] = useState('');
+  const [alertPrice, setAlertPrice] = useState('');
+  const [alertDirection, setAlertDirection] = useState<'above' | 'below'>('above');
+  const [alertNote, setAlertNote] = useState('');
 
   const position = useMemo(
     () => positions.find(p => p.symbol === ticker && p.accountId === accountId),
@@ -170,6 +173,31 @@ export default function PositionDetailScreen() {
       refetchHistory();
     }, [refetchHistory]),
   );
+
+  // ─── Price alerts ─────────────────────────────────────────────────────────
+
+  interface PriceAlert { id: number; symbol: string; triggerPrice: string; direction: string; note: string | null; status: string; triggeredAt: string | null }
+
+  const { data: priceAlerts = [], refetch: refetchAlerts } = useQuery<PriceAlert[]>({
+    queryKey: ['price-alerts', ticker],
+    queryFn: () => apiGet<PriceAlert[]>(`/price-alerts?symbol=${ticker}`),
+    enabled: !!ticker,
+  });
+
+  const { mutate: createAlert } = useMutation({
+    mutationFn: (body: object) => apiPost('/price-alerts', body),
+    onSuccess: () => { refetchAlerts(); setAlertPrice(''); setAlertNote(''); },
+  });
+
+  const { mutate: deleteAlert } = useMutation({
+    mutationFn: (id: number) => apiDelete(`/price-alerts/${id}`),
+    onSuccess: () => refetchAlerts(),
+  });
+
+  const { mutate: dismissAlert } = useMutation({
+    mutationFn: (id: number) => apiPatch(`/price-alerts/${id}`, { status: 'dismissed' }),
+    onSuccess: () => refetchAlerts(),
+  });
 
   // ─── Derived ──────────────────────────────────────────────────────────────
 
@@ -799,6 +827,83 @@ export default function PositionDetailScreen() {
         )}
       </Card>
 
+      {/* Price Alerts */}
+      <Card>
+        <Text style={styles.cardLabel}>Price Alerts</Text>
+
+        {/* Existing alerts */}
+        {priceAlerts.filter(a => a.status !== 'dismissed').map(a => {
+          const triggered = a.status === 'triggered';
+          const dir = a.direction === 'above' ? '↑' : '↓';
+          return (
+            <View key={a.id} style={styles.alertRow}>
+              <View style={[styles.alertDot, { backgroundColor: triggered ? colors.positive : colors.textMuted }]} />
+              <View style={{ flex: 1 }}>
+                <Text style={styles.alertRowLabel}>
+                  {dir} {formatCurrency(parseFloat(a.triggerPrice))}
+                  {a.note ? <Text style={styles.alertRowNote}> · {a.note}</Text> : null}
+                </Text>
+                {triggered && <Text style={styles.alertTriggered}>Triggered</Text>}
+              </View>
+              <Pressable hitSlop={8} onPress={() => triggered ? dismissAlert(a.id) : deleteAlert(a.id)}>
+                <Feather name={triggered ? 'check' : 'x'} size={13} color={colors.textMuted} />
+              </Pressable>
+            </View>
+          );
+        })}
+
+        {/* Add alert form */}
+        <View style={styles.alertForm}>
+          <View style={styles.alertDirToggle}>
+            {(['above', 'below'] as const).map(d => (
+              <Pressable
+                key={d}
+                style={[styles.alertDirBtn, alertDirection === d && styles.alertDirBtnActive]}
+                onPress={() => setAlertDirection(d)}
+              >
+                <Text style={[styles.alertDirText, alertDirection === d && styles.alertDirTextActive]}>
+                  {d === 'above' ? '↑ Above' : '↓ Below'}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+          <View style={styles.alertInputRow}>
+            <TextInput
+              style={styles.alertPriceInput}
+              value={alertPrice}
+              onChangeText={setAlertPrice}
+              placeholder={`$${currentPrice.toFixed(2)}`}
+              placeholderTextColor={colors.textMuted}
+              keyboardType="decimal-pad"
+            />
+            <TextInput
+              style={[styles.alertPriceInput, { flex: 1 }]}
+              value={alertNote}
+              onChangeText={setAlertNote}
+              placeholder="Note (optional)"
+              placeholderTextColor={colors.textMuted}
+            />
+            <Pressable
+              style={styles.alertAddBtn}
+              onPress={() => {
+                const price = parseFloat(alertPrice);
+                if (!price || isNaN(price)) return;
+                createAlert({
+                  symbol: ticker,
+                  positionId: position?.id,
+                  accountId: position?.accountId,
+                  triggerPrice: price,
+                  direction: alertDirection,
+                  note: alertNote.trim() || undefined,
+                });
+              }}
+            >
+              <Feather name="plus" size={14} color={colors.textPrimary} />
+            </Pressable>
+          </View>
+        </View>
+      </Card>
+
       {/* Catalysts */}
       <Card>
         <Text style={styles.cardLabel}>Catalysts</Text>
@@ -1143,6 +1248,22 @@ const styles = StyleSheet.create({
   levelSetBtn: { backgroundColor: colors.primary + '15', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 6 },
   levelSetBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 11, color: colors.primary },
   levelBasisText: { fontFamily: 'Inter_400Regular', fontSize: 10, color: colors.textMuted, paddingLeft: 18, paddingBottom: 4 },
+
+  // Price alerts
+  alertRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.separator },
+  alertDot: { width: 7, height: 7, borderRadius: 4 },
+  alertRowLabel: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textPrimary },
+  alertRowNote: { fontFamily: 'Inter_400Regular', color: colors.textSecondary },
+  alertTriggered: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.positive, marginTop: 1 },
+  alertForm: { paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.separator, gap: 8 },
+  alertDirToggle: { flexDirection: 'row', gap: 6 },
+  alertDirBtn: { paddingHorizontal: 12, paddingVertical: 5, borderRadius: 8, backgroundColor: colors.surface, borderWidth: 1, borderColor: colors.separator },
+  alertDirBtnActive: { backgroundColor: colors.primary + '20', borderColor: colors.primary + '80' },
+  alertDirText: { fontFamily: 'Inter_500Medium', fontSize: 12, color: colors.textSecondary },
+  alertDirTextActive: { color: colors.primary },
+  alertInputRow: { flexDirection: 'row', gap: 8, alignItems: 'center' },
+  alertPriceInput: { width: 90, fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textPrimary, borderBottomWidth: 1, borderBottomColor: colors.separator, paddingVertical: 4 },
+  alertAddBtn: { width: 32, height: 32, borderRadius: 8, backgroundColor: colors.surfaceElevated, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: colors.separator },
 
   // Catalysts
   catalystRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingVertical: 8, borderTopWidth: 1, borderTopColor: colors.separator },

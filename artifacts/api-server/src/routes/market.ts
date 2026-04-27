@@ -195,114 +195,133 @@ router.get("/indices", async (_req, res) => {
   }
 });
 
+function sma(closes: number[], period: number): number | null {
+  if (closes.length < period) return null;
+  const slice = closes.slice(closes.length - period);
+  return slice.reduce((s, v) => s + v, 0) / period;
+}
+
+// 7-criterion Minervini Trend Template
+function minerviniCriteria(closes: number[], price: number, high52w: number, low52w: number) {
+  const sma50 = sma(closes, 50);
+  const sma150 = sma(closes, 150);
+  const sma200 = sma(closes, 200);
+  // 200 SMA 20 bars ago (approx 1 month)
+  const sma200_20ago = closes.length >= 220 ? sma(closes.slice(0, closes.length - 20), 200) : null;
+
+  const criteria = [
+    {
+      label: "Price > 200 SMA",
+      pass: sma200 != null && price > sma200,
+    },
+    {
+      label: "200 SMA trending up (1 month)",
+      pass: sma200 != null && sma200_20ago != null && sma200 > sma200_20ago,
+    },
+    {
+      label: "150 SMA > 200 SMA",
+      pass: sma150 != null && sma200 != null && sma150 > sma200,
+    },
+    {
+      label: "50 SMA > 150 SMA",
+      pass: sma50 != null && sma150 != null && sma50 > sma150,
+    },
+    {
+      label: "Price > 50 SMA",
+      pass: sma50 != null && price > sma50,
+    },
+    {
+      label: "Within 25% of 52W high",
+      pass: high52w > 0 && price >= high52w * 0.75,
+    },
+    {
+      label: "30%+ above 52W low",
+      pass: low52w > 0 && price >= low52w * 1.30,
+    },
+  ];
+
+  const score = criteria.filter(c => c.pass).length;
+  return { criteria, score, sma50, sma150, sma200 };
+}
+
 router.get("/screener", async (req, res) => {
   try {
     const minPrice = req.query.minPrice ? parseFloat(req.query.minPrice as string) : 5;
-    const maxPrice = req.query.maxPrice ? parseFloat(req.query.maxPrice as string) : 500;
-    // Fetch popular stocks for swing screening
-    const screenSymbols = [
+    const maxPrice = req.query.maxPrice ? parseFloat(req.query.maxPrice as string) : 2000;
+    const extraSymbols = req.query.symbols
+      ? (req.query.symbols as string).split(",").map(s => s.trim().toUpperCase()).filter(Boolean)
+      : [];
+
+    const baseUniverse = [
       "AAPL","MSFT","NVDA","AMZN","META","GOOGL","TSLA","AMD","NFLX","CRM",
-      "PLTR","SOFI","RIOT","MARA","COIN","SHOP","SNAP","PINS","RBLX","U",
-      "ARKK","SPY","QQQ","IWM","XLF","XLV","XLE","XLK","XLY","XLC"
+      "PLTR","SOFI","UPST","AFRM","RKLB","HIMS","APP","AXON","DDOG","CRWD",
+      "NET","MNDY","TTD","SNOW","ZS","BILL","DUOL","MELI","NU","SE",
+      "SMCI","ARM","HOOD","COIN","MSTR","RBLX","U","SHOP","GTLB","BASE",
     ];
-    // FIX 4: query all active positions upfront so we can flag alreadyOwned per result
+
     const allPositions = await db.select({ symbol: positionsTable.symbol, quantity: positionsTable.quantity })
       .from(positionsTable);
     const ownedSymbols = new Set(
-      allPositions
-        .filter(p => parseFloat(p.quantity) > 0)
-        .map(p => p.symbol.toUpperCase())
+      allPositions.filter(p => parseFloat(p.quantity) > 0).map(p => p.symbol.toUpperCase())
     );
+    const ownedList = [...ownedSymbols].filter(s => !CRYPTO_SYMBOLS.has(s));
+
+    const screenSymbols = [...new Set([...baseUniverse, ...ownedList, ...extraSymbols])];
 
     const results = await Promise.allSettled(
       screenSymbols.map(async (symbol) => {
-        // FIX 1: fetch 3 months so Wilder's EMA has enough bars to stabilise
-        const url = `${YAHOO_BASE}/v8/finance/chart/${symbol}?interval=1d&range=3mo`;
+        const url = `${YAHOO_BASE}/v8/finance/chart/${symbol}?interval=1d&range=1y`;
         const data = await fetchYahoo(url);
         const result = data?.chart?.result?.[0];
         if (!result) return null;
         const meta = result.meta;
         const price = meta.regularMarketPrice || 0;
         if (price < minPrice || price > maxPrice) return null;
+
         const previousClose = meta.previousClose || meta.chartPreviousClose || price;
-        const change = price - previousClose;
-        const changePercent = previousClose > 0 ? (change / previousClose) * 100 : 0;
+        const changePercent = previousClose > 0 ? ((price - previousClose) / previousClose) * 100 : 0;
         const volume = meta.regularMarketVolume || 0;
-        // Calculate relative volume
-        const closes: number[] = (result.indicators?.quote?.[0]?.close || []).filter(Boolean);
+
+        const rawCloses: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+        const closes = rawCloses.filter((c): c is number => typeof c === "number" && c > 0);
         const volumes: number[] = (result.indicators?.quote?.[0]?.volume || []).filter(Boolean);
+
         const avgVolume = volumes.length > 0 ? volumes.reduce((a: number, b: number) => a + b, 0) / volumes.length : 0;
         const relativeVolume = avgVolume > 0 ? volume / avgVolume : 1;
 
-        // FIX 1: Wilder's smoothed RSI(14) — seed on first 14 periods, then EMA
-        let rsi = 50;
-        if (closes.length >= 15) {
-          let avgGain = 0;
-          let avgLoss = 0;
-          // Seed: simple average of first 14 price changes
-          for (let i = 1; i <= 14; i++) {
-            const diff = closes[i] - closes[i - 1];
-            if (diff > 0) avgGain += diff;
-            else avgLoss += Math.abs(diff);
-          }
-          avgGain /= 14;
-          avgLoss /= 14;
-          // Smooth remaining periods with Wilder's EMA
-          for (let i = 15; i < closes.length; i++) {
-            const diff = closes[i] - closes[i - 1];
-            const gain = diff > 0 ? diff : 0;
-            const loss = diff < 0 ? Math.abs(diff) : 0;
-            avgGain = (avgGain * 13 + gain) / 14;
-            avgLoss = (avgLoss * 13 + loss) / 14;
-          }
-          const rs = avgLoss > 0 ? avgGain / avgLoss : 100;
-          rsi = 100 - (100 / (1 + rs));
-        }
+        const high52w = meta.fiftyTwoWeekHigh || Math.max(...closes);
+        const low52w = meta.fiftyTwoWeekLow || Math.min(...closes);
 
-        // FIX 3: RSI scoring — trending zone earns full points, pullback partial, extended/oversold zero
-        let rsiScore: number;
-        if (rsi >= 50 && rsi <= 70) rsiScore = 40;
-        else if (rsi >= 40 && rsi < 50) rsiScore = 25;
-        else if (rsi > 70 && rsi <= 80) rsiScore = 15;
-        else rsiScore = 0; // < 40 or > 80
-
-        // FIX 2: direction-aware price move scoring — breakouts rewarded, distribution penalised
-        let priceScore: number;
-        if (changePercent >= 1 && changePercent <= 5) priceScore = 30;
-        else if (changePercent > 5 && changePercent <= 10) priceScore = 20;
-        else if (changePercent < 0 && changePercent >= -3 && relativeVolume < 1.2) priceScore = 20;
-        else if (changePercent < -3 || (changePercent < 0 && relativeVolume > 1.5)) priceScore = 0;
-        else priceScore = 10;
-
-        const swingScore = Math.min(100,
-          (relativeVolume > 1.5 ? 30 : relativeVolume * 20) +
-          rsiScore +
-          priceScore
-        );
+        const { criteria, score, sma50, sma150, sma200 } = minerviniCriteria(closes, price, high52w, low52w);
 
         return {
-          symbol: meta.symbol,
+          symbol: meta.symbol || symbol,
           name: meta.shortName || meta.longName || symbol,
           price,
-          changePercent,
+          changePercent: Math.round(changePercent * 100) / 100,
           volume,
           avgVolume: Math.round(avgVolume),
           relativeVolume: Math.round(relativeVolume * 100) / 100,
-          marketCap: meta.marketCap || undefined,
-          rsi: Math.round(rsi * 10) / 10,
-          swingScore: Math.round(swingScore),
-          // FIX 4: flag symbols already held in any sleeve with qty > 0
+          high52w,
+          low52w,
+          sma50: sma50 ? Math.round(sma50 * 100) / 100 : null,
+          sma150: sma150 ? Math.round(sma150 * 100) / 100 : null,
+          sma200: sma200 ? Math.round(sma200 * 100) / 100 : null,
+          minerviniScore: score,
+          minerviniCriteria: criteria,
           alreadyOwned: ownedSymbols.has((meta.symbol || symbol).toUpperCase()),
         };
       })
     );
-    const stocks = results
-      .filter((r): r is PromiseFulfilledResult<NonNullable<typeof r extends PromiseFulfilledResult<infer T> ? T : never>> =>
-        r.status === "fulfilled" && r.value !== null)
+
+    const stocks = (results as any[])
+      .filter(r => r.status === "fulfilled" && r.value !== null)
       .map(r => r.value)
-      .sort((a, b) => (b?.swingScore || 0) - (a?.swingScore || 0));
+      .sort((a: any, b: any) => (b.minerviniScore ?? 0) - (a.minerviniScore ?? 0));
+
     res.json(stocks);
   } catch (error) {
+    console.error("[market/screener]", error);
     res.status(500).json({ error: "Failed to screen stocks" });
   }
 });

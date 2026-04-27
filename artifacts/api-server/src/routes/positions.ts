@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { positionsTable, activitiesTable, accountsTable } from "@workspace/db";
+import { checkPriceAlerts } from "./priceAlerts";
 import { eq, and, desc, asc, inArray, or } from "drizzle-orm";
 import { validate } from "../middlewares/validate";
 import { CreatePositionBody, UpdatePositionBody } from "@workspace/api-zod/schemas";
@@ -440,7 +441,12 @@ router.post("/refresh-prices", async (req, res) => {
             .where(eq(positionsTable.id, p.id))
         )
     );
-    res.json({ updated: updates.filter(r => r.status === "fulfilled").length });
+    const updatedCount = updates.filter(r => r.status === "fulfilled").length;
+
+    // Check price alerts against freshly fetched prices
+    const alertsTriggered = await checkPriceAlerts(priceMap).catch(() => 0);
+
+    res.json({ updated: updatedCount, alertsTriggered });
   } catch (error) {
     res.status(500).json({ error: "Failed to refresh prices" });
   }

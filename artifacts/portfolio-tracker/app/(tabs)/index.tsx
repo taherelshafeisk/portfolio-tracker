@@ -380,6 +380,20 @@ export default function HomeScreen() {
     onSuccess: () => refetchFlags(),
   });
 
+  // ── Triggered price alerts (today) ───────────────────────────────────────────
+
+  interface PriceAlert { id: number; symbol: string; triggerPrice: string; direction: string; note: string | null; status: string; triggeredAt: string | null }
+
+  const todayStart = useMemo(() => {
+    const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString();
+  }, []);
+
+  const { data: triggeredAlerts = [], refetch: refetchTriggered } = useQuery({
+    queryKey: ['price-alerts-triggered'],
+    queryFn: () => apiGet<PriceAlert[]>(`/price-alerts?status=triggered&since=${todayStart}`),
+    staleTime: 30_000,
+  });
+
   // ── Overdue / due-today flags ─────────────────────────────────────────────────
 
   const overdueAndToday = useMemo<EnrichedFlag[]>(() => {
@@ -705,6 +719,38 @@ export default function HomeScreen() {
                 }}
               />
             ))}
+          </View>
+        )}
+
+        {/* ── Triggered price alerts ── */}
+        {triggeredAlerts.length > 0 && (
+          <View style={styles.actionsSection}>
+            <View style={styles.actionsSectionHeader}>
+              <Text style={styles.ledgerTitle}>Price alerts triggered</Text>
+              <View style={[styles.actionCountBadge, { backgroundColor: `${colors.amber}20` }]}>
+                <Text style={[styles.actionCountText, { color: colors.amber }]}>{triggeredAlerts.length}</Text>
+              </View>
+            </View>
+            {triggeredAlerts.map(a => {
+              const dir = a.direction === 'above' ? '↑' : '↓';
+              return (
+                <View key={a.id} style={styles.triggeredAlertRow}>
+                  <View style={[styles.triggeredAlertBar, { backgroundColor: colors.amber }]} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.triggeredAlertLabel}>
+                      {a.symbol} hit {dir} ${parseFloat(a.triggerPrice).toFixed(2)}
+                    </Text>
+                    {a.note ? <Text style={styles.triggeredAlertNote}>{a.note}</Text> : null}
+                  </View>
+                  <Pressable
+                    hitSlop={8}
+                    onPress={() => apiPatch(`/price-alerts/${a.id}`, { status: 'dismissed' }).then(() => refetchTriggered())}
+                  >
+                    <Text style={styles.triggeredAlertDismiss}>Done</Text>
+                  </Pressable>
+                </View>
+              );
+            })}
           </View>
         )}
 
@@ -1048,6 +1094,20 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '600',
   },
+
+  // Triggered alert row
+  triggeredAlertRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingVertical: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.hair,
+  },
+  triggeredAlertBar: { width: 3, height: 28, borderRadius: 2 },
+  triggeredAlertLabel: { fontFamily: fonts.sansMedium, fontSize: 13, color: colors.ink },
+  triggeredAlertNote: { fontFamily: fonts.sans, fontSize: 11, color: colors.ink3, marginTop: 2 },
+  triggeredAlertDismiss: { fontFamily: fonts.sansMedium, fontSize: 12, color: colors.amber },
 
   // Action card
   actionCard: {

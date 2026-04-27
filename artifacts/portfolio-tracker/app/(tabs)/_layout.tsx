@@ -64,10 +64,16 @@ export default function TabLayout() {
           tabBarIcon: ({ focused }) => <TabIcon label="Coach" focused={focused} />,
         }}
       />
+      <Tabs.Screen
+        name="screener"
+        options={{
+          tabBarLabel: 'Screen',
+          tabBarIcon: ({ focused }) => <TabIcon label="Screen" focused={focused} />,
+        }}
+      />
       {/* Hidden from tab bar */}
       <Tabs.Screen name="activity" options={{ href: null }} />
       <Tabs.Screen name="feed" options={{ href: null }} />
-      <Tabs.Screen name="screener" options={{ href: null }} />
       <Tabs.Screen name="journal" options={{ href: null }} />
     </Tabs>
   );

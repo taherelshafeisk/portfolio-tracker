@@ -5,10 +5,16 @@
   "type": "module",
   "scripts": {
     "hello": "tsx ./src/hello.ts",
+    "migrate:user-id": "tsx --env-file ../artifacts/api-server/.env ./src/migrate-add-user-id.ts",
+    "seed:demo": "tsx --env-file ../artifacts/api-server/.env ./src/seed-demo.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
     "@types/node": "catalog:",
     "tsx": "catalog:"
+  },
+  "dependencies": {
+    "@types/pg": "^8.18.0",
+    "pg": "^8.20.0"
   }
 }

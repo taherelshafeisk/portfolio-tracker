@@ -6,10 +6,10 @@ import { getCachedPrices } from "./positions";
 
 const router: IRouter = Router();
 
-router.get("/summary", async (_req, res) => {
+router.get("/summary", async (req, res) => {
   try {
-    const accounts = await db.select().from(accountsTable);
-    const allPositions = await db.select().from(positionsTable);
+    const accounts = await db.select().from(accountsTable).where(eq(accountsTable.userId, req.userId));
+    const allPositions = await db.select().from(positionsTable).where(eq(positionsTable.userId, req.userId));
 
     let totalNav = 0;
     let totalCost = 0;
@@ -137,10 +137,10 @@ router.get("/summary", async (_req, res) => {
 });
 
 // GET /api/portfolio/pulse — per-position day contribution for the Pulse tab
-router.get("/pulse", async (_req, res) => {
+router.get("/pulse", async (req, res) => {
   try {
-    const accounts = await db.select().from(accountsTable);
-    const allPositions = await db.select().from(positionsTable);
+    const accounts = await db.select().from(accountsTable).where(eq(accountsTable.userId, req.userId));
+    const allPositions = await db.select().from(positionsTable).where(eq(positionsTable.userId, req.userId));
     const allSymbols = [...new Set(allPositions.map(p => p.symbol))];
     const priceMap = getCachedPrices(allSymbols);
 
@@ -190,14 +190,14 @@ router.get("/pulse", async (_req, res) => {
 });
 
 // GET /api/portfolio/daily-review — EOD review artifact
-router.get("/daily-review", async (_req, res) => {
+router.get("/daily-review", async (req, res) => {
   try {
     const startOfToday = new Date();
     startOfToday.setHours(0, 0, 0, 0);
 
     const [accounts, allPositions] = await Promise.all([
-      db.select().from(accountsTable),
-      db.select().from(positionsTable),
+      db.select().from(accountsTable).where(eq(accountsTable.userId, req.userId)),
+      db.select().from(positionsTable).where(eq(positionsTable.userId, req.userId)),
     ]);
 
     const accountMap = new Map(accounts.map(a => [a.id, a.name]));
@@ -228,28 +228,25 @@ router.get("/daily-review", async (_req, res) => {
 
     // New today: alerts first generated today (any status)
     const newTodayRaw = await db.select().from(alertsTable)
-      .where(gte(alertsTable.generatedAt, startOfToday));
+      .where(and(gte(alertsTable.generatedAt, startOfToday), eq(alertsTable.userId, req.userId)));
 
-    // Acted on today: alerts acknowledged or resolved today
     const actedOnAlertsRaw = await db.select().from(alertsTable)
-      .where(or(
-        gte(alertsTable.acknowledgedAt, startOfToday),
-        gte(alertsTable.resolvedAt, startOfToday),
+      .where(and(
+        eq(alertsTable.userId, req.userId),
+        or(gte(alertsTable.acknowledgedAt, startOfToday), gte(alertsTable.resolvedAt, startOfToday)),
       ));
 
-    // Flags resolved today
     const actedOnFlagsRaw = await db.select().from(positionFlagsTable)
-      .where(gte(positionFlagsTable.resolvedAt, startOfToday));
+      .where(and(gte(positionFlagsTable.resolvedAt, startOfToday), eq(positionFlagsTable.userId, req.userId)));
 
-    // Still open: ALL currently active alerts (not filtered by date — regeneration resets generatedAt)
     const stillOpenRaw = await db.select().from(alertsTable)
-      .where(eq(alertsTable.status, "active"));
+      .where(and(eq(alertsTable.status, "active"), eq(alertsTable.userId, req.userId)));
 
-    // Carry forward: open flags with a dueAt
     const carryForwardRaw = await db.select().from(positionFlagsTable)
       .where(and(
         isNull(positionFlagsTable.resolvedAt),
         isNotNull(positionFlagsTable.dueAt),
+        eq(positionFlagsTable.userId, req.userId),
       ));
 
     const HARD_RULE_TYPES = new Set(["concentration", "leverage"]);

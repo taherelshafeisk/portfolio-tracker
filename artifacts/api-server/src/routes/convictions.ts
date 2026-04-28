@@ -142,11 +142,12 @@ async function processWithClaude(convictionId: string): Promise<void> {
     const conviction = convictionRows[0];
     if (!conviction) return;
 
-    // Build portfolio context
+    // Build portfolio context scoped to the conviction's owner
+    const ownerUserId = conviction.userId ?? "";
     const [accounts, positions, policyRows] = await Promise.all([
-      db.select().from(accountsTable),
-      db.select().from(positionsTable),
-      db.select().from(portfolioPolicyTable).limit(1),
+      db.select().from(accountsTable).where(eq(accountsTable.userId, ownerUserId)),
+      db.select().from(positionsTable).where(eq(positionsTable.userId, ownerUserId)),
+      db.select().from(portfolioPolicyTable).where(eq(portfolioPolicyTable.userId, ownerUserId)).limit(1),
     ]);
 
     const policy = policyRows[0] ?? null;
@@ -410,6 +411,7 @@ router.post(
           themes: themes.length > 0 ? themes : null,
           fetchStatus: source_url ? "PENDING" : "SKIPPED",
           proposalStatus: "PROCESSING",
+          userId: req.userId,
         })
         .returning();
 
@@ -474,12 +476,13 @@ router.get("/", async (req: Request, res: Response) => {
       rows = await db
         .select()
         .from(convictionsTable)
-        .where(eq(convictionsTable.proposalStatus, proposal_status))
+        .where(and(eq(convictionsTable.proposalStatus, proposal_status), eq(convictionsTable.userId, req.userId)))
         .orderBy(desc(convictionsTable.createdAt));
     } else {
       rows = await db
         .select()
         .from(convictionsTable)
+        .where(eq(convictionsTable.userId, req.userId))
         .orderBy(desc(convictionsTable.createdAt));
     }
 
@@ -562,7 +565,7 @@ router.patch("/:id/approve", async (req: Request, res: Response) => {
     const [conviction] = await db
       .select()
       .from(convictionsTable)
-      .where(eq(convictionsTable.id, id as string));
+      .where(and(eq(convictionsTable.id, id as string), eq(convictionsTable.userId, req.userId)));
 
     if (!conviction) {
       res.status(404).json({ error: "Conviction not found" });
@@ -584,7 +587,7 @@ router.patch("/:id/approve", async (req: Request, res: Response) => {
       );
       if (actionable) {
         const side = actionable.suggested_action === "ADD" ? "buy" : "sell";
-        const accounts = await db.select().from(accountsTable).limit(1);
+        const accounts = await db.select().from(accountsTable).where(eq(accountsTable.userId, req.userId)).limit(1);
         if (accounts.length > 0) {
           const [suggestion] = await db
             .insert(orderSuggestionsTable)
@@ -596,6 +599,7 @@ router.patch("/:id/approve", async (req: Request, res: Response) => {
               urgency: proposal.confidence === "HIGH" ? "high" : proposal.confidence === "MEDIUM" ? "medium" : "low",
               rationale: actionable.rationale,
               trigger: `Conviction: ${conviction.sourceName || conviction.sourceType} — ${proposal.summary?.slice(0, 100) ?? ""}`,
+              userId: req.userId,
             })
             .returning();
           if (suggestion) actionId = suggestion.id;

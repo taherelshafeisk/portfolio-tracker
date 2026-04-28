@@ -5,8 +5,6 @@ import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 
-const POLICY_ID = 1;
-
 function toPolicyResponse(row: typeof portfolioPolicyTable.$inferSelect) {
   return {
     id: row.id,
@@ -21,19 +19,17 @@ function toPolicyResponse(row: typeof portfolioPolicyTable.$inferSelect) {
   };
 }
 
-/** GET /portfolio-policy — returns the policy row or {} if none exists yet */
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const [row] = await db.select().from(portfolioPolicyTable).where(eq(portfolioPolicyTable.id, POLICY_ID));
+    const [row] = await db.select().from(portfolioPolicyTable).where(eq(portfolioPolicyTable.userId, req.userId));
     if (!row) return res.json({});
-    res.json(toPolicyResponse(row));
+    return res.json(toPolicyResponse(row));
   } catch (error) {
     console.error("[portfolio-policy GET /] Error:", error);
-    res.status(500).json({ error: "Failed to fetch portfolio policy" });
+    return res.status(500).json({ error: "Failed to fetch portfolio policy" });
   }
 });
 
-/** PUT /portfolio-policy — upsert by id=1 */
 router.put("/", async (req, res) => {
   try {
     const {
@@ -41,7 +37,7 @@ router.put("/", async (req, res) => {
       monthlyContribution, macroPosture, ipsVersion, ipsDate,
     } = req.body as Record<string, unknown>;
 
-    const values: Record<string, unknown> = { updatedAt: new Date() };
+    const values: Record<string, unknown> = { updatedAt: new Date(), userId: req.userId };
     if (goldFloorPct !== undefined) values.goldFloorPct = goldFloorPct != null ? String(goldFloorPct) : null;
     if (goldTargetPct !== undefined) values.goldTargetPct = goldTargetPct != null ? String(goldTargetPct) : null;
     if (goldTargetDate !== undefined) values.goldTargetDate = goldTargetDate || null;
@@ -50,24 +46,18 @@ router.put("/", async (req, res) => {
     if (ipsVersion !== undefined) values.ipsVersion = ipsVersion || null;
     if (ipsDate !== undefined) values.ipsDate = ipsDate || null;
 
-    // Try update first; if nothing was updated, insert
     const updated = await db.update(portfolioPolicyTable)
       .set(values)
-      .where(eq(portfolioPolicyTable.id, POLICY_ID))
+      .where(eq(portfolioPolicyTable.userId, req.userId))
       .returning();
 
-    if (updated.length > 0) {
-      return res.json(toPolicyResponse(updated[0]));
-    }
+    if (updated.length > 0) return res.json(toPolicyResponse(updated[0]));
 
-    // First-time creation
-    const [created] = await db.insert(portfolioPolicyTable)
-      .values({ id: POLICY_ID as any, ...values })
-      .returning();
-    res.json(toPolicyResponse(created));
+    const [created] = await db.insert(portfolioPolicyTable).values(values as any).returning();
+    return res.json(toPolicyResponse(created));
   } catch (error) {
     console.error("[portfolio-policy PUT /] Error:", error);
-    res.status(500).json({ error: "Failed to update portfolio policy" });
+    return res.status(500).json({ error: "Failed to update portfolio policy" });
   }
 });
 

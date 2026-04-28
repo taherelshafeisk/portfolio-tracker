@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { positionsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 import { batchScreen, screenMinervini, clearCache } from "../lib/twelveData";
 
 const router: IRouter = Router();
@@ -27,7 +28,8 @@ router.get("/scan", async (req, res) => {
     } else {
       const positions = await db
         .select({ symbol: positionsTable.symbol })
-        .from(positionsTable);
+        .from(positionsTable)
+        .where(eq(positionsTable.userId, req.userId));
       const positionSymbols = positions.map((p) => p.symbol.toUpperCase());
       const combined = new Set([...DEFAULT_SYMBOLS, ...positionSymbols]);
       symbols = Array.from(combined);

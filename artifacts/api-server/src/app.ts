@@ -1,9 +1,10 @@
-import express, { type Express } from "express";
+import express, { type Express, type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import pinoHttp from "pino-http";
 import path from "path";
 import router from "./routes";
 import { logger } from "./lib/logger";
+import { requireAuth } from "./middlewares/auth";
 
 const app: Express = express();
 
@@ -31,6 +32,21 @@ app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 // Serve uploaded conviction attachments as static files
 app.use("/uploads", express.static(path.join(process.cwd(), "uploads")));
+
+// Paths (relative to /api) that do not require a JWT / demo token
+const PUBLIC_PATHS = new Set([
+  "/healthz",
+  "/auth/signup",
+  "/auth/signin",
+  "/auth/refresh",
+  "/auth/google",
+  "/auth/verify",
+]);
+
+app.use("/api", (req: Request, res: Response, next: NextFunction) => {
+  if (PUBLIC_PATHS.has(req.path)) return next();
+  return requireAuth(req, res, next);
+});
 
 app.use("/api", router);
 

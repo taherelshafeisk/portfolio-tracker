@@ -76,6 +76,7 @@ async function adjustCashForActivity(
 async function reconcilePosition(
   accountId: number,
   symbol: string,
+  userId: string,
 ): Promise<{ qty: number; avgCost: number; symbol: string; accountId: number }> {
   const activities = await db
     .select()
@@ -145,6 +146,7 @@ async function reconcilePosition(
         quantity: currentQty.toString(),
         avgCost: avgCost.toFixed(4),
         currentPrice: "0",
+        userId,
       });
     }
   } else {
@@ -163,6 +165,7 @@ async function reconcilePosition(
         quantity: "0",
         avgCost: avgCost.toFixed(4),
         currentPrice: "0",
+        userId,
       });
     }
   }
@@ -184,12 +187,18 @@ export async function reconcileAll(): Promise<{
     .from(activitiesTable)
     .where(isNotNull(activitiesTable.symbol));
 
+  // Build accountId → userId map for insert ownership
+  const allAccounts = await db.select({ id: accountsTable.id, userId: accountsTable.userId }).from(accountsTable);
+  const accountUserMap = Object.fromEntries(allAccounts.map(a => [a.id, a.userId]));
+
   let positionsUpdated = 0;
   let positionsDeleted = 0;
 
   for (const { accountId, symbol } of pairs) {
     if (!symbol) continue;
-    const result = await reconcilePosition(accountId, symbol);
+    const userId = accountUserMap[accountId];
+    if (!userId) continue;
+    const result = await reconcilePosition(accountId, symbol, userId);
     if (result.qty > 0) positionsUpdated++;
     else positionsDeleted++;
   }
@@ -203,15 +212,13 @@ router.get("/", async (req, res) => {
   try {
     const limit = req.query.limit ? parseInt(req.query.limit as string) : 50;
     const accountId = req.query.accountId ? parseInt(req.query.accountId as string) : undefined;
-    let query = db.select().from(activitiesTable).orderBy(desc(activitiesTable.tradeDate), desc(activitiesTable.id)).limit(limit);
-    if (accountId) {
-      const activities = await db.select().from(activitiesTable)
-        .where(eq(activitiesTable.accountId, accountId))
-        .orderBy(desc(activitiesTable.tradeDate), desc(activitiesTable.id))
-        .limit(limit);
-      return res.json(activities.map(toResponse));
-    }
-    const activities = await query;
+    const whereClause = accountId
+      ? and(eq(activitiesTable.accountId, accountId), eq(activitiesTable.userId, req.userId))
+      : eq(activitiesTable.userId, req.userId);
+    const activities = await db.select().from(activitiesTable)
+      .where(whereClause)
+      .orderBy(desc(activitiesTable.tradeDate), desc(activitiesTable.id))
+      .limit(limit);
     return res.json(activities.map(toResponse));
   } catch (error) {
     console.error("[activities GET /] Error:", error);
@@ -232,13 +239,14 @@ router.post("/", validate(CreateActivityBodyHttp), async (req, res) => {
       totalAmount: totalAmount ? totalAmount.toString() : (quantity && price ? (quantity * price).toString() : null),
       notes: notes || null,
       tradeDate: new Date(tradeDate),
+      userId: req.userId,
     }).onConflictDoNothing().returning();
 
     // Duplicate — silently return 200 with no body
     if (!activity) return res.status(200).json({ skipped: true });
 
     if (upperSymbol) {
-      await reconcilePosition(accountId, upperSymbol);
+      await reconcilePosition(accountId, upperSymbol, req.userId);
     }
 
     await adjustCashForActivity(
@@ -355,11 +363,11 @@ router.delete("/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     const [deleted] = await db
       .delete(activitiesTable)
-      .where(eq(activitiesTable.id, id))
+      .where(and(eq(activitiesTable.id, id), eq(activitiesTable.userId, req.userId)))
       .returning();
 
     if (deleted?.symbol && deleted?.accountId) {
-      await reconcilePosition(deleted.accountId, deleted.symbol);
+      await reconcilePosition(deleted.accountId, deleted.symbol, req.userId);
     }
 
     if (deleted?.accountId) {

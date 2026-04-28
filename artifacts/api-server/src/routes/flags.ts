@@ -20,29 +20,16 @@ const resolveFlagSchema = z.object({
   resolutionNote: z.string().optional(),
 });
 
-// GET /flags — list flags, optional filters: ?resolved=false|true, ?accountId=N, ?positionId=N
 router.get("/", async (req, res) => {
   try {
     const { resolved, accountId, positionId } = req.query;
+    const conditions = [eq(positionFlagsTable.userId, req.userId)];
+    if (accountId) conditions.push(eq(positionFlagsTable.accountId, Number(accountId)));
+    if (positionId) conditions.push(eq(positionFlagsTable.positionId, Number(positionId)));
+    if (resolved === "false") conditions.push(isNull(positionFlagsTable.resolvedAt));
+    else if (resolved === "true") conditions.push(isNotNull(positionFlagsTable.resolvedAt));
 
-    const conditions: ReturnType<typeof eq>[] = [];
-
-    if (accountId) {
-      conditions.push(eq(positionFlagsTable.accountId, Number(accountId)));
-    }
-    if (positionId) {
-      conditions.push(eq(positionFlagsTable.positionId, Number(positionId)));
-    }
-    if (resolved === "false") {
-      conditions.push(isNull(positionFlagsTable.resolvedAt));
-    } else if (resolved === "true") {
-      conditions.push(isNotNull(positionFlagsTable.resolvedAt));
-    }
-
-    const flags = conditions.length > 0
-      ? await db.select().from(positionFlagsTable).where(and(...conditions))
-      : await db.select().from(positionFlagsTable);
-
+    const flags = await db.select().from(positionFlagsTable).where(and(...conditions));
     res.json(flags);
   } catch (err) {
     console.error("[flags GET /]", err);
@@ -50,14 +37,10 @@ router.get("/", async (req, res) => {
   }
 });
 
-// POST /flags — create a new flag
 router.post("/", async (req, res) => {
   try {
     const parsed = createFlagSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
-      return;
-    }
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     const data = parsed.data;
     const [flag] = await db.insert(positionFlagsTable).values({
       positionId: data.positionId ?? null,
@@ -67,6 +50,7 @@ router.post("/", async (req, res) => {
       dueAt: data.dueAt ? new Date(data.dueAt) : null,
       appGeneratedReasonSnapshot: data.appGeneratedReasonSnapshot ?? null,
       userConfirmed: data.userConfirmed,
+      userId: req.userId,
     }).returning();
     res.status(201).json(flag);
   } catch (err) {
@@ -75,29 +59,17 @@ router.post("/", async (req, res) => {
   }
 });
 
-// PATCH /flags/:id/resolve — resolve a flag
 router.patch("/:id/resolve", async (req, res) => {
   try {
     const id = Number(req.params.id);
     const parsed = resolveFlagSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: parsed.error.message });
-      return;
-    }
+    if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     const { resolutionType, resolutionNote } = parsed.data;
-    const [updated] = await db
-      .update(positionFlagsTable)
-      .set({
-        resolvedAt: new Date(),
-        resolutionType,
-        resolutionNote: resolutionNote ?? null,
-      })
-      .where(eq(positionFlagsTable.id, id))
+    const [updated] = await db.update(positionFlagsTable)
+      .set({ resolvedAt: new Date(), resolutionType, resolutionNote: resolutionNote ?? null })
+      .where(and(eq(positionFlagsTable.id, id), eq(positionFlagsTable.userId, req.userId)))
       .returning();
-    if (!updated) {
-      res.status(404).json({ error: "Flag not found" });
-      return;
-    }
+    if (!updated) { res.status(404).json({ error: "Flag not found" }); return; }
     res.json(updated);
   } catch (err) {
     console.error("[flags PATCH /:id/resolve]", err);
@@ -105,11 +77,11 @@ router.patch("/:id/resolve", async (req, res) => {
   }
 });
 
-// DELETE /flags/:id — hard delete (for dismissals without resolve)
 router.delete("/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
-    await db.delete(positionFlagsTable).where(eq(positionFlagsTable.id, id));
+    await db.delete(positionFlagsTable)
+      .where(and(eq(positionFlagsTable.id, id), eq(positionFlagsTable.userId, req.userId)));
     res.status(204).send();
   } catch (err) {
     console.error("[flags DELETE /:id]", err);

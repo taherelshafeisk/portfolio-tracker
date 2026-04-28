@@ -41,8 +41,8 @@ router.post("/generate", validate(GenerateOrderSuggestionsBody), async (req, res
     const { accountId } = req.body as { accountId?: number | null };
 
     const [allAccounts, allPositions] = await Promise.all([
-      db.select().from(accountsTable),
-      db.select().from(positionsTable),
+      db.select().from(accountsTable).where(eq(accountsTable.userId, req.userId)),
+      db.select().from(positionsTable).where(eq(positionsTable.userId, req.userId)),
     ]);
 
     const engineAccounts = allAccounts.map(a => ({
@@ -96,6 +96,7 @@ router.post("/generate", validate(GenerateOrderSuggestionsBody), async (req, res
           status: "pending" as const,
           generatedAt: now,
           expiresAt,
+          userId: req.userId,
         })),
       )
       .returning();
@@ -114,14 +115,11 @@ router.get("/", async (req, res) => {
     const accountId = accountIdParam ? parseInt(accountIdParam as string, 10) : undefined;
 
     const rows = accountId
-      ? await db
-          .select()
-          .from(orderSuggestionsTable)
-          .where(eq(orderSuggestionsTable.accountId, accountId))
+      ? await db.select().from(orderSuggestionsTable)
+          .where(and(eq(orderSuggestionsTable.accountId, accountId), eq(orderSuggestionsTable.userId, req.userId)))
           .orderBy(orderSuggestionsTable.generatedAt)
-      : await db
-          .select()
-          .from(orderSuggestionsTable)
+      : await db.select().from(orderSuggestionsTable)
+          .where(eq(orderSuggestionsTable.userId, req.userId))
           .orderBy(orderSuggestionsTable.generatedAt);
 
     if (rows.length === 0) {
@@ -151,7 +149,7 @@ router.patch("/:id", validate(UpdateOrderSuggestionBody), async (req, res) => {
     const [updated] = await db
       .update(orderSuggestionsTable)
       .set({ status, updatedAt: new Date() })
-      .where(eq(orderSuggestionsTable.id, id))
+      .where(and(eq(orderSuggestionsTable.id, id), eq(orderSuggestionsTable.userId, req.userId)))
       .returning();
 
     if (!updated) {

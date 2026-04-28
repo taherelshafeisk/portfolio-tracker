@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { accountsTable, positionsTable, activitiesTable } from "@workspace/db";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { fetchLivePrices } from "./positions";
 import { validate } from "../middlewares/validate";
 import { CreateAccountBody, UpdateAccountBody } from "@workspace/api-zod/schemas";
@@ -27,11 +27,12 @@ function toAccountResponse(a: typeof accountsTable.$inferSelect) {
   };
 }
 
-router.get("/", async (_req, res) => {
+router.get("/", async (req, res) => {
   try {
-    const accounts = await db.select().from(accountsTable).orderBy(accountsTable.createdAt);
-    const result = accounts.map(toAccountResponse);
-    res.json(result);
+    const accounts = await db.select().from(accountsTable)
+      .where(eq(accountsTable.userId, req.userId))
+      .orderBy(accountsTable.createdAt);
+    res.json(accounts.map(toAccountResponse));
   } catch (error) {
     console.error("[accounts GET /] Error:", error);
     res.status(500).json({ error: "Failed to fetch accounts" });
@@ -48,6 +49,7 @@ router.post("/", validate(CreateAccountBody), async (req, res) => {
       currency: currency || "USD",
       initialBalance: initialBalance.toString(),
       currentBalance: initialBalance.toString(),
+      userId: req.userId,
     }).returning();
     res.status(201).json(toAccountResponse(account));
   } catch (error) {
@@ -58,17 +60,18 @@ router.post("/", validate(CreateAccountBody), async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [account] = await db.select().from(accountsTable).where(eq(accountsTable.id, id));
+    const [account] = await db.select().from(accountsTable)
+      .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, req.userId)));
     if (!account) return res.status(404).json({ error: "Account not found" });
-    res.json(toAccountResponse(account));
+    return res.json(toAccountResponse(account));
   } catch (error) {
-    res.status(500).json({ error: "Failed to fetch account" });
+    return res.status(500).json({ error: "Failed to fetch account" });
   }
 });
 
 router.put("/:id", validate(UpdateAccountBody), async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
     const { name, broker, accountType, currentBalance, sleeveKey, maxLeverageRatio, ipsVersion, concentrationLimit, leverageCeiling } = req.body;
     const updates: Record<string, unknown> = { updatedAt: new Date() };
     if (name !== undefined) updates.name = name;
@@ -80,46 +83,53 @@ router.put("/:id", validate(UpdateAccountBody), async (req, res) => {
     if (ipsVersion !== undefined) updates.ipsVersion = ipsVersion || null;
     if (concentrationLimit !== undefined) updates.concentrationLimit = concentrationLimit != null ? concentrationLimit.toString() : null;
     if (leverageCeiling !== undefined) updates.leverageCeiling = leverageCeiling != null ? leverageCeiling.toString() : null;
-    const [account] = await db.update(accountsTable).set(updates).where(eq(accountsTable.id, id)).returning();
+    const [account] = await db.update(accountsTable).set(updates)
+      .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, req.userId)))
+      .returning();
     if (!account) return res.status(404).json({ error: "Account not found" });
-    res.json(toAccountResponse(account));
+    return res.json(toAccountResponse(account));
   } catch (error) {
-    res.status(500).json({ error: "Failed to update account" });
+    return res.status(500).json({ error: "Failed to update account" });
   }
 });
 
 router.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    // Cascade: delete positions and activities before account
+    // Verify ownership before cascading deletes
+    const [account] = await db.select({ id: accountsTable.id }).from(accountsTable)
+      .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, req.userId)));
+    if (!account) return res.status(404).json({ error: "Account not found" });
     await db.delete(positionsTable).where(eq(positionsTable.accountId, id));
     await db.delete(activitiesTable).where(eq(activitiesTable.accountId, id));
     await db.delete(accountsTable).where(eq(accountsTable.id, id));
-    res.status(204).send();
+    return res.status(204).send();
   } catch (error) {
-    res.status(500).json({ error: "Failed to delete account" });
+    return res.status(500).json({ error: "Failed to delete account" });
   }
 });
 
 router.get("/:id/positions", async (req, res) => {
   try {
     const accountId = parseInt(req.params.id);
+    // Verify account ownership
+    const [account] = await db.select({ id: accountsTable.id }).from(accountsTable)
+      .where(and(eq(accountsTable.id, accountId), eq(accountsTable.userId, req.userId)));
+    if (!account) return res.status(404).json({ error: "Account not found" });
+
     const positions = await db.select().from(positionsTable)
       .where(eq(positionsTable.accountId, accountId))
       .orderBy(positionsTable.symbol);
 
     if (positions.length === 0) return res.json([]);
 
-    // Closed tombstones (qty=0) are returned for activity linking but get no live price fetch.
     const activePositions = positions.filter(p => parseFloat(p.quantity) > 0);
     const closedPositions = positions.filter(p => parseFloat(p.quantity) <= 0);
 
-    // Fetch live prices only for active positions
     const priceMap = activePositions.length > 0
       ? await fetchLivePrices(activePositions.map(p => p.symbol))
       : {};
 
-    // Persist updated prices to DB in the background
     await Promise.allSettled(
       activePositions
         .filter(p => priceMap[p.symbol] !== undefined)
@@ -170,14 +180,13 @@ router.get("/:id/positions", async (req, res) => {
       };
     };
 
-    const result = [
+    return res.json([
       ...activePositions.map(p => mapPosition(p, true)),
       ...closedPositions.map(p => mapPosition(p, false)),
-    ];
-    res.json(result);
+    ]);
   } catch (error) {
     console.error(`[accounts GET /:id/positions] Error:`, error);
-    res.status(500).json({ error: "Failed to fetch positions" });
+    return res.status(500).json({ error: "Failed to fetch positions" });
   }
 });
 

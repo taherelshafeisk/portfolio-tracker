@@ -148,6 +148,7 @@ function toPositionResponse(p: typeof positionsTable.$inferSelect, livePrice?: n
     assetType: p.assetType ?? undefined,
     sector: p.sector ?? undefined,
     notes: p.notes ?? undefined,
+    notesUpdatedAt: p.notesUpdatedAt ? p.notesUpdatedAt.toISOString() : null,
     positionBucket: p.positionBucket ?? null,
     ipsAction: p.ipsAction ?? null,
     stopPrice: p.stopPrice != null ? parseFloat(p.stopPrice) : null,
@@ -175,10 +176,12 @@ router.get("/history", async (req, res) => {
     const statusFilter = (req.query.status as string) || 'all';
     const today = new Date();
 
-    // Load accounts (for names)
+    // Load accounts (for names) — scoped to this user
     const accounts = accountIdFilter
-      ? await db.select().from(accountsTable).where(eq(accountsTable.id, accountIdFilter))
-      : await db.select().from(accountsTable);
+      ? await db.select().from(accountsTable)
+          .where(and(eq(accountsTable.id, accountIdFilter), eq(accountsTable.userId, req.userId)))
+      : await db.select().from(accountsTable)
+          .where(eq(accountsTable.userId, req.userId));
 
     const accountIds = accounts.map(a => a.id);
     if (accountIds.length === 0) return res.json([]);
@@ -268,15 +271,16 @@ router.get("/history/:ticker", async (req, res) => {
 
     const today = new Date();
 
-    // Find the position record
+    // Find the position record — verify account ownership
+    const [account] = await db.select().from(accountsTable)
+      .where(and(eq(accountsTable.id, accountId), eq(accountsTable.userId, req.userId)));
+    if (!account) return res.status(404).json({ error: "Position not found" });
+
     const [position] = await db
       .select()
       .from(positionsTable)
       .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.symbol, ticker)));
     if (!position) return res.status(404).json({ error: "Position not found" });
-
-    // Load account info
-    const [account] = await db.select().from(accountsTable).where(eq(accountsTable.id, accountId));
 
     // Load all activities for this ticker+account
     const activities = await db
@@ -343,6 +347,7 @@ router.post("/", validate(CreatePositionBody), async (req, res) => {
       assetType: assetType || null,
       sector: sector || null,
       notes: notes || null,
+      notesUpdatedAt: notes ? new Date() : null,
       positionBucket: positionBucket || null,
       ipsAction: ipsAction || null,
       stopPrice: stopPrice != null ? stopPrice.toString() : null,
@@ -351,6 +356,7 @@ router.post("/", validate(CreatePositionBody), async (req, res) => {
       cutListAddedAt: cutListAddedAt ? new Date(cutListAddedAt) : null,
       policyNote: policyNote || null,
       ipsVersion: ipsVersion || null,
+      userId: req.userId,
     };
 
     // Check-then-update/insert so this works before the unique constraint is
@@ -380,7 +386,7 @@ router.post("/", validate(CreatePositionBody), async (req, res) => {
 
 router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
   try {
-    const id = parseInt(req.params.id);
+    const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
     const { quantity, avgCost, currentPrice, assetType, notes,
             positionBucket, ipsAction, stopPrice, targetPrice, addZoneLow, addZoneHigh,
             cutListAddedAt, policyNote, ipsVersion, exitReason } = req.body;
@@ -389,7 +395,7 @@ router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
     if (avgCost !== undefined) updates.avgCost = avgCost.toString();
     if (currentPrice !== undefined) updates.currentPrice = currentPrice.toString();
     if (assetType !== undefined) updates.assetType = assetType || null;
-    if (notes !== undefined) updates.notes = notes;
+    if (notes !== undefined) { updates.notes = notes; updates.notesUpdatedAt = new Date(); }
     if (positionBucket !== undefined) updates.positionBucket = positionBucket || null;
     if (ipsAction !== undefined) updates.ipsAction = ipsAction || null;
     if (stopPrice !== undefined) updates.stopPrice = stopPrice != null ? stopPrice.toString() : null;
@@ -400,7 +406,9 @@ router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
     if (policyNote !== undefined) updates.policyNote = policyNote || null;
     if (ipsVersion !== undefined) updates.ipsVersion = ipsVersion || null;
     if (exitReason !== undefined) updates.exitReason = exitReason || null;
-    const [position] = await db.update(positionsTable).set(updates).where(eq(positionsTable.id, id)).returning();
+    const [position] = await db.update(positionsTable).set(updates)
+      .where(and(eq(positionsTable.id, id), eq(positionsTable.userId, req.userId)))
+      .returning();
     if (!position) return res.status(404).json({ error: "Position not found" });
     res.json(toPositionResponse(position));
   } catch (error) {
@@ -411,7 +419,8 @@ router.put("/:id", validate(UpdatePositionBody), async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    await db.delete(positionsTable).where(eq(positionsTable.id, id));
+    await db.delete(positionsTable)
+      .where(and(eq(positionsTable.id, id), eq(positionsTable.userId, req.userId)));
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: "Failed to delete position" });
@@ -423,9 +432,10 @@ router.post("/refresh-prices", async (req, res) => {
     const { accountId } = req.body as { accountId?: number };
     let positions;
     if (accountId) {
-      positions = await db.select().from(positionsTable).where(eq(positionsTable.accountId, accountId));
+      positions = await db.select().from(positionsTable)
+        .where(and(eq(positionsTable.accountId, accountId), eq(positionsTable.userId, req.userId)));
     } else {
-      positions = await db.select().from(positionsTable);
+      positions = await db.select().from(positionsTable).where(eq(positionsTable.userId, req.userId));
     }
     if (positions.length === 0) return res.json({ updated: 0 });
 
@@ -456,7 +466,8 @@ router.post("/refresh-prices", async (req, res) => {
 router.get("/:id/history", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [position] = await db.select().from(positionsTable).where(eq(positionsTable.id, id));
+    const [position] = await db.select().from(positionsTable)
+      .where(and(eq(positionsTable.id, id), eq(positionsTable.userId, req.userId)));
     if (!position) return res.status(404).json({ error: "Position not found" });
 
     const activities = await db
@@ -466,6 +477,7 @@ router.get("/:id/history", async (req, res) => {
         and(
           eq(activitiesTable.accountId, position.accountId),
           eq(activitiesTable.symbol, position.symbol),
+          eq(activitiesTable.userId, req.userId),
         )
       )
       .orderBy(desc(activitiesTable.tradeDate));

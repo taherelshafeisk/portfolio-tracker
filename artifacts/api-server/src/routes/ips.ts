@@ -63,11 +63,12 @@ function proposalToResponse(
 
 // ── GET /ips/proposals ────────────────────────────────────────────────────────
 
-router.get("/proposals", async (_req, res) => {
+router.get("/proposals", async (req, res) => {
   try {
     const proposals = await db
       .select()
       .from(policyProposalsTable)
+      .where(eq(policyProposalsTable.userId, req.userId))
       .orderBy(desc(policyProposalsTable.createdAt));
 
     const allItems = await db.select().from(policyProposalItemsTable);
@@ -87,12 +88,12 @@ router.get("/proposals", async (_req, res) => {
 
 // ── GET /ips/proposals/pending-items ─────────────────────────────────────────
 
-router.get("/proposals/pending-items", async (_req, res) => {
+router.get("/proposals/pending-items", async (req, res) => {
   try {
     const builderProposal = await db
       .select()
       .from(policyProposalsTable)
-      .where(eq(policyProposalsTable.sourceFilename, "__ips_builder__"))
+      .where(and(eq(policyProposalsTable.sourceFilename, "__ips_builder__"), eq(policyProposalsTable.userId, req.userId)))
       .limit(1)
       .then(rows => rows[0]);
 
@@ -129,7 +130,7 @@ router.get("/proposals/:id", async (req, res) => {
     const [proposal] = await db
       .select()
       .from(policyProposalsTable)
-      .where(eq(policyProposalsTable.id, id));
+      .where(and(eq(policyProposalsTable.id, id), eq(policyProposalsTable.userId, req.userId)));
     if (!proposal) return res.status(404).json({ error: "Proposal not found" });
 
     const items = await db
@@ -162,6 +163,13 @@ router.put("/proposals/:id/items/:itemId", async (req, res) => {
       .from(policyProposalItemsTable)
       .where(eq(policyProposalItemsTable.id, itemId));
     if (!item) return res.status(404).json({ error: "Item not found" });
+
+    // Verify the parent proposal belongs to this user
+    const [ownerCheck] = await db
+      .select()
+      .from(policyProposalsTable)
+      .where(and(eq(policyProposalsTable.id, item.proposalId), eq(policyProposalsTable.userId, req.userId)));
+    if (!ownerCheck) return res.status(403).json({ error: "Forbidden" });
 
     let updatedItem: typeof policyProposalItemsTable.$inferSelect;
 
@@ -211,11 +219,11 @@ router.put("/proposals/:id/items/:itemId", async (req, res) => {
         if (proposal?.ipsVersion)
           posUpdates.ipsVersion = proposal.ipsVersion;
 
-        // Write to all positions for this symbol (IPS policy is symbol-wide)
+        // Write to all positions for this symbol belonging to the user (IPS policy is symbol-wide)
         await tx
           .update(positionsTable)
           .set(posUpdates)
-          .where(eq(positionsTable.symbol, item.entityKey));
+          .where(and(eq(positionsTable.symbol, item.entityKey), eq(positionsTable.userId, req.userId)));
 
         // Update the proposal item
         const itemUpdates: Record<string, unknown> = {
@@ -348,20 +356,21 @@ router.post("/builder/next", async (req, res) => {
   try {
     const { userMessage } = req.body as { userMessage?: string };
 
-    // Fetch or create single session (no auth yet)
-    let [session] = await db.select().from(ipsBuilderSessionsTable).limit(1);
+    let [session] = await db.select().from(ipsBuilderSessionsTable)
+      .where(eq(ipsBuilderSessionsTable.userId, req.userId))
+      .limit(1);
     if (!session) {
-      [session] = await db
-        .insert(ipsBuilderSessionsTable)
-        .values({})
+      [session] = await db.insert(ipsBuilderSessionsTable)
+        .values({ userId: req.userId })
         .returning();
     }
 
-    // Fetch accounts, positions, and active macro posture
     const [accounts, positions, macroPostureRows] = await Promise.all([
-      db.select().from(accountsTable),
-      db.select().from(positionsTable),
-      db.select().from(macroPostureTable).where(eq(macroPostureTable.isActive, true)).limit(1),
+      db.select().from(accountsTable).where(eq(accountsTable.userId, req.userId)),
+      db.select().from(positionsTable).where(eq(positionsTable.userId, req.userId)),
+      db.select().from(macroPostureTable)
+        .where(and(eq(macroPostureTable.isActive, true), eq(macroPostureTable.userId, req.userId)))
+        .limit(1),
     ]);
     const macroPosture = macroPostureRows[0] ?? null;
 
@@ -486,14 +495,14 @@ router.post("/builder/next", async (req, res) => {
       let builderProposal = await db
         .select()
         .from(policyProposalsTable)
-        .where(eq(policyProposalsTable.sourceFilename, "__ips_builder__"))
+        .where(and(eq(policyProposalsTable.sourceFilename, "__ips_builder__"), eq(policyProposalsTable.userId, req.userId)))
         .limit(1)
         .then(rows => rows[0]);
 
       if (!builderProposal) {
         [builderProposal] = await db
           .insert(policyProposalsTable)
-          .values({ sourceFilename: "__ips_builder__", status: "pending" })
+          .values({ sourceFilename: "__ips_builder__", status: "pending", userId: req.userId })
           .returning();
       }
 
@@ -587,10 +596,13 @@ router.post("/builder/next", async (req, res) => {
 
 // ── GET /ips/builder/session ──────────────────────────────────────────────────
 
-router.get("/builder/session", async (_req, res) => {
+router.get("/builder/session", async (req, res) => {
   try {
-    const [session] = await db.select().from(ipsBuilderSessionsTable).limit(1);
-    const allPositions = await db.select().from(positionsTable);
+    const [session] = await db.select().from(ipsBuilderSessionsTable)
+      .where(eq(ipsBuilderSessionsTable.userId, req.userId))
+      .limit(1);
+    const allPositions = await db.select().from(positionsTable)
+      .where(eq(positionsTable.userId, req.userId));
     const distinctSymbols = [...new Set(allPositions.map(p => p.symbol))];
     const totalSymbols = distinctSymbols.length;
 

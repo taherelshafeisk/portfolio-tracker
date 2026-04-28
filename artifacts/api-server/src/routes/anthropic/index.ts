@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db, conversations as conversationsTable, messages as messagesTable } from "@workspace/db";
 import { accountsTable, positionsTable, alertsTable, portfolioPolicyTable } from "@workspace/db";
-import { eq, asc, inArray } from "drizzle-orm";
+import { eq, and, asc, inArray } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
 import { fetchLivePrices } from "../positions";
 import { resolveTickerFromName, derivePriceFromAmount, inferTradeCurrency } from "./trade-utils";
@@ -11,13 +11,15 @@ const router: IRouter = Router();
 const DEFAULT_CONC_LIMIT = 0.20;
 const DEFAULT_LEV_CEILING = 1.50;
 
-async function buildPortfolioContext(): Promise<string> {
+async function buildPortfolioContext(userId: string): Promise<string> {
   try {
     const [accounts, allPositions, activeAlerts, policyRows] = await Promise.all([
-      db.select().from(accountsTable),
-      db.select().from(positionsTable),
-      db.select().from(alertsTable).where(inArray(alertsTable.status, ["active", "acknowledged"])),
-      db.select().from(portfolioPolicyTable).limit(1),
+      db.select().from(accountsTable).where(eq(accountsTable.userId, userId)),
+      db.select().from(positionsTable).where(eq(positionsTable.userId, userId)),
+      db.select().from(alertsTable).where(
+        inArray(alertsTable.status, ["active", "acknowledged"])
+      ).then(rows => rows.filter(r => r.userId === userId)),
+      db.select().from(portfolioPolicyTable).where(eq(portfolioPolicyTable.userId, userId)).limit(1),
     ]);
 
     if (accounts.length === 0) return "The user has not added any accounts or positions yet.";
@@ -167,10 +169,12 @@ const toMessage = (m: typeof messagesTable.$inferSelect) => ({
   createdAt: m.createdAt.toISOString(),
 });
 
-router.get("/conversations", async (_req, res) => {
+router.get("/conversations", async (req, res) => {
   try {
-    const conversations = await db.select().from(conversationsTable).orderBy(conversationsTable.createdAt);
-    res.json(conversations.map(toConversation));
+    const convos = await db.select().from(conversationsTable)
+      .where(eq(conversationsTable.userId, req.userId))
+      .orderBy(conversationsTable.createdAt);
+    res.json(convos.map(toConversation));
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch conversations" });
   }
@@ -179,7 +183,9 @@ router.get("/conversations", async (_req, res) => {
 router.post("/conversations", async (req, res) => {
   try {
     const { title } = req.body;
-    const [conversation] = await db.insert(conversationsTable).values({ title }).returning();
+    const [conversation] = await db.insert(conversationsTable)
+      .values({ title, userId: req.userId })
+      .returning();
     res.status(201).json(toConversation(conversation));
   } catch (error) {
     res.status(500).json({ error: "Failed to create conversation" });
@@ -189,7 +195,8 @@ router.post("/conversations", async (req, res) => {
 router.get("/conversations/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [conversation] = await db.select().from(conversationsTable).where(eq(conversationsTable.id, id));
+    const [conversation] = await db.select().from(conversationsTable)
+      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.userId, req.userId)));
     if (!conversation) return res.status(404).json({ error: "Conversation not found" });
     const messages = await db.select().from(messagesTable)
       .where(eq(messagesTable.conversationId, id))
@@ -203,6 +210,9 @@ router.get("/conversations/:id", async (req, res) => {
 router.delete("/conversations/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    const [conv] = await db.select({ id: conversationsTable.id }).from(conversationsTable)
+      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.userId, req.userId)));
+    if (!conv) return res.status(404).json({ error: "Conversation not found" });
     await db.delete(messagesTable).where(eq(messagesTable.conversationId, id));
     await db.delete(conversationsTable).where(eq(conversationsTable.id, id));
     res.status(204).send();
@@ -246,7 +256,7 @@ router.post("/conversations/:id/messages", async (req, res) => {
     res.setHeader("Cache-Control", "no-cache");
     res.setHeader("Connection", "keep-alive");
 
-    const portfolioContext = await buildPortfolioContext();
+    const portfolioContext = await buildPortfolioContext(req.userId);
 
     let fullResponse = "";
 

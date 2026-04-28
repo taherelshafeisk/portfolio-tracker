@@ -1,6 +1,7 @@
 import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { positionsTable } from "@workspace/db";
+import { eq } from "drizzle-orm";
 
 const router: IRouter = Router();
 
@@ -260,7 +261,8 @@ router.get("/screener", async (req, res) => {
     ];
 
     const allPositions = await db.select({ symbol: positionsTable.symbol, quantity: positionsTable.quantity })
-      .from(positionsTable);
+      .from(positionsTable)
+      .where(eq(positionsTable.userId, req.userId));
     const ownedSymbols = new Set(
       allPositions.filter(p => parseFloat(p.quantity) > 0).map(p => p.symbol.toUpperCase())
     );

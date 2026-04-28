@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useMemo, ReactNode, useCallback } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { getAuthToken } from './AuthContext';
 
 function resolveBaseUrl(): string {
   const domain = process.env.EXPO_PUBLIC_DOMAIN;
@@ -18,8 +19,15 @@ function resolveBaseUrl(): string {
 const BASE_URL = resolveBaseUrl();
 console.log('BASE_URL =', BASE_URL);
 
+function authHeaders(extra?: Record<string, string>): Record<string, string> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = { ...extra };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return headers;
+}
+
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}/api${path}`);
+  const res = await fetch(`${BASE_URL}/api${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`API error ${res.status} on GET ${path}`);
   return res.json();
 }
@@ -27,7 +35,7 @@ export async function apiGet<T>(path: string): Promise<T> {
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
   if (!res.ok) {
@@ -41,7 +49,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
@@ -51,7 +59,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
   });
   if (!res.ok) throw new Error(`API error ${res.status}`);
@@ -59,13 +67,17 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiDelete(path: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api${path}`, { method: 'DELETE' });
+  const res = await fetch(`${BASE_URL}/api${path}`, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
   if (!res.ok && res.status !== 204) throw new Error(`API error ${res.status}`);
 }
 
 export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
   const res = await fetch(`${BASE_URL}/api${path}`, {
     method: 'POST',
+    headers: authHeaders(),
     body: formData,
   });
   if (!res.ok) {
@@ -110,6 +122,7 @@ export interface Position {
   assetType?: string;
   sector?: string;
   notes?: string;
+  notesUpdatedAt?: string | null;
   positionBucket?: string | null;
   ipsAction?: string | null;
   stopPrice?: number | null;

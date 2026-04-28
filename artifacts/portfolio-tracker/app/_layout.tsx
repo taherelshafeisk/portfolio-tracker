@@ -27,6 +27,7 @@ import { SafeAreaProvider } from "react-native-safe-area-context";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
 import { PortfolioProvider } from "@/context/PortfolioContext";
 import { AIContextProvider } from "@/hooks/useAIContext";
+import { AuthProvider } from "@/context/AuthContext";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -35,6 +36,9 @@ const queryClient = new QueryClient();
 function RootLayoutNav() {
   return (
     <Stack screenOptions={{ headerShown: false }}>
+      <Stack.Screen name="index" options={{ headerShown: false }} />
+      <Stack.Screen name="auth/signin" options={{ headerShown: false }} />
+      <Stack.Screen name="auth/signup" options={{ headerShown: false }} />
       <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
       <Stack.Screen
         name="account/[id]"
@@ -132,17 +136,19 @@ export default function RootLayout() {
   return (
     <SafeAreaProvider>
       <ErrorBoundary>
-        <QueryClientProvider client={queryClient}>
-          <PortfolioProvider>
-            <AIContextProvider>
-              <GestureHandlerRootView>
-                <KeyboardProvider>
-                  <RootLayoutNav />
-                </KeyboardProvider>
-              </GestureHandlerRootView>
-            </AIContextProvider>
-          </PortfolioProvider>
-        </QueryClientProvider>
+        <AuthProvider>
+          <QueryClientProvider client={queryClient}>
+            <PortfolioProvider>
+              <AIContextProvider>
+                <GestureHandlerRootView>
+                  <KeyboardProvider>
+                    <RootLayoutNav />
+                  </KeyboardProvider>
+                </GestureHandlerRootView>
+              </AIContextProvider>
+            </PortfolioProvider>
+          </QueryClientProvider>
+        </AuthProvider>
       </ErrorBoundary>
     </SafeAreaProvider>
   );

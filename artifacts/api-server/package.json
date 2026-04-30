@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "NODE_ENV=development tsx --env-file .env ./src/index.ts",
+    "dev": "NODE_ENV=development env -u ANTHROPIC_API_KEY -u ANTHROPIC_BASE_URL tsx --env-file .env ./src/index.ts",
     "build": "tsx ./build.ts",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run"

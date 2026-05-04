@@ -16,11 +16,8 @@ import { formatCurrency } from '@/components/ui/PnlBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { AnnotationModal } from '@/components/activity/AnnotationModal';
 
-const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
-  ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
-    ? `http://${process.env.EXPO_PUBLIC_DOMAIN}/api`
-    : `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
-  : '/api';
+import { resolveApiBaseUrl } from '@/utils/apiUrl';
+const API_BASE = `${resolveApiBaseUrl()}/api`;
 
 const ACTIVITY_ICONS: Record<string, { icon: any; color: string }> = {
   buy: { icon: 'arrow-down-circle', color: colors.positive },

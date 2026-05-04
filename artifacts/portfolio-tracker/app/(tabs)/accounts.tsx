@@ -243,6 +243,11 @@ export default function AccountsScreen() {
 
   const bottomPad = Platform.OS === 'web' ? 100 : insets.bottom + 80;
 
+  const totalNav = summary?.totalNav ?? 0;
+  const dayChange = summary?.dayChange ?? 0;
+  const dayChangePct = summary?.dayChangePct ?? 0;
+  const dayColor = dayChange >= 0 ? colors.positive : colors.negative;
+
   return (
     <View style={[styles.root, { paddingTop: topPad }]}>
       {/* Header */}
@@ -271,6 +276,28 @@ export default function AccountsScreen() {
         refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refreshAll} tintColor={colors.ink3} />}
         contentContainerStyle={{ paddingHorizontal: 22, paddingBottom: bottomPad }}
       >
+        {/* NW summary panel */}
+        {summary != null && (
+          <View style={styles.navPanel}>
+            <Text style={styles.navEyebrow}>NET LIQUID VALUE</Text>
+            <Text style={styles.navFigure}>
+              ${totalNav.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+            </Text>
+            <View style={styles.navMeta}>
+              <Text style={[styles.navChange, { color: dayColor }]}>
+                {dayChange >= 0 ? '+$' : '−$'}{Math.abs(dayChange).toLocaleString('en-US', { maximumFractionDigits: 0 })}
+              </Text>
+              <Text style={[styles.navChange, { color: dayColor }]}>
+                {dayChange >= 0 ? '+' : ''}{dayChangePct.toFixed(2)}%
+              </Text>
+              <Text style={styles.navSep}>·</Text>
+              <Text style={styles.navLabel}>today</Text>
+              <Text style={styles.navSep}>·</Text>
+              <Text style={styles.navLabel}>{summary.positionCount} positions</Text>
+            </View>
+          </View>
+        )}
+
         {accounts.length === 0 ? (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>No sleeves yet</Text>
@@ -483,6 +510,36 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   addBtnText: { fontSize: 20, color: colors.card, lineHeight: 22 },
+
+  // NW panel
+  navPanel: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    borderRadius: 2,
+    padding: 14,
+    marginBottom: 18,
+  },
+  navEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+  },
+  navFigure: {
+    fontFamily: fonts.mono,
+    fontSize: 32,
+    letterSpacing: -0.02 * 32,
+    color: colors.ink,
+    marginTop: 4,
+    lineHeight: 38,
+    fontVariant: ['tabular-nums'],
+  },
+  navMeta: { flexDirection: 'row', alignItems: 'center', gap: 5, marginTop: 4 },
+  navChange: { fontFamily: fonts.mono, fontSize: 12, fontVariant: ['tabular-nums'] },
+  navSep: { color: colors.hair2, fontSize: 12 },
+  navLabel: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink3 },
 
   // Ledger
   ledgerTable: {

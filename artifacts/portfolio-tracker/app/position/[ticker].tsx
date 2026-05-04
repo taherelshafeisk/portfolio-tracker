@@ -15,6 +15,7 @@ import Svg, {
   Text as SvgText,
 } from 'react-native-svg';
 import { colors } from '@/constants/colors';
+import { fonts } from '@/constants/fonts';
 import { usePortfolio, apiPut, apiGet, apiPost, apiDelete, apiPatch } from '@/context/PortfolioContext';
 import { useAIContext } from '@/hooks/useAIContext';
 import { Card } from '@/components/ui/Card';
@@ -99,6 +100,15 @@ function bucketColor(bucket: string): string {
     case 'inc':    return '#2DC5A2';
     default:       return colors.positive;
   }
+}
+
+function formatThesisDate(iso: string): string {
+  const d = new Date(iso);
+  const sameYear = d.getFullYear() === new Date().getFullYear();
+  return d.toLocaleDateString('en-US', {
+    month: 'short', day: 'numeric',
+    ...(sameYear ? {} : { year: 'numeric' }),
+  });
 }
 
 /** Format share quantities: whole numbers as integers, fractional shares with up to 4 sig decimals. */
@@ -630,26 +640,39 @@ export default function PositionDetailScreen() {
           />
         </View>
 
-        {/* Entry note */}
-        <View style={styles.noteRow}>
+        {/* Thesis */}
+        <View style={styles.thesisSection}>
+          <View style={styles.thesisSectionHeader}>
+            <Text style={styles.thesisSectionLabel}>THESIS</Text>
+            {editingNote && (
+              <Pressable style={styles.thesisSaveBtn} onPress={saveNote}>
+                <Text style={styles.thesisSaveBtnText}>Save</Text>
+              </Pressable>
+            )}
+          </View>
           {editingNote ? (
             <TextInput
-              style={styles.noteInput}
+              style={styles.thesisInput}
               value={noteText}
               onChangeText={setNoteText}
               onBlur={saveNote}
               autoFocus
-              placeholder="Add entry note…"
+              multiline
+              placeholder="Entry trigger, expected move, exit conditions…"
               placeholderTextColor={colors.textMuted}
             />
           ) : (
-            <Text style={styles.noteText} numberOfLines={1}>
-              {noteText || <Text style={{ color: colors.textMuted, fontStyle: 'italic' }}>No entry note</Text>}
+            <Pressable onPress={() => setEditingNote(true)}>
+              {noteText
+                ? <Text style={styles.thesisText}>{noteText}</Text>
+                : <Text style={styles.thesisPlaceholder}>Tap to add thesis…</Text>}
+            </Pressable>
+          )}
+          {position?.notesUpdatedAt != null && !editingNote && (
+            <Text style={styles.thesisTimestamp}>
+              Updated {formatThesisDate(position.notesUpdatedAt)}
             </Text>
           )}
-          <Pressable hitSlop={8} onPress={() => editingNote ? saveNote() : setEditingNote(true)}>
-            <Feather name="edit-2" size={13} color={colors.textMuted} />
-          </Pressable>
         </View>
 
         {/* Realized P&L */}
@@ -705,6 +728,18 @@ export default function PositionDetailScreen() {
             );
           })}
         </Card>
+      )}
+
+      {/* Tranche ladder visualization */}
+      {(stopPrice != null || targetPrice != null || position.addZoneLow != null || position.addZoneHigh != null) && (
+        <TrancheLadder
+          currentPrice={currentPrice}
+          avgCost={avgCost}
+          stopPrice={stopPrice}
+          targetPrice={targetPrice}
+          addZoneLow={position.addZoneLow}
+          addZoneHigh={position.addZoneHigh}
+        />
       )}
 
       {/* Levels */}
@@ -1101,6 +1136,98 @@ export default function PositionDetailScreen() {
 
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
+function TrancheLadder({
+  currentPrice,
+  avgCost,
+  stopPrice,
+  targetPrice,
+  addZoneLow,
+  addZoneHigh,
+}: {
+  currentPrice: number;
+  avgCost: number;
+  stopPrice: number | null;
+  targetPrice: number | null;
+  addZoneLow: number | null | undefined;
+  addZoneHigh: number | null | undefined;
+}) {
+  const levels = [
+    stopPrice != null && { price: stopPrice, label: 'Stop', color: colors.negative },
+    addZoneLow != null && { price: addZoneLow, label: 'Add low', color: colors.gold },
+    addZoneHigh != null && { price: addZoneHigh, label: 'Add high', color: colors.gold },
+    { price: currentPrice, label: 'Now', color: colors.ink, current: true },
+    { price: avgCost, label: 'Avg cost', color: colors.ink3 },
+    targetPrice != null && { price: targetPrice, label: 'Target', color: colors.positive },
+  ].filter(Boolean) as { price: number; label: string; color: string; current?: boolean }[];
+
+  const sorted = [...levels].sort((a, b) => b.price - a.price);
+  const minPrice = Math.min(...sorted.map(l => l.price));
+  const maxPrice = Math.max(...sorted.map(l => l.price));
+  const range = maxPrice - minPrice || 1;
+
+  return (
+    <View style={ladderStyles.card}>
+      <Text style={ladderStyles.eyebrow}>PRICE LADDER</Text>
+      {sorted.map((level, i) => {
+        const pct = ((level.price - minPrice) / range) * 100;
+        const distFromCurrent = ((level.price - currentPrice) / currentPrice) * 100;
+        return (
+          <View key={level.label} style={[ladderStyles.row, i > 0 && ladderStyles.rowBorder]}>
+            <View style={ladderStyles.labelCol}>
+              <Text style={[ladderStyles.levelLabel, { color: level.color }]}>{level.label}</Text>
+            </View>
+            <View style={ladderStyles.track}>
+              <View style={[ladderStyles.fill, { width: `${pct}%` as any, backgroundColor: level.color + (level.current ? 'ff' : '40') }]} />
+            </View>
+            <View style={ladderStyles.priceCol}>
+              <Text style={[ladderStyles.price, { color: level.color }]}>
+                {formatCurrency(level.price)}
+              </Text>
+              {!level.current && (
+                <Text style={ladderStyles.dist}>
+                  {distFromCurrent >= 0 ? '+' : ''}{distFromCurrent.toFixed(1)}%
+                </Text>
+              )}
+            </View>
+          </View>
+        );
+      })}
+    </View>
+  );
+}
+
+const ladderStyles = StyleSheet.create({
+  card: {
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    borderRadius: 2,
+    padding: 14,
+  },
+  eyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+    marginBottom: 10,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 8,
+    gap: 10,
+  },
+  rowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
+  labelCol: { width: 68 },
+  levelLabel: { fontFamily: fonts.mono, fontSize: 10, letterSpacing: 0.5 },
+  track: { flex: 1, height: 6, backgroundColor: colors.bgInset, borderRadius: 1, overflow: 'hidden' },
+  fill: { height: 6, borderRadius: 1 },
+  priceCol: { width: 88, alignItems: 'flex-end' },
+  price: { fontFamily: fonts.mono, fontSize: 12, fontVariant: ['tabular-nums'] },
+  dist: { fontFamily: fonts.mono, fontSize: 9, color: colors.ink3, fontVariant: ['tabular-nums'] },
+});
+
 function StatCell({ label, value, valueColor }: { label: string; value: string; valueColor?: string }) {
   return (
     <View style={scStyles.cell}>
@@ -1112,8 +1239,8 @@ function StatCell({ label, value, valueColor }: { label: string; value: string; 
 
 const scStyles = StyleSheet.create({
   cell: { width: '50%', paddingRight: 8, marginBottom: 12 },
-  label: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginBottom: 2 },
-  value: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.textPrimary },
+  label: { fontFamily: fonts.mono, fontSize: 9, letterSpacing: 1.2, textTransform: 'uppercase', color: colors.ink3, marginBottom: 3 },
+  value: { fontFamily: fonts.mono, fontSize: 13, fontVariant: ['tabular-nums'], color: colors.ink },
 });
 
 function SizeRow({ label, pct, highlight }: { label: string; pct: number; highlight?: string }) {
@@ -1131,18 +1258,18 @@ function SizeRow({ label, pct, highlight }: { label: string; pct: number; highli
 
 const srStyles = StyleSheet.create({
   row: { flexDirection: 'row', alignItems: 'center', gap: 10, marginBottom: 10 },
-  label: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary, width: 155 },
-  track: { flex: 1, height: 4, backgroundColor: colors.surfaceBorder, borderRadius: 2, overflow: 'hidden' },
+  label: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink2, width: 155 },
+  track: { flex: 1, height: 4, backgroundColor: colors.hair2, borderRadius: 2, overflow: 'hidden' },
   fill: { height: 4, borderRadius: 2 },
-  value: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: colors.textPrimary, width: 42, textAlign: 'right' },
+  value: { fontFamily: fonts.mono, fontSize: 12, fontVariant: ['tabular-nums'], color: colors.ink, width: 42, textAlign: 'right' },
 });
 
 // ─── Styles ───────────────────────────────────────────────────────────────────
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background },
+  container: { flex: 1, backgroundColor: colors.bg },
   scroll: { padding: 16, gap: 12 },
-  notFound: { fontFamily: 'Inter_400Regular', fontSize: 16, color: colors.textSecondary, textAlign: 'center', marginTop: 80 },
+  notFound: { fontFamily: fonts.sans, fontSize: 16, color: colors.ink2, textAlign: 'center', marginTop: 80 },
 
   // Topbar
   topbar: {
@@ -1151,19 +1278,19 @@ const styles = StyleSheet.create({
     gap: 8,
     paddingHorizontal: 16,
     paddingVertical: 11,
-    backgroundColor: colors.background,
+    backgroundColor: colors.bg,
     borderBottomWidth: 1,
-    borderBottomColor: colors.separator,
+    borderBottomColor: colors.hair2,
   },
   backBtn: { padding: 4 },
-  topbarTicker: { fontFamily: 'Inter_700Bold', fontSize: 17, color: colors.textPrimary },
-  badge: { paddingHorizontal: 8, paddingVertical: 3, borderRadius: 6, borderWidth: 1 },
-  badgeText: { fontFamily: 'Inter_700Bold', fontSize: 10, letterSpacing: 0.5 },
+  topbarTicker: { fontFamily: fonts.monoBold, fontSize: 16, color: colors.ink },
+  badge: { paddingHorizontal: 7, paddingVertical: 3, borderRadius: 2, borderWidth: 1 },
+  badgeText: { fontFamily: fonts.mono, fontSize: 9, letterSpacing: 1.2 },
   topbarTabs: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end', gap: 2 },
-  topbarTab: { paddingHorizontal: 11, paddingVertical: 5, borderRadius: 8 },
-  topbarTabActive: { backgroundColor: colors.primary + '1A' },
-  topbarTabText: { fontFamily: 'Inter_500Medium', fontSize: 13, color: colors.textMuted },
-  topbarTabTextActive: { color: colors.primary, fontFamily: 'Inter_600SemiBold' },
+  topbarTab: { paddingHorizontal: 11, paddingVertical: 5, borderRadius: 2 },
+  topbarTabActive: { backgroundColor: colors.accentSoft },
+  topbarTabText: { fontFamily: fonts.serif, fontSize: 13, color: colors.ink3 },
+  topbarTabTextActive: { color: colors.accent, fontFamily: fonts.serifItalic },
 
   // Price card
   priceCard: { overflow: 'hidden' },
@@ -1218,9 +1345,15 @@ const styles = StyleSheet.create({
   positionCard: {},
   cardLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 11, color: colors.textMuted, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 12 },
   posGrid: { flexDirection: 'row', flexWrap: 'wrap' },
-  noteRow: { flexDirection: 'row', alignItems: 'center', gap: 8, paddingTop: 10, borderTopWidth: 1, borderTopColor: colors.separator, marginTop: 4 },
-  noteText: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textSecondary },
-  noteInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textPrimary, padding: 0 },
+  thesisSection: { paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.separator, marginTop: 4 },
+  thesisSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  thesisSectionLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 11, color: colors.textMuted, letterSpacing: 0.5, textTransform: 'uppercase' },
+  thesisSaveBtn: { backgroundColor: colors.primary + '22', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6 },
+  thesisSaveBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: colors.primary },
+  thesisText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textPrimary, lineHeight: 21 },
+  thesisPlaceholder: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textMuted, fontStyle: 'italic' },
+  thesisInput: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textPrimary, lineHeight: 21, minHeight: 80, textAlignVertical: 'top', padding: 0 },
+  thesisTimestamp: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 6 },
   realizedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, marginTop: 8, borderTopWidth: 1, borderTopColor: colors.separator },
   realizedLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted, flex: 1, marginRight: 8 },
   realizedValue: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },

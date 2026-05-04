@@ -1,23 +1,18 @@
-import React, { createContext, useContext, useState, useMemo, ReactNode, useCallback } from 'react';
-import AsyncStorage from '@react-native-async-storage/async-storage';
-import { getAuthToken } from './AuthContext';
+import React, { createContext, useContext, useState, useMemo, ReactNode, useCallback, useEffect, useRef } from 'react';
+import { AppState } from 'react-native';
+import { getAuthToken, tryRefreshToken } from './AuthContext';
+import { resolveApiBaseUrl } from '@/utils/apiUrl';
 
-function resolveBaseUrl(): string {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  if (domain) {
-    return domain.includes('localhost')
-      ? `http://${domain}`
-      : `https://${domain}`;
-  }
-  // On web, fall back to same hostname on port 3001 (API server default)
-  if (typeof window !== 'undefined') {
-    return `http://${window.location.hostname}:3001`;
-  }
-  return '';
+const BASE_URL = resolveApiBaseUrl();
+console.log('BASE_URL =', BASE_URL);
+
+// ── Session-expired sentinel ───────────────────────────────────────────────────
+
+export class SessionExpiredError extends Error {
+  constructor() { super('SESSION_EXPIRED'); }
 }
 
-const BASE_URL = resolveBaseUrl();
-console.log('BASE_URL =', BASE_URL);
+// ── Auth headers ──────────────────────────────────────────────────────────────
 
 function authHeaders(extra?: Record<string, string>): Record<string, string> {
   const token = getAuthToken();
@@ -26,14 +21,33 @@ function authHeaders(extra?: Record<string, string>): Record<string, string> {
   return headers;
 }
 
+// ── 401 retry helper ──────────────────────────────────────────────────────────
+
+async function fetchWithRefresh(input: RequestInfo, init?: RequestInit): Promise<Response> {
+  let res = await fetch(input, init);
+  if (res.status !== 401) return res;
+  // Token might be expired — try refreshing once
+  const refreshed = await tryRefreshToken();
+  if (!refreshed) throw new SessionExpiredError();
+  // Retry with new token (authHeaders() now reads the updated token)
+  res = await fetch(input, {
+    ...init,
+    headers: { ...authHeaders(), ...(init?.headers as Record<string, string> ?? {}) },
+  });
+  if (res.status === 401) throw new SessionExpiredError();
+  return res;
+}
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+
 export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE_URL}/api${path}`, { headers: authHeaders() });
+  const res = await fetchWithRefresh(`${BASE_URL}/api${path}`, { headers: authHeaders() });
   if (!res.ok) throw new Error(`API error ${res.status} on GET ${path}`);
   return res.json();
 }
 
 export async function apiPost<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE_URL}/api${path}`, {
+  const res = await fetchWithRefresh(`${BASE_URL}/api${path}`, {
     method: 'POST',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
@@ -47,7 +61,7 @@ export async function apiPost<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE_URL}/api${path}`, {
+  const res = await fetchWithRefresh(`${BASE_URL}/api${path}`, {
     method: 'PATCH',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
@@ -57,7 +71,7 @@ export async function apiPatch<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiPut<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${BASE_URL}/api${path}`, {
+  const res = await fetchWithRefresh(`${BASE_URL}/api${path}`, {
     method: 'PUT',
     headers: authHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify(body),
@@ -67,7 +81,7 @@ export async function apiPut<T>(path: string, body: unknown): Promise<T> {
 }
 
 export async function apiDelete(path: string): Promise<void> {
-  const res = await fetch(`${BASE_URL}/api${path}`, {
+  const res = await fetchWithRefresh(`${BASE_URL}/api${path}`, {
     method: 'DELETE',
     headers: authHeaders(),
   });
@@ -75,7 +89,7 @@ export async function apiDelete(path: string): Promise<void> {
 }
 
 export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
-  const res = await fetch(`${BASE_URL}/api${path}`, {
+  const res = await fetchWithRefresh(`${BASE_URL}/api${path}`, {
     method: 'POST',
     headers: authHeaders(),
     body: formData,
@@ -153,6 +167,7 @@ export type MacroPosture = {
   label: string | null;
   notes: string | null;
   cryptoView: string | null;
+  recessionRisk: number | null;
   setAt: string | null;
 };
 
@@ -202,12 +217,13 @@ interface PortfolioContextValue {
   summary: PortfolioSummary | null;
   macroPosture: MacroPosture | null;
   isLoading: boolean;
-  /** Non-null when the last refresh failed. Cleared on the next successful fetch. */
   error: string | null;
+  sessionExpired: boolean;
   refreshAll: () => Promise<void>;
   refreshPositions: (accountId?: number) => Promise<void>;
   refreshActivities: () => Promise<void>;
   fetchMacroPosture: () => Promise<void>;
+  resetState: () => void;
 }
 
 const PortfolioContext = createContext<PortfolioContextValue | null>(null);
@@ -220,6 +236,17 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   const [macroPosture, setMacroPosture] = useState<MacroPosture | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [sessionExpired, setSessionExpired] = useState(false);
+
+  const resetState = useCallback(() => {
+    setAccounts([]);
+    setPositions([]);
+    setActivities([]);
+    setSummary(null);
+    setMacroPosture(null);
+    setError(null);
+    setSessionExpired(false);
+  }, []);
 
   const fetchMacroPosture = useCallback(async () => {
     try {
@@ -231,10 +258,10 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const refreshAll = useCallback(async () => {
+    if (!getAuthToken()) return; // not signed in yet — skip silently
     setIsLoading(true);
     setError(null);
     try {
-      // 1. Fetch accounts and activities in parallel
       const [accs, acts] = await Promise.all([
         apiGet<Account[]>('/accounts'),
         apiGet<TradeActivity[]>('/activities'),
@@ -242,7 +269,6 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       setAccounts(accs);
       setActivities(acts);
 
-      // 2. Fetch positions (this triggers live price updates in the DB)
       const allPositions: Position[] = [];
       await Promise.all(accs.map(async (acc) => {
         const pos = await apiGet<Position[]>(`/accounts/${acc.id}/positions`);
@@ -250,20 +276,24 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
       }));
       setPositions(allPositions);
 
-      // 3. Fetch summary AFTER positions so it reads fresh prices from DB
       const summ = await apiGet<PortfolioSummary>('/portfolio/summary');
       setSummary(summ);
 
-      // 4. Fetch macro posture alongside
       await fetchMacroPosture();
+      setSessionExpired(false);
     } catch (e) {
-      const isNetworkError = e instanceof TypeError && (e as TypeError).message.includes('Network request failed');
-      setError(isNetworkError ? "Can't reach the server. Check your connection." : "Failed to load portfolio. Pull down to retry.");
+      if (e instanceof SessionExpiredError) {
+        setSessionExpired(true);
+        setError('Session expired. Please sign in again.');
+      } else {
+        const isNetwork = e instanceof TypeError && (e as TypeError).message.includes('Network request failed');
+        setError(isNetwork ? "Can't reach the server. Check your connection." : "Failed to load portfolio. Pull down to retry.");
+      }
       console.warn('Portfolio refresh failed:', e);
     } finally {
       setIsLoading(false);
     }
-  }, []);
+  }, [fetchMacroPosture]);
 
   const refreshPositions = useCallback(async (accountId?: number) => {
     try {
@@ -292,6 +322,20 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     }
   }, []);
 
+  // ── AppState: refresh data when app returns to foreground ─────────────────────
+  const appStateRef = useRef(AppState.currentState);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      const prev = appStateRef.current;
+      appStateRef.current = nextState;
+      // Only refresh when transitioning from background/inactive → active
+      if (nextState === 'active' && prev !== 'active') {
+        refreshAll();
+      }
+    });
+    return () => sub.remove();
+  }, [refreshAll]);
+
   const value = useMemo(() => ({
     accounts,
     positions,
@@ -300,11 +344,13 @@ export function PortfolioProvider({ children }: { children: ReactNode }) {
     macroPosture,
     isLoading,
     error,
+    sessionExpired,
     refreshAll,
     refreshPositions,
     refreshActivities,
     fetchMacroPosture,
-  }), [accounts, positions, activities, summary, macroPosture, isLoading, error, refreshAll, refreshPositions, refreshActivities, fetchMacroPosture]);
+    resetState,
+  }), [accounts, positions, activities, summary, macroPosture, isLoading, error, sessionExpired, refreshAll, refreshPositions, refreshActivities, fetchMacroPosture, resetState]);
 
   return (
     <PortfolioContext.Provider value={value}>

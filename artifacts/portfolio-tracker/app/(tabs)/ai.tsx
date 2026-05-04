@@ -10,17 +10,8 @@ import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
 import { type AIContextPayload } from '@/hooks/useAIContext';
 
-function resolveBaseUrl(): string {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  if (domain) {
-    return domain.includes('localhost') ? `http://${domain}` : `https://${domain}`;
-  }
-  if (typeof window !== 'undefined') {
-    return `http://${window.location.hostname}:3001`;
-  }
-  return '';
-}
-const BASE_URL = resolveBaseUrl();
+import { resolveApiBaseUrl } from '@/utils/apiUrl';
+const BASE_URL = resolveApiBaseUrl();
 
 interface Message {
   id: number;
@@ -471,14 +462,14 @@ const styles = StyleSheet.create({
     borderRadius: 17,
     backgroundColor: colors.deep,
     borderWidth: 1.2,
-    borderColor: colors.goldOnDeep,
+    borderColor: colors.deepAccent,
     alignItems: 'center',
     justifyContent: 'center',
   },
   avatarText: {
     fontFamily: fonts.serifItalic,
     fontSize: 16,
-    color: colors.goldOnDeep,
+    color: colors.deepAccent,
   },
   headerTitle: {
     fontFamily: fonts.sansMedium,
@@ -509,7 +500,7 @@ const styles = StyleSheet.create({
     marginHorizontal: 22,
     marginTop: 10,
     borderRadius: 2,
-    backgroundColor: colors.goldSoft,
+    backgroundColor: colors.amberSoft,
     borderWidth: 1,
     borderColor: colors.gold,
     paddingVertical: 10,

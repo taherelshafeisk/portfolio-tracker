@@ -226,6 +226,9 @@ router.delete("/conversations/:id", async (req, res) => {
 router.get("/conversations/:id/messages", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    const [conv] = await db.select({ id: conversationsTable.id }).from(conversationsTable)
+      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.userId, req.userId)));
+    if (!conv) { res.status(404).json({ error: "Conversation not found" }); return; }
     const messages = await db.select().from(messagesTable)
       .where(eq(messagesTable.conversationId, id))
       .orderBy(asc(messagesTable.createdAt));
@@ -239,6 +242,10 @@ router.post("/conversations/:id/messages", async (req, res) => {
   try {
     const conversationId = parseInt(req.params.id);
     const { content } = req.body;
+
+    const [conv] = await db.select({ id: conversationsTable.id }).from(conversationsTable)
+      .where(and(eq(conversationsTable.id, conversationId), eq(conversationsTable.userId, req.userId)));
+    if (!conv) { res.status(404).json({ error: "Conversation not found" }); return; }
 
     // Save user message
     await db.insert(messagesTable).values({ conversationId, role: "user", content });

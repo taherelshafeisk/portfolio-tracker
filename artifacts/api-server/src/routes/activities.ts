@@ -41,7 +41,7 @@ router.get("/", async (req, res) => {
       .limit(limit);
     return res.json(activities.map(toResponse));
   } catch (error) {
-    console.error("[activities GET /] Error:", error);
+    logger.error(error, "[activities GET /] Error");
     return res.status(500).json({ error: "Failed to fetch activities" });
   }
 });
@@ -87,9 +87,22 @@ router.post("/", validate(CreateActivityBodyHttp), async (req, res) => {
 // parameterised paths (/:id) at the same depth.
 
 /** All annotations with full data — used by Journal tab; activityId field also supports activity-tab dot indicators */
-router.get("/annotations", async (_req, res) => {
+router.get("/annotations", async (req, res) => {
   try {
-    const rows = await db.select().from(tradeAnnotationsTable);
+    const rows = await db.select({
+      id: tradeAnnotationsTable.id,
+      activityId: tradeAnnotationsTable.activityId,
+      thesis: tradeAnnotationsTable.thesis,
+      ipsAligned: tradeAnnotationsTable.ipsAligned,
+      plannedExit: tradeAnnotationsTable.plannedExit,
+      verdict: tradeAnnotationsTable.verdict,
+      verdictNote: tradeAnnotationsTable.verdictNote,
+      createdAt: tradeAnnotationsTable.createdAt,
+      updatedAt: tradeAnnotationsTable.updatedAt,
+    })
+    .from(tradeAnnotationsTable)
+    .innerJoin(activitiesTable, eq(tradeAnnotationsTable.activityId, activitiesTable.id))
+    .where(eq(activitiesTable.userId, req.userId));
     return res.json(rows);
   } catch {
     return res.status(500).json({ error: "Failed to fetch annotations" });
@@ -98,14 +111,15 @@ router.get("/annotations", async (_req, res) => {
 
 /**
  * POST /activities/reconcile-all
- * Recovery tool: recomputes every position's qty and avgCost from activity history.
+ * Recovery tool: recomputes every position's qty/avgCost and every account's cash balance
+ * from activity history. Safe to run at any time — idempotent.
  */
-router.post("/reconcile-all", async (_req, res) => {
+router.post("/reconcile-all", async (req, res) => {
   try {
-    const summary = await reconcileAll();
+    const summary = await reconcileAll(req.userId);
     return res.json(summary);
   } catch (error) {
-    console.error("[activities POST /reconcile-all] Error:", error);
+    logger.error(error, "[activities POST /reconcile-all] Error");
     return res.status(500).json({ error: "Reconciliation failed" });
   }
 });
@@ -114,6 +128,10 @@ router.post("/reconcile-all", async (_req, res) => {
 router.get("/:id/annotation", async (req, res) => {
   try {
     const activityId = parseInt(req.params.id);
+    const [activity] = await db.select({ id: activitiesTable.id })
+      .from(activitiesTable)
+      .where(and(eq(activitiesTable.id, activityId), eq(activitiesTable.userId, req.userId)));
+    if (!activity) { return res.status(404).json({ error: "Not found" }); }
     const [row] = await db
       .select()
       .from(tradeAnnotationsTable)
@@ -135,6 +153,11 @@ router.put("/:id/annotation", async (req, res) => {
     if (verdict !== undefined && verdict !== null && !VALID_VERDICTS.has(verdict)) {
       return res.status(400).json({ error: "Invalid verdict value" });
     }
+
+    const [activity] = await db.select({ id: activitiesTable.id })
+      .from(activitiesTable)
+      .where(and(eq(activitiesTable.id, activityId), eq(activitiesTable.userId, req.userId)));
+    if (!activity) { return res.status(404).json({ error: "Not found" }); }
 
     const [existing] = await db
       .select()

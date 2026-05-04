@@ -15,7 +15,8 @@ import {
   SourceSerif4_500Medium,
   SourceSerif4_500Medium_Italic,
 } from "@expo-google-fonts/source-serif-4";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { QueryClientProvider } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { useFonts } from "expo-font";
@@ -30,8 +31,6 @@ import { AIContextProvider } from "@/hooks/useAIContext";
 import { AuthProvider } from "@/context/AuthContext";
 
 SplashScreen.preventAutoHideAsync();
-
-const queryClient = new QueryClient();
 
 function RootLayoutNav() {
   return (

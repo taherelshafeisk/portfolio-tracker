@@ -61,13 +61,8 @@ interface Conviction {
 }
 
 // ─── API ─────────────────────────────────────────────────────────────────────
-function resolveBase(): string {
-  const domain = process.env.EXPO_PUBLIC_DOMAIN;
-  if (domain) return domain.includes('localhost') ? `http://${domain}` : `https://${domain}`;
-  if (typeof window !== 'undefined') return `http://${window.location.hostname}:3001`;
-  return '';
-}
-const BASE = resolveBase();
+import { resolveApiBaseUrl } from '@/utils/apiUrl';
+const BASE = resolveApiBaseUrl();
 
 async function getConviction(id: string): Promise<Conviction> {
   const res = await fetch(`${BASE}/api/convictions/${id}`);

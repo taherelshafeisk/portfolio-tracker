@@ -35,11 +35,11 @@ export function Card({ children, style, onPress, noPadding }: CardProps) {
 
 const styles = StyleSheet.create({
   card: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
+    backgroundColor: colors.card,
+    borderRadius: 2,
     padding: 16,
     borderWidth: 1,
-    borderColor: colors.separator,
+    borderColor: colors.hair2,
   },
   noPadding: {
     padding: 0,

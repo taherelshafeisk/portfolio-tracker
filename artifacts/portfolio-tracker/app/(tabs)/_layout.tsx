@@ -49,7 +49,13 @@ export default function TabLayout() {
           tabBarIcon: ({ focused }) => <TabIcon label="Portfolio" focused={focused} />,
         }}
       />
-      <Tabs.Screen name="pulse" options={{ href: null }} />
+      <Tabs.Screen
+        name="pulse"
+        options={{
+          tabBarLabel: 'Pulse',
+          tabBarIcon: ({ focused }) => <TabIcon label="Pulse" focused={focused} />,
+        }}
+      />
       <Tabs.Screen
         name="trade"
         options={{
@@ -64,13 +70,7 @@ export default function TabLayout() {
           tabBarIcon: ({ focused }) => <TabIcon label="Coach" focused={focused} />,
         }}
       />
-      <Tabs.Screen
-        name="screener"
-        options={{
-          tabBarLabel: 'Screen',
-          tabBarIcon: ({ focused }) => <TabIcon label="Screen" focused={focused} />,
-        }}
-      />
+      <Tabs.Screen name="screener" options={{ href: null }} />
       {/* Hidden from tab bar */}
       <Tabs.Screen name="activity" options={{ href: null }} />
       <Tabs.Screen name="feed" options={{ href: null }} />

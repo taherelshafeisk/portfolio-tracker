@@ -52,11 +52,8 @@ const IPS_ACTIONS = [
   { key: 'exit',    label: 'Exit'    },
 ];
 
-const API_BASE = process.env.EXPO_PUBLIC_DOMAIN
-  ? process.env.EXPO_PUBLIC_DOMAIN.includes('localhost')
-    ? `http://${process.env.EXPO_PUBLIC_DOMAIN}/api`
-    : `https://${process.env.EXPO_PUBLIC_DOMAIN}/api`
-  : '/api';
+import { resolveApiBaseUrl } from '@/utils/apiUrl';
+const API_BASE = `${resolveApiBaseUrl()}/api`;
 
 // CRYPTO_SYMBOLS imported from lib/buckets — shared source of truth
 const SYMBOL_OVERRIDES: Record<string, string> = {

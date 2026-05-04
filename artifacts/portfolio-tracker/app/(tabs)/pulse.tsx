@@ -1,9 +1,8 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, RefreshControl,
   Pressable, Platform, ActivityIndicator,
 } from 'react-native';
-import Svg, { Rect } from 'react-native-svg';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
@@ -19,6 +18,7 @@ interface PositionContribution {
   name: string;
   accountId: number;
   accountName: string;
+  positionBucket: string | null;
   qty: number;
   currentPrice: number;
   marketValue: number;
@@ -46,58 +46,108 @@ function fmtPct(n: number): string {
   return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
 }
 
-// ─── Contribution ribbon ──────────────────────────────────────────────────────
+// ─── Sleeve bidir bars ────────────────────────────────────────────────────────
 
-function ContribRibbon({ contributions }: { contributions: PositionContribution[] }) {
-  const totalAbs = contributions.reduce((s, c) => s + Math.abs(c.dayChangeDollars), 0);
-  if (totalAbs === 0) return null;
+function SleeveBidirBars({ contributions }: { contributions: PositionContribution[] }) {
+  const sleeves = useMemo(() => {
+    const map = new Map<string, { dayChange: number; nav: number }>();
+    for (const c of contributions) {
+      const key = c.positionBucket ?? c.accountName;
+      const existing = map.get(key);
+      if (existing) {
+        existing.dayChange += c.dayChangeDollars;
+        existing.nav += c.marketValue;
+      } else {
+        map.set(key, { dayChange: c.dayChangeDollars, nav: c.marketValue });
+      }
+    }
+    return Array.from(map.entries())
+      .map(([name, { dayChange, nav }]) => ({
+        name,
+        dayChange,
+        dayPct: nav > 0 ? (dayChange / nav) * 100 : 0,
+      }))
+      .sort((a, b) => b.dayChange - a.dayChange);
+  }, [contributions]);
 
-  const W = 336;
-  const H = 22;
+  if (sleeves.length === 0) return null;
+  const maxAbs = Math.max(...sleeves.map(s => Math.abs(s.dayChange)), 1);
 
-  const segments = contributions
-    .filter(c => c.dayChangeDollars !== 0)
-    .map(c => {
-      const share = Math.abs(c.dayChangeDollars) / totalAbs;
-      const maxOpacity = 0.75;
-      const minOpacity = 0.25;
-      const opacity = minOpacity + share * (maxOpacity - minOpacity);
-      return {
-        width: share * W,
-        color: c.dayChangeDollars >= 0 ? colors.positive : colors.negative,
-        opacity,
-        ticker: c.ticker,
-      };
-    });
-
-  let x = 0;
   return (
-    <View>
-      <Text style={styles.ribbonCaption}>width = $ impact · color = direction · opacity = size</Text>
-      <View style={[styles.ribbonWrapper, { width: W, height: H }]}>
-        <Svg width={W} height={H}>
-          {segments.map((seg, i) => {
-            const rx = x;
-            x += seg.width;
-            return (
-              <Rect
-                key={i}
-                x={rx + (i > 0 ? 0.5 : 0)}
-                y={0}
-                width={seg.width - (i > 0 ? 0.5 : 0)}
-                height={H}
-                fill={seg.color}
-                opacity={seg.opacity}
+    <View style={bidirStyles.card}>
+      <Text style={bidirStyles.eyebrow}>BY SLEEVE</Text>
+      {sleeves.map((s, i) => {
+        const isPos = s.dayChange >= 0;
+        const frac = Math.abs(s.dayChange) / maxAbs;
+        const barColor = isPos ? colors.positive : colors.negative;
+        const barBg = isPos ? colors.positiveLight : colors.negativeLight;
+        return (
+          <View key={s.name} style={[bidirStyles.row, i > 0 && bidirStyles.rowBorder]}>
+            <Text style={bidirStyles.label} numberOfLines={1}>{s.name}</Text>
+            <View style={bidirStyles.track}>
+              <View
+                style={[
+                  bidirStyles.bar,
+                  {
+                    width: `${Math.round(frac * 100)}%`,
+                    backgroundColor: barBg,
+                    borderRightWidth: isPos ? 2 : 0,
+                    borderLeftWidth: isPos ? 0 : 2,
+                    borderColor: barColor,
+                  },
+                ]}
               />
-            );
-          })}
-        </Svg>
-      </View>
+            </View>
+            <Text style={[bidirStyles.pct, { color: barColor }]}>{fmtPct(s.dayPct)}</Text>
+            <Text style={[bidirStyles.dollar, { color: barColor }]}>{fmtSigned(s.dayChange)}</Text>
+          </View>
+        );
+      })}
     </View>
   );
 }
 
-// ─── Pulse list ───────────────────────────────────────────────────────────────
+const bidirStyles = StyleSheet.create({
+  card: {
+    marginHorizontal: 22,
+    marginTop: 18,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    borderRadius: 2,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 4,
+  },
+  eyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+    marginBottom: 8,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 9,
+    gap: 8,
+  },
+  rowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
+  label: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink2, width: 90 },
+  track: {
+    flex: 1,
+    height: 12,
+    backgroundColor: colors.bgInset,
+    borderRadius: 1,
+    overflow: 'hidden',
+  },
+  bar: { height: '100%', borderRadius: 1 },
+  pct: { fontFamily: fonts.mono, fontSize: 11, fontVariant: ['tabular-nums'], width: 58, textAlign: 'right' },
+  dollar: { fontFamily: fonts.mono, fontSize: 10, fontVariant: ['tabular-nums'], width: 60, textAlign: 'right', color: colors.ink3 },
+});
+
+// ─── Pulse list item ──────────────────────────────────────────────────────────
 
 function PulseListItem({
   item,
@@ -113,68 +163,43 @@ function PulseListItem({
 
   return (
     <Pressable
-      style={styles.pulseItem}
+      style={listStyles.item}
       onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: item.ticker, accountId: String(item.accountId) } })}
     >
-      <View style={styles.pulseItemRow}>
-        <Text style={styles.pulseItemTicker}>{item.ticker}</Text>
-        <Text style={[styles.pulseItemName]}>{item.name}</Text>
-        <View style={styles.pulseItemRight}>
-          <Text style={[styles.pulseItemPct, { color: barColor }]}>{fmtPct(item.dayChangePct)}</Text>
-          <Text style={[styles.pulseItemDollars, { color: barColor }]}>{fmtSigned(item.dayChangeDollars)}</Text>
+      <View style={listStyles.row}>
+        <Text style={listStyles.ticker}>{item.ticker}</Text>
+        <Text style={listStyles.name} numberOfLines={1}>{item.name}</Text>
+        <View style={listStyles.right}>
+          <Text style={[listStyles.pct, { color: barColor }]}>{fmtPct(item.dayChangePct)}</Text>
+          <Text style={[listStyles.dollars, { color: barColor }]}>{fmtSigned(item.dayChangeDollars)}</Text>
         </View>
       </View>
-      {/* Contribution bar */}
-      <View style={styles.pulseBarTrack}>
-        <View style={[styles.pulseBarFill, { width: `${barWidth}%` as any, backgroundColor: barColor }]} />
+      <View style={listStyles.barTrack}>
+        <View style={[listStyles.barFill, { width: `${barWidth}%` as any, backgroundColor: barColor }]} />
       </View>
-      {/* Because line — placeholder since we don't have a news API */}
-      <Text style={styles.becauseLine}>
-        <Text style={styles.becauseLabel}>BECAUSE  </Text>
+      <Text style={listStyles.context}>
+        <Text style={listStyles.contextLabel}>{item.positionBucket ?? item.accountName}  </Text>
         {isPositive
-          ? `Up ${fmtPct(Math.abs(item.dayChangePct))} today · ${item.accountName}`
-          : `Down ${fmtPct(Math.abs(item.dayChangePct))} today · ${item.accountName}`}
+          ? `Up ${fmtPct(Math.abs(item.dayChangePct))} · since entry ${item.unrealizedPnlPct >= 0 ? '+' : ''}${item.unrealizedPnlPct.toFixed(1)}%`
+          : `Down ${fmtPct(Math.abs(item.dayChangePct))} · since entry ${item.unrealizedPnlPct >= 0 ? '+' : ''}${item.unrealizedPnlPct.toFixed(1)}%`}
       </Text>
     </Pressable>
   );
 }
 
-// ─── Sleeve diverging chart ───────────────────────────────────────────────────
-
-interface SleeveSummary {
-  name: string;
-  dayPct: number;
-}
-
-function SleeveDivergingChart({ sleeves }: { sleeves: SleeveSummary[] }) {
-  const maxAbs = Math.max(...sleeves.map(s => Math.abs(s.dayPct)), 0.01);
-
-  return (
-    <View style={styles.sleeveChart}>
-      {sleeves.map((sleeve, i) => {
-        const isPos = sleeve.dayPct >= 0;
-        const barW = (Math.abs(sleeve.dayPct) / maxAbs) * 36;
-        return (
-          <View key={i} style={styles.sleeveChartRow}>
-            <Text style={styles.sleeveName} numberOfLines={1}>{sleeve.name}</Text>
-            <View style={styles.sleeveLane}>
-              <View style={styles.sleeveAxis} />
-              <View style={[
-                styles.sleeveBar,
-                isPos
-                  ? { left: '50%', width: barW, backgroundColor: colors.positive }
-                  : { right: '50%', width: barW, backgroundColor: colors.negative },
-              ]} />
-            </View>
-            <Text style={[styles.sleeveDayPct, { color: isPos ? colors.positive : colors.negative }]}>
-              {fmtPct(sleeve.dayPct)}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
+const listStyles = StyleSheet.create({
+  item: { paddingVertical: 11 },
+  row: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  ticker: { fontFamily: fonts.monoBold, fontSize: 13, color: colors.ink, minWidth: 44 },
+  name: { flex: 1, fontFamily: fonts.sans, fontSize: 11, color: colors.ink3 },
+  right: { alignItems: 'flex-end', gap: 1 },
+  pct: { fontFamily: fonts.mono, fontSize: 12, fontVariant: ['tabular-nums'] },
+  dollars: { fontFamily: fonts.monoMedium, fontSize: 11, fontVariant: ['tabular-nums'] },
+  barTrack: { height: 2, backgroundColor: colors.hair2, borderRadius: 1, marginTop: 5, overflow: 'hidden' },
+  barFill: { height: 2, borderRadius: 1 },
+  context: { fontFamily: fonts.serifItalic, fontSize: 10.5, color: colors.ink3, marginTop: 4, lineHeight: 15 },
+  contextLabel: { fontFamily: fonts.mono, fontSize: 9, letterSpacing: 1, textTransform: 'uppercase', color: colors.accent },
+});
 
 // ─── Timeframe toggle ─────────────────────────────────────────────────────────
 
@@ -182,18 +207,26 @@ type Timeframe = 'today' | 'entry';
 
 function TimeframeToggle({ value, onChange }: { value: Timeframe; onChange: (v: Timeframe) => void }) {
   return (
-    <View style={styles.toggle}>
+    <View style={toggleStyles.wrap}>
       {(['today', 'entry'] as Timeframe[]).map(tf => (
-        <Pressable key={tf} onPress={() => onChange(tf)} style={styles.toggleOption}>
-          <Text style={[styles.toggleLabel, value === tf && styles.toggleLabelActive]}>
-            {tf === 'today' ? 'Today' : 'Since my entry'}
+        <Pressable key={tf} onPress={() => onChange(tf)} style={toggleStyles.option}>
+          <Text style={[toggleStyles.label, value === tf && toggleStyles.labelActive]}>
+            {tf === 'today' ? 'Today' : 'Since entry'}
           </Text>
-          {value === tf && <View style={styles.toggleUnderline} />}
+          {value === tf && <View style={toggleStyles.underline} />}
         </Pressable>
       ))}
     </View>
   );
 }
+
+const toggleStyles = StyleSheet.create({
+  wrap: { flexDirection: 'row', gap: 16 },
+  option: { alignItems: 'center' },
+  label: { fontFamily: fonts.serif, fontSize: 13, color: colors.ink3 },
+  labelActive: { fontFamily: fonts.serifItalic, color: colors.ink },
+  underline: { height: 1.5, backgroundColor: colors.accent, alignSelf: 'stretch', marginTop: 2 },
+});
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
@@ -217,33 +250,20 @@ export default function PulseScreen() {
 
   const greenCount = contributions.filter(c => c.dayChangeDollars > 0).length;
   const redCount = contributions.filter(c => c.dayChangeDollars < 0).length;
-  const largest = leaders[0];
-  const largestDrag = laggards[0];
 
-  // For "Since entry" mode, rerank by unrealizedPnlPct
-  const entryLeaders = [...contributions].sort((a, b) => b.unrealizedPnlPct - a.unrealizedPnlPct).slice(0, 5);
-  const entryLaggards = [...contributions].sort((a, b) => a.unrealizedPnlPct - b.unrealizedPnlPct).slice(0, 5);
+  const entryLeaders = useMemo(
+    () => [...contributions].sort((a, b) => b.unrealizedPnlPct - a.unrealizedPnlPct).slice(0, 5),
+    [contributions],
+  );
+  const entryLaggards = useMemo(
+    () => [...contributions].sort((a, b) => a.unrealizedPnlPct - b.unrealizedPnlPct).slice(0, 5),
+    [contributions],
+  );
 
   const displayLeaders = timeframe === 'today' ? leaders.slice(0, 5) : entryLeaders;
   const displayLaggards = timeframe === 'today' ? laggards.slice(0, 5) : entryLaggards;
   const maxLeaderAbs = Math.max(...displayLeaders.map(l => Math.abs(l.dayChangeDollars)), 1);
   const maxLaggardAbs = Math.max(...displayLaggards.map(l => Math.abs(l.dayChangeDollars)), 1);
-
-  // Sleeve summaries — derive from contributions (group by accountName)
-  const sleeveMap = new Map<string, { dayChange: number; nav: number }>();
-  contributions.forEach(c => {
-    const existing = sleeveMap.get(c.accountName);
-    if (existing) {
-      existing.dayChange += c.dayChangeDollars;
-      existing.nav += c.marketValue;
-    } else {
-      sleeveMap.set(c.accountName, { dayChange: c.dayChangeDollars, nav: c.marketValue });
-    }
-  });
-  const sleeves: SleeveSummary[] = Array.from(sleeveMap.entries()).map(([name, { dayChange, nav }]) => ({
-    name,
-    dayPct: nav > 0 ? (dayChange / nav) * 100 : 0,
-  }));
 
   const hasData = !!data;
 
@@ -254,7 +274,7 @@ export default function PulseScreen() {
         refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refetch} tintColor={colors.ink3} />}
         contentContainerStyle={{ paddingBottom: bottomPad }}
       >
-        {/* Header */}
+        {/* ── Header ── */}
         <View style={styles.header}>
           <Text style={styles.eyebrow}>PULSE</Text>
           <Text style={styles.title}>
@@ -264,58 +284,55 @@ export default function PulseScreen() {
           </Text>
         </View>
 
-        {/* Timeframe toggle */}
+        {/* ── Timeframe + timestamp ── */}
         <View style={styles.toggleRow}>
           <TimeframeToggle value={timeframe} onChange={setTimeframe} />
           <Text style={styles.asOf}>
-            as of {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', timeZoneName: 'short' })}
+            {new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit' })}
           </Text>
         </View>
 
-        {/* Loading state */}
+        {/* ── Loading ── */}
         {isLoading && !hasData && (
           <View style={styles.loadingState}>
             <ActivityIndicator size="small" color={colors.ink3} />
           </View>
         )}
 
-        {/* Error state */}
+        {/* ── Error ── */}
         {isError && !hasData && (
           <View style={styles.emptyState}>
             <Text style={styles.emptyTitle}>Unable to load</Text>
-            <Text style={styles.emptyText}>Something went wrong fetching today's pulse</Text>
             <Pressable style={styles.retryBtn} onPress={() => refetch()}>
               <Text style={styles.retryText}>Retry</Text>
             </Pressable>
           </View>
         )}
 
-        {/* Content — only renders once data is confirmed present */}
+        {/* ── Content ── */}
         {hasData && (
           <>
-            {/* Narrative */}
-            <View style={styles.narrativeSection}>
-              <Text style={styles.narrative}>
+            {/* Narrative headline */}
+            <View style={styles.narrative}>
+              <Text style={styles.narrativeText}>
                 {totalDayChange >= 0 ? 'Up ' : 'Down '}
                 <Text style={{ color: totalDayChange >= 0 ? colors.positive : colors.negative }}>
                   {fmtSigned(totalDayChange)}
                 </Text>
-                {largest && laggards[0]
-                  ? ` · ${largest.ticker} carrying, ${laggards[0].ticker} slipping.`
+                {leaders[0] && laggards[0]
+                  ? ` · ${leaders[0].ticker} carrying, ${laggards[0].ticker} slipping.`
                   : '.'}
               </Text>
               <Text style={styles.narrativeSub}>
-                {greenCount} green · {redCount} red.
-                {largest ? ` Largest contributor: ${largest.ticker} (${fmtSigned(largest.dayChangeDollars)}).` : ''}
-                {largestDrag ? ` Largest drag: ${largestDrag.ticker} (${fmtSigned(largestDrag.dayChangeDollars)}).` : ''}
+                {greenCount} green · {redCount} red
+                {leaders[0] ? ` · ${leaders[0].ticker} ${fmtSigned(leaders[0].dayChangeDollars)} top contributor` : ''}
               </Text>
             </View>
 
-            {/* Contribution ribbon */}
-            <View style={styles.ribbonSection}>
-              <Text style={styles.sectionEyebrow}>CONTRIBUTION</Text>
-              <ContribRibbon contributions={contributions} />
-            </View>
+            {/* Sleeve bidir bars */}
+            {contributions.length > 0 && (
+              <SleeveBidirBars contributions={contributions} />
+            )}
 
             {/* Leaders */}
             {displayLeaders.length > 0 && (
@@ -323,16 +340,16 @@ export default function PulseScreen() {
                 <View style={styles.listHeader}>
                   <Text style={styles.listTitle}>
                     <Text style={styles.listTitleItalic}>Leaders</Text>
-                    {' · '}top {displayLeaders.length}
+                    {' · '}{displayLeaders.length}
                   </Text>
-                  <Text style={[styles.listTotal, { color: colors.positive }]}>
+                  <Text style={[styles.listMeta, { color: colors.positive }]}>
                     {fmtSigned(displayLeaders.reduce((s, l) => s + Math.abs(l.dayChangeDollars), 0))}
                   </Text>
                 </View>
                 <View style={styles.listTable}>
                   {displayLeaders.map((item, i) => (
                     <View key={item.id} style={i > 0 ? styles.listItemBorder : undefined}>
-                      <PulseListItem item={item} maxAbs={maxLeaderAbs} isPositive={true} />
+                      <PulseListItem item={item} maxAbs={maxLeaderAbs} isPositive />
                     </View>
                   ))}
                 </View>
@@ -345,9 +362,9 @@ export default function PulseScreen() {
                 <View style={styles.listHeader}>
                   <Text style={styles.listTitle}>
                     <Text style={styles.listTitleItalic}>Laggards</Text>
-                    {' · '}bottom {displayLaggards.length}
+                    {' · '}{displayLaggards.length}
                   </Text>
-                  <Text style={[styles.listTotal, { color: colors.negative }]}>
+                  <Text style={[styles.listMeta, { color: colors.negative }]}>
                     {fmtSigned(displayLaggards.reduce((s, l) => s + Math.abs(l.dayChangeDollars), 0))}
                   </Text>
                 </View>
@@ -361,15 +378,6 @@ export default function PulseScreen() {
               </View>
             )}
 
-            {/* Who's carrying — sleeve diverging chart */}
-            {sleeves.length > 0 && (
-              <View style={styles.sleeveSection}>
-                <Text style={styles.sectionEyebrow}>WHO'S CARRYING</Text>
-                <SleeveDivergingChart sleeves={sleeves} />
-              </View>
-            )}
-
-            {/* Empty state — only when API returned successfully with zero positions */}
             {contributions.length === 0 && (
               <View style={styles.emptyState}>
                 <Text style={styles.emptyTitle}>No positions yet</Text>
@@ -406,7 +414,6 @@ const styles = StyleSheet.create({
   },
   titleItalic: { fontFamily: fonts.serifItalic },
 
-  // Timeframe toggle
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -415,34 +422,15 @@ const styles = StyleSheet.create({
     marginTop: 14,
     marginBottom: 4,
   },
-  toggle: { flexDirection: 'row', gap: 16 },
-  toggleOption: { alignItems: 'center' },
-  toggleLabel: {
-    fontFamily: fonts.serif,
-    fontSize: 13,
-    color: colors.ink3,
-  },
-  toggleLabelActive: {
-    fontFamily: fonts.serifItalic,
-    color: colors.ink,
-  },
-  toggleUnderline: {
-    height: 1.5,
-    backgroundColor: colors.accent,
-    alignSelf: 'stretch',
-    marginTop: 2,
-  },
   asOf: {
     fontFamily: fonts.mono,
     fontSize: 9,
     letterSpacing: 0.5,
-    textTransform: 'uppercase',
     color: colors.ink3,
   },
 
-  // Narrative
-  narrativeSection: { paddingHorizontal: 22, marginTop: 16, marginBottom: 4 },
-  narrative: {
+  narrative: { paddingHorizontal: 22, marginTop: 16, marginBottom: 4 },
+  narrativeText: {
     fontFamily: fonts.serif,
     fontSize: 20,
     letterSpacing: -0.01 * 20,
@@ -451,99 +439,25 @@ const styles = StyleSheet.create({
   },
   narrativeSub: {
     fontFamily: fonts.serifItalic,
-    fontSize: 12.5,
+    fontSize: 12,
     color: colors.ink3,
-    marginTop: 6,
-    lineHeight: 18,
+    marginTop: 5,
+    lineHeight: 17,
   },
 
-  // Ribbon
-  ribbonSection: { paddingHorizontal: 22, marginTop: 18, marginBottom: 4 },
-  sectionEyebrow: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    color: colors.ink3,
-    marginBottom: 8,
-  },
-  ribbonWrapper: {
-    borderWidth: 1,
-    borderColor: colors.hair2,
-    borderRadius: 2,
-    overflow: 'hidden',
-  },
-  ribbonCaption: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    color: colors.ink3,
+  listSection: { paddingHorizontal: 22, marginTop: 22 },
+  listHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
     marginBottom: 6,
   },
-
-  // Pulse list
-  listSection: { paddingHorizontal: 22, marginTop: 20 },
-  listHeader: { flexDirection: 'row', alignItems: 'baseline', justifyContent: 'space-between', marginBottom: 8 },
   listTitle: { fontFamily: fonts.serif, fontSize: 15, color: colors.ink },
   listTitleItalic: { fontFamily: fonts.serifItalic },
-  listTotal: { fontFamily: fonts.mono, fontSize: 13, fontVariant: ['tabular-nums'] },
+  listMeta: { fontFamily: fonts.mono, fontSize: 12, fontVariant: ['tabular-nums'] },
   listTable: { borderTopWidth: 1, borderTopColor: colors.ink },
   listItemBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
 
-  pulseItem: { paddingVertical: 10 },
-  pulseItemRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  pulseItemTicker: { fontFamily: fonts.monoBold, fontSize: 13, color: colors.ink, minWidth: 44 },
-  pulseItemName: { flex: 1, fontFamily: fonts.sans, fontSize: 11.5, color: colors.ink2 },
-  pulseItemRight: { alignItems: 'flex-end' },
-  pulseItemPct: { fontFamily: fonts.mono, fontSize: 12, fontVariant: ['tabular-nums'] },
-  pulseItemDollars: { fontFamily: fonts.monoMedium, fontSize: 11, fontVariant: ['tabular-nums'] },
-
-  pulseBarTrack: { height: 2, backgroundColor: colors.hair2, borderRadius: 1, marginTop: 6, overflow: 'hidden' },
-  pulseBarFill: { height: 2, borderRadius: 1 },
-
-  becauseLine: {
-    fontFamily: fonts.serifItalic,
-    fontSize: 11,
-    color: colors.ink3,
-    marginTop: 5,
-    lineHeight: 15,
-  },
-  becauseLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 1.5,
-    textTransform: 'uppercase',
-    color: colors.accent,
-    fontStyle: 'normal',
-  },
-
-  // Sleeve chart
-  sleeveSection: { paddingHorizontal: 22, marginTop: 24, marginBottom: 8 },
-  sleeveChart: { gap: 10 },
-  sleeveChartRow: { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  sleeveName: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink2, width: 120 },
-  sleeveLane: {
-    flex: 1,
-    height: 10,
-    position: 'relative',
-    justifyContent: 'center',
-  },
-  sleeveAxis: {
-    position: 'absolute',
-    left: '50%',
-    top: 3,
-    width: 1,
-    height: 4,
-    backgroundColor: colors.hair2,
-  },
-  sleeveBar: {
-    position: 'absolute',
-    height: 4,
-    top: 3,
-    borderRadius: 2,
-  },
-  sleeveDayPct: { fontFamily: fonts.mono, fontSize: 11, fontVariant: ['tabular-nums'], width: 54, textAlign: 'right' },
-
-  // Loading / error / empty
   loadingState: { alignItems: 'center', paddingTop: 80 },
   emptyState: { alignItems: 'center', paddingTop: 80, gap: 10 },
   emptyTitle: { fontFamily: fonts.serif, fontSize: 20, color: colors.ink },

@@ -13,6 +13,15 @@ import { useAIContext } from '@/hooks/useAIContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
+type ThresholdType = 'stop_crossed' | 'stop_near' | 'target_hit' | 'target_near' | 'add_zone';
+
+interface ThresholdCrossing {
+  position: Position;
+  type: ThresholdType;
+  thresholdPrice: number;
+  distPct: number;
+}
+
 interface MinerviniCriteria {
   priceAbove150: boolean;
   priceAbove200: boolean;
@@ -50,6 +59,35 @@ function daysHeld(createdAt: string): number {
   return Math.floor((Date.now() - new Date(createdAt).getTime()) / 86_400_000);
 }
 
+function computeThresholds(positions: Position[]): ThresholdCrossing[] {
+  const out: ThresholdCrossing[] = [];
+  for (const p of positions) {
+    const cur = p.currentPrice;
+    if (p.stopPrice != null) {
+      const dist = ((cur - p.stopPrice) / p.stopPrice) * 100;
+      if (cur <= p.stopPrice) {
+        out.push({ position: p, type: 'stop_crossed', thresholdPrice: p.stopPrice, distPct: dist });
+      } else if (dist <= 3) {
+        out.push({ position: p, type: 'stop_near', thresholdPrice: p.stopPrice, distPct: dist });
+      }
+    }
+    if (p.targetPrice != null) {
+      const dist = ((cur - p.targetPrice) / p.targetPrice) * 100;
+      if (cur >= p.targetPrice) {
+        out.push({ position: p, type: 'target_hit', thresholdPrice: p.targetPrice, distPct: dist });
+      } else if (Math.abs(dist) <= 3) {
+        out.push({ position: p, type: 'target_near', thresholdPrice: p.targetPrice, distPct: dist });
+      }
+    }
+    if (p.addZoneLow != null && p.addZoneHigh != null) {
+      if (cur >= p.addZoneLow && cur <= p.addZoneHigh) {
+        out.push({ position: p, type: 'add_zone', thresholdPrice: p.addZoneLow, distPct: 0 });
+      }
+    }
+  }
+  return out;
+}
+
 type Tab = 'swings' | 'screener';
 
 // ─── Screen ───────────────────────────────────────────────────────────────────
@@ -84,6 +122,50 @@ export default function DecideScreen() {
   );
 }
 
+// ─── Threshold Crossing Section ───────────────────────────────────────────────
+
+const THRESHOLD_CONFIG: Record<ThresholdType, { label: string; sublabel: string; dotColor: string }> = {
+  stop_crossed: { label: 'Stop crossed', sublabel: 'Price below stop — review exit', dotColor: colors.negative },
+  stop_near:    { label: 'Near stop',     sublabel: 'Within 3% of stop loss',          dotColor: colors.negative },
+  target_hit:   { label: 'Target hit',    sublabel: 'At or above target price',        dotColor: colors.positive },
+  target_near:  { label: 'Near target',   sublabel: 'Within 3% of target',             dotColor: colors.positive },
+  add_zone:     { label: 'Add zone',      sublabel: 'Price in defined add range',      dotColor: colors.amber },
+};
+
+function ThresholdSection({ crossings }: { crossings: ThresholdCrossing[] }) {
+  if (crossings.length === 0) return null;
+  return (
+    <View style={styles.thresholdCard}>
+      <Text style={styles.thresholdEyebrow}>LEVELS IN PLAY</Text>
+      {crossings.map((c, i) => {
+        const cfg = THRESHOLD_CONFIG[c.type];
+        const distLabel = c.type === 'add_zone'
+          ? 'in zone'
+          : c.distPct >= 0
+            ? `+${c.distPct.toFixed(1)}% away`
+            : `${c.distPct.toFixed(1)}%`;
+        return (
+          <Pressable
+            key={`${c.position.id}-${c.type}`}
+            style={[styles.thresholdRow, i === 0 && styles.thresholdRowFirst]}
+            onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: c.position.symbol, accountId: String(c.position.accountId) } })}
+          >
+            <View style={[styles.thresholdDot, { backgroundColor: cfg.dotColor }]} />
+            <View style={{ flex: 1 }}>
+              <View style={styles.thresholdRowTop}>
+                <Text style={styles.thresholdTicker}>{c.position.symbol}</Text>
+                <Text style={[styles.thresholdDist, { color: cfg.dotColor }]}>{distLabel}</Text>
+              </View>
+              <Text style={styles.thresholdSubLabel}>{cfg.label} · {formatCurrency(c.thresholdPrice)}</Text>
+            </View>
+            <Text style={styles.chevron}>›</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 // ─── Open Swings ──────────────────────────────────────────────────────────────
 
 function OpenSwingsSection() {
@@ -97,6 +179,7 @@ function OpenSwingsSection() {
 
   const swingNav = swingPositions.reduce((sum, p) => sum + p.marketValue, 0);
   const allocationPct = Math.min((swingNav / SWING_ALLOCATION_TARGET) * 100, 100);
+  const thresholds = computeThresholds(swingPositions);
 
   useEffect(() => {
     setAIContext({
@@ -148,6 +231,9 @@ function OpenSwingsSection() {
           <Text style={styles.emptyTitle}>No open swings</Text>
         </View>
       )}
+
+      {/* Threshold crossings */}
+      <ThresholdSection crossings={thresholds} />
 
       {/* Positions ledger */}
       {swingPositions.length > 0 && (
@@ -552,4 +638,38 @@ const styles = StyleSheet.create({
   chipText: { fontFamily: fonts.mono, fontSize: 9, letterSpacing: 0.5 },
 
   cacheNote: { fontFamily: fonts.mono, fontSize: 11, color: colors.ink3, textAlign: 'center', marginTop: 8 },
+
+  // Threshold crossings
+  thresholdCard: {
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    borderRadius: 3,
+    paddingHorizontal: 14,
+    paddingTop: 12,
+    paddingBottom: 4,
+    marginBottom: 16,
+    backgroundColor: colors.card,
+  },
+  thresholdEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+    marginBottom: 8,
+  },
+  thresholdRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    gap: 10,
+    borderTopWidth: 1,
+    borderTopColor: colors.hair,
+  },
+  thresholdRowFirst: { borderTopWidth: 0 },
+  thresholdDot: { width: 7, height: 7, borderRadius: 4, marginTop: 1 },
+  thresholdRowTop: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  thresholdTicker: { fontFamily: fonts.monoBold, fontSize: 13, color: colors.ink },
+  thresholdDist: { fontFamily: fonts.mono, fontSize: 12, fontVariant: ['tabular-nums'] },
+  thresholdSubLabel: { fontFamily: fonts.mono, fontSize: 10, color: colors.ink3, marginTop: 2 },
 });

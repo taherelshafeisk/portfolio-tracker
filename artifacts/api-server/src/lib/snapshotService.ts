@@ -1,7 +1,7 @@
 import { db } from "@workspace/db";
 import { accountsTable, positionsTable, portfolioSnapshotsTable } from "@workspace/db";
 import { eq, and, isNull } from "drizzle-orm";
-import { fetchLivePrices } from "../routes/positions";
+import { fetchLivePrices } from "./priceService";
 
 const YAHOO_BASE = "https://query1.finance.yahoo.com";
 

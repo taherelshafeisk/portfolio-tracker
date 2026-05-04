@@ -3,8 +3,9 @@ import { db, conversations as conversationsTable, messages as messagesTable } fr
 import { accountsTable, positionsTable, alertsTable, portfolioPolicyTable } from "@workspace/db";
 import { eq, and, asc, inArray } from "drizzle-orm";
 import { anthropic } from "@workspace/integrations-anthropic-ai";
-import { fetchLivePrices } from "../positions";
+import { fetchLivePrices } from "../../lib/priceService";
 import { resolveTickerFromName, derivePriceFromAmount, inferTradeCurrency } from "./trade-utils";
+import { logger } from "../../lib/logger";
 
 const router: IRouter = Router();
 
@@ -129,7 +130,7 @@ ${alertLines}
 GLOBAL POLICY:
 ${policySection}`;
   } catch (e) {
-    console.error("[buildPortfolioContext] Error:", e);
+    logger.error(e, "[buildPortfolioContext] Error");
     return "Portfolio data temporarily unavailable.";
   }
 }
@@ -144,11 +145,12 @@ async function fetchForexRateToUSD(fromCurrency: string): Promise<number> {
       { headers: { "User-Agent": "Mozilla/5.0" } }
     );
     if (!res.ok) return 1;
-    const json = await res.json();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const json = await res.json() as any;
     const usdPerForeignInverse = json?.chart?.result?.[0]?.meta?.regularMarketPrice; // e.g. 3.6725 for AED
     if (typeof usdPerForeignInverse !== "number" || usdPerForeignInverse <= 0) return 1;
     const rate = 1 / usdPerForeignInverse; // e.g. 0.272 USD per 1 AED
-    console.log(`[forex] USD${fromCurrency.toUpperCase()}=X = ${usdPerForeignInverse} → 1 ${fromCurrency} = ${rate.toFixed(6)} USD`);
+    logger.info(`[forex] USD${fromCurrency.toUpperCase()}=X = ${usdPerForeignInverse} → 1 ${fromCurrency} = ${rate.toFixed(6)} USD`);
     return rate;
   } catch {
     return 1;
@@ -197,7 +199,7 @@ router.get("/conversations/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     const [conversation] = await db.select().from(conversationsTable)
       .where(and(eq(conversationsTable.id, id), eq(conversationsTable.userId, req.userId)));
-    if (!conversation) return res.status(404).json({ error: "Conversation not found" });
+    if (!conversation) { res.status(404).json({ error: "Conversation not found" }); return; }
     const messages = await db.select().from(messagesTable)
       .where(eq(messagesTable.conversationId, id))
       .orderBy(asc(messagesTable.createdAt));
@@ -212,7 +214,7 @@ router.delete("/conversations/:id", async (req, res) => {
     const id = parseInt(req.params.id);
     const [conv] = await db.select({ id: conversationsTable.id }).from(conversationsTable)
       .where(and(eq(conversationsTable.id, id), eq(conversationsTable.userId, req.userId)));
-    if (!conv) return res.status(404).json({ error: "Conversation not found" });
+    if (!conv) { res.status(404).json({ error: "Conversation not found" }); return; }
     await db.delete(messagesTable).where(eq(messagesTable.conversationId, id));
     await db.delete(conversationsTable).where(eq(conversationsTable.id, id));
     res.status(204).send();
@@ -224,6 +226,9 @@ router.delete("/conversations/:id", async (req, res) => {
 router.get("/conversations/:id/messages", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
+    const [conv] = await db.select({ id: conversationsTable.id }).from(conversationsTable)
+      .where(and(eq(conversationsTable.id, id), eq(conversationsTable.userId, req.userId)));
+    if (!conv) { res.status(404).json({ error: "Conversation not found" }); return; }
     const messages = await db.select().from(messagesTable)
       .where(eq(messagesTable.conversationId, id))
       .orderBy(asc(messagesTable.createdAt));
@@ -237,6 +242,10 @@ router.post("/conversations/:id/messages", async (req, res) => {
   try {
     const conversationId = parseInt(req.params.id);
     const { content } = req.body;
+
+    const [conv] = await db.select({ id: conversationsTable.id }).from(conversationsTable)
+      .where(and(eq(conversationsTable.id, conversationId), eq(conversationsTable.userId, req.userId)));
+    if (!conv) { res.status(404).json({ error: "Conversation not found" }); return; }
 
     // Save user message
     await db.insert(messagesTable).values({ conversationId, role: "user", content });
@@ -301,7 +310,7 @@ Rules:
     res.write(`data: ${JSON.stringify({ done: true })}\n\n`);
     res.end();
   } catch (error: any) {
-    console.error("[AI chat] Streaming error:", error?.status, error?.message, error?.error ?? error);
+    logger.error({ err: error, status: error?.status, apiError: error?.error }, "[AI chat] Streaming error");
     const msg = error?.error?.message || error?.message || "Failed to process message";
     res.write(`data: ${JSON.stringify({ error: msg })}\n\n`);
     res.end();
@@ -311,7 +320,7 @@ Rules:
 router.post("/parse-screenshot", async (req, res) => {
   try {
     const { imageBase64, mediaType, parseType = "positions" } = req.body;
-    if (!imageBase64) return res.status(400).json({ error: "No image provided" });
+    if (!imageBase64) { res.status(400).json({ error: "No image provided" }); return; }
 
     const mimeType = (mediaType || "image/png") as "image/png" | "image/jpeg" | "image/gif" | "image/webp";
 
@@ -471,7 +480,8 @@ Only return the JSON object, no additional text. If no trades are visible, retur
       .join("");
 
     if (!content) {
-      return res.status(500).json({ error: "Failed to parse image" });
+      res.status(500).json({ error: "Failed to parse image" });
+      return;
     }
 
     // Strip markdown code fences if present
@@ -483,10 +493,10 @@ Only return the JSON object, no additional text. If no trades are visible, retur
       // Convert non-USD amounts to USD (positions only)
       if (parseType === "positions") {
         const currency: string = (parsedData.currency || "USD").toUpperCase();
-        console.log(`[parse-screenshot] accountHint="${parsedData.accountHint}" detectedCurrency=${currency} positions=${parsedData.positions?.length ?? 0}`);
+        logger.info(`[parse-screenshot] accountHint="${parsedData.accountHint}" detectedCurrency=${currency} positions=${parsedData.positions?.length ?? 0}`);
         if (currency !== "USD") {
           const rate = await fetchForexRateToUSD(currency);
-          console.log(`[forex] Converting ${currency} → USD at rate ${rate}`);
+          logger.info(`[forex] Converting ${currency} → USD at rate ${rate}`);
           for (const pos of parsedData.positions || []) {
             if (pos.avgCost != null) pos.avgCost = parseFloat((pos.avgCost * rate).toFixed(4));
             if (pos.currentPrice != null) pos.currentPrice = parseFloat((pos.currentPrice * rate).toFixed(4));
@@ -509,7 +519,7 @@ Only return the JSON object, no additional text. If no trades are visible, retur
       // Post-process activities: ticker resolution, price derivation, currency conversion
       if (parseType === "activities") {
         const accountCurrency: string = (parsedData.currency || "USD").toUpperCase();
-        console.log(`[parse-screenshot] accountHint="${parsedData.accountHint}" detectedCurrency=${accountCurrency} trades=${parsedData.trades?.length ?? 0}`);
+        logger.info(`[parse-screenshot] accountHint="${parsedData.accountHint}" detectedCurrency=${accountCurrency} trades=${parsedData.trades?.length ?? 0}`);
         parsedData.currency = accountCurrency;
 
         // Determine the effective currency for each trade.
@@ -525,7 +535,7 @@ Only return the JSON object, no additional text. If no trades are visible, retur
         const fxRates: Record<string, number> = {};
         for (const currency of currenciesToConvert) {
           fxRates[currency] = await fetchForexRateToUSD(currency);
-          console.log(`[forex] ${currency} → USD rate: ${fxRates[currency]}`);
+          logger.info(`[forex] ${currency} → USD rate: ${fxRates[currency]}`);
         }
 
         // Drop cancelled/unfilled orders: buy and sell must have qty > 0
@@ -568,14 +578,14 @@ Only return the JSON object, no additional text. If no trades are visible, retur
 
       res.json(parsedData);
     } catch (parseError) {
-      console.error("Failed to parse Claude response as JSON:", content);
+      logger.error({ content }, "Failed to parse Claude response as JSON");
       res.status(500).json({ error: "Failed to parse response from AI" });
     }
   } catch (error: any) {
-    console.error("Parse screenshot error:", error);
+    logger.error(error, "Parse screenshot error");
     const status = Number(error?.status) || 500;
     const message = error?.error?.message || error?.message || "Failed to parse screenshot";
-    return res.status(status).json({ error: message });
+    res.status(status).json({ error: message });
   }
 });
 

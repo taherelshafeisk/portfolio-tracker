@@ -1,7 +1,7 @@
 import { Router, type IRouter } from "express";
-import { db, positionFlagsTable } from "@workspace/db";
-import { eq, and, isNull, isNotNull } from "drizzle-orm";
 import { z } from "@workspace/api-zod/schemas";
+import { logger } from "../lib/logger";
+import { listFlags, createFlag, resolveFlag, deleteFlag } from "../services/flagService";
 
 const router: IRouter = Router();
 
@@ -23,16 +23,15 @@ const resolveFlagSchema = z.object({
 router.get("/", async (req, res) => {
   try {
     const { resolved, accountId, positionId } = req.query;
-    const conditions = [eq(positionFlagsTable.userId, req.userId)];
-    if (accountId) conditions.push(eq(positionFlagsTable.accountId, Number(accountId)));
-    if (positionId) conditions.push(eq(positionFlagsTable.positionId, Number(positionId)));
-    if (resolved === "false") conditions.push(isNull(positionFlagsTable.resolvedAt));
-    else if (resolved === "true") conditions.push(isNotNull(positionFlagsTable.resolvedAt));
-
-    const flags = await db.select().from(positionFlagsTable).where(and(...conditions));
+    const resolvedFilter = resolved === "true" ? true : resolved === "false" ? false : undefined;
+    const flags = await listFlags(req.userId, {
+      resolved: resolvedFilter,
+      accountId: accountId ? Number(accountId) : undefined,
+      positionId: positionId ? Number(positionId) : undefined,
+    });
     res.json(flags);
   } catch (err) {
-    console.error("[flags GET /]", err);
+    logger.error(err, "[flags GET /]");
     res.status(500).json({ error: "Failed to fetch flags" });
   }
 });
@@ -42,19 +41,18 @@ router.post("/", async (req, res) => {
     const parsed = createFlagSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
     const data = parsed.data;
-    const [flag] = await db.insert(positionFlagsTable).values({
-      positionId: data.positionId ?? null,
+    const flag = await createFlag(req.userId, {
+      positionId: data.positionId,
       accountId: data.accountId,
       flagType: data.flagType,
       source: data.source,
       dueAt: data.dueAt ? new Date(data.dueAt) : null,
-      appGeneratedReasonSnapshot: data.appGeneratedReasonSnapshot ?? null,
+      appGeneratedReasonSnapshot: data.appGeneratedReasonSnapshot,
       userConfirmed: data.userConfirmed,
-      userId: req.userId,
-    }).returning();
+    });
     res.status(201).json(flag);
   } catch (err) {
-    console.error("[flags POST /]", err);
+    logger.error(err, "[flags POST /]");
     res.status(500).json({ error: "Failed to create flag" });
   }
 });
@@ -64,27 +62,21 @@ router.patch("/:id/resolve", async (req, res) => {
     const id = Number(req.params.id);
     const parsed = resolveFlagSchema.safeParse(req.body);
     if (!parsed.success) { res.status(400).json({ error: parsed.error.message }); return; }
-    const { resolutionType, resolutionNote } = parsed.data;
-    const [updated] = await db.update(positionFlagsTable)
-      .set({ resolvedAt: new Date(), resolutionType, resolutionNote: resolutionNote ?? null })
-      .where(and(eq(positionFlagsTable.id, id), eq(positionFlagsTable.userId, req.userId)))
-      .returning();
+    const updated = await resolveFlag(id, req.userId, parsed.data);
     if (!updated) { res.status(404).json({ error: "Flag not found" }); return; }
     res.json(updated);
   } catch (err) {
-    console.error("[flags PATCH /:id/resolve]", err);
+    logger.error(err, "[flags PATCH /:id/resolve]");
     res.status(500).json({ error: "Failed to resolve flag" });
   }
 });
 
 router.delete("/:id", async (req, res) => {
   try {
-    const id = Number(req.params.id);
-    await db.delete(positionFlagsTable)
-      .where(and(eq(positionFlagsTable.id, id), eq(positionFlagsTable.userId, req.userId)));
+    await deleteFlag(Number(req.params.id), req.userId);
     res.status(204).send();
   } catch (err) {
-    console.error("[flags DELETE /:id]", err);
+    logger.error(err, "[flags DELETE /:id]");
     res.status(500).json({ error: "Failed to delete flag" });
   }
 });

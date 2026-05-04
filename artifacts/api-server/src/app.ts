@@ -27,7 +27,18 @@ app.use(
     },
   }),
 );
-app.use(cors());
+const allowedOrigins = process.env["ALLOWED_ORIGINS"]
+  ? process.env["ALLOWED_ORIGINS"].split(",").map(o => o.trim())
+  : ["http://localhost:8081", "http://localhost:5173"]; // Expo + Vite dev defaults
+
+app.use(cors({
+  origin: (origin, callback) => {
+    // Allow server-to-server / mobile app requests (no Origin header)
+    if (!origin) return callback(null, true);
+    if (allowedOrigins.includes(origin)) return callback(null, true);
+    callback(new Error(`CORS: origin not allowed — ${origin}`));
+  },
+}));
 app.use(express.json({ limit: '20mb' }));
 app.use(express.urlencoded({ extended: true, limit: '20mb' }));
 // Serve uploaded conviction attachments as static files

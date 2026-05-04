@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db, priceAlertsTable } from "@workspace/db";
 import { eq, and } from "drizzle-orm";
 import { z } from "@workspace/api-zod/schemas";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -30,7 +31,7 @@ router.get("/", async (req, res) => {
     }
     res.json(rows);
   } catch (err) {
-    console.error("[price-alerts GET /]", err);
+    logger.error(err, "[price-alerts GET /]");
     res.status(500).json({ error: "Failed to fetch price alerts" });
   }
 });
@@ -51,15 +52,21 @@ router.post("/", async (req, res) => {
     }).returning();
     res.status(201).json(row);
   } catch (err) {
-    console.error("[price-alerts POST /]", err);
+    logger.error(err, "[price-alerts POST /]");
     res.status(500).json({ error: "Failed to create price alert" });
   }
 });
+
+const VALID_PRICE_ALERT_STATUSES = new Set(["active", "triggered", "dismissed"]);
 
 router.patch("/:id", async (req, res) => {
   try {
     const id = Number(req.params.id);
     const { status } = req.body as { status: string };
+    if (!status || !VALID_PRICE_ALERT_STATUSES.has(status)) {
+      res.status(400).json({ error: "status must be one of: active, triggered, dismissed" });
+      return;
+    }
     const [row] = await db.update(priceAlertsTable)
       .set({ status, triggeredAt: status === "triggered" ? new Date() : undefined })
       .where(and(eq(priceAlertsTable.id, id), eq(priceAlertsTable.userId, req.userId)))
@@ -67,7 +74,7 @@ router.patch("/:id", async (req, res) => {
     if (!row) { res.status(404).json({ error: "Not found" }); return; }
     res.json(row);
   } catch (err) {
-    console.error("[price-alerts PATCH /:id]", err);
+    logger.error(err, "[price-alerts PATCH /:id]");
     res.status(500).json({ error: "Failed to update price alert" });
   }
 });
@@ -78,7 +85,7 @@ router.delete("/:id", async (req, res) => {
       .where(and(eq(priceAlertsTable.id, Number(req.params.id)), eq(priceAlertsTable.userId, req.userId)));
     res.status(204).send();
   } catch (err) {
-    console.error("[price-alerts DELETE /:id]", err);
+    logger.error(err, "[price-alerts DELETE /:id]");
     res.status(500).json({ error: "Failed to delete price alert" });
   }
 });

@@ -1,4 +1,4 @@
-import { pgTable, text, timestamp, boolean, uuid } from "drizzle-orm/pg-core";
+import { pgTable, text, timestamp, boolean, uuid, integer } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { z } from "zod/v4";
 
@@ -7,6 +7,7 @@ export const macroPostureTable = pgTable("macro_posture", {
   label: text("label").notNull(),
   notes: text("notes"),
   cryptoView: text("crypto_view"),
+  recessionRisk: integer("recession_risk"),   // 0–100 manual estimate
   isActive: boolean("is_active").default(true).notNull(),
   setAt: timestamp("set_at", { withTimezone: true }).defaultNow().notNull(),
   supersededAt: timestamp("superseded_at", { withTimezone: true }),

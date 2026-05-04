@@ -1,6 +1,6 @@
 import type { Request, Response, NextFunction } from "express";
 import { supabase } from "../lib/supabase";
-import { DEMO_USER_ID } from "../lib/constants";
+import { DEMO_USER_ID, DEMO_TOKEN } from "../lib/constants";
 
 declare global {
   namespace Express {
@@ -17,7 +17,7 @@ export async function requireAuth(req: Request, res: Response, next: NextFunctio
     return;
   }
 
-  if (token === "demo-token") {
+  if (token === DEMO_TOKEN) {
     req.userId = DEMO_USER_ID;
     return next();
   }

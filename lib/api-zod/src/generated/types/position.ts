@@ -25,6 +25,7 @@ export interface Position {
   assetType?: PositionAssetType;
   sector?: string;
   notes?: string;
+  notesUpdatedAt?: Date | null;
   positionBucket?: PositionPositionBucket;
   ipsAction?: PositionIpsAction;
   stopPrice?: number | null;

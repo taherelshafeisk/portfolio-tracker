@@ -3,6 +3,7 @@ import { db } from "@workspace/db";
 import { portfolioSnapshotsTable } from "@workspace/db";
 import { desc, eq, isNull, and } from "drizzle-orm";
 import { captureSnapshot } from "../lib/snapshotService";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -11,7 +12,7 @@ router.post("/capture", async (req, res) => {
     const result = await captureSnapshot(req.userId);
     res.json(result);
   } catch (error) {
-    console.error("[snapshots POST /capture] Error:", error);
+    logger.error(error, "[snapshots POST /capture] Error");
     res.status(500).json({ error: "Snapshot capture failed" });
   }
 });
@@ -40,7 +41,7 @@ router.get("/", async (req, res) => {
       positionCount: r.positionCount,
     })));
   } catch (error) {
-    console.error("[snapshots GET /] Error:", error);
+    logger.error(error, "[snapshots GET /] Error");
     res.status(500).json({ error: "Failed to fetch snapshots" });
   }
 });

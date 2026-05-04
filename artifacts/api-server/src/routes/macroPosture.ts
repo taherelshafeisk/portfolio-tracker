@@ -1,7 +1,6 @@
 import { Router, type IRouter } from "express";
-import { db } from "@workspace/db";
-import { macroPostureTable } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
+import { logger } from "../lib/logger";
+import { getActiveMacroPosture, setMacroPosture } from "../services/macroPostureService";
 
 const router: IRouter = Router();
 
@@ -14,46 +13,36 @@ type ValidLabel = (typeof VALID_LABELS)[number];
 
 router.get("/", async (req, res) => {
   try {
-    const [row] = await db.select().from(macroPostureTable)
-      .where(and(eq(macroPostureTable.isActive, true), eq(macroPostureTable.userId, req.userId)))
-      .limit(1);
-
-    if (!row) return res.json({ label: null, notes: null, cryptoView: null, setAt: null });
-
-    return res.json({
-      id: row.id, label: row.label, notes: row.notes, cryptoView: row.cryptoView,
-      isActive: row.isActive, setAt: row.setAt.toISOString(), createdAt: row.createdAt.toISOString(),
-    });
+    const result = await getActiveMacroPosture(req.userId);
+    if (!result) return res.json({ label: null, notes: null, cryptoView: null, recessionRisk: null, setAt: null });
+    return res.json(result);
   } catch (err) {
-    console.error("[macro-posture GET] error:", err);
+    logger.error(err, "[macro-posture GET] error");
     return res.status(500).json({ error: "Failed to fetch macro posture" });
   }
 });
 
 router.post("/", async (req, res) => {
   try {
-    const { label, notes, cryptoView } = req.body as { label: string; notes?: string; cryptoView?: string };
+    const { label, notes, cryptoView, recessionRisk } = req.body as {
+      label: string;
+      notes?: string;
+      cryptoView?: string;
+      recessionRisk?: number;
+    };
 
     if (!VALID_LABELS.includes(label as ValidLabel)) {
       return res.status(400).json({ error: `Invalid label. Must be one of: ${VALID_LABELS.join(", ")}` });
     }
 
-    const now = new Date();
+    if (recessionRisk != null && (recessionRisk < 0 || recessionRisk > 100)) {
+      return res.status(400).json({ error: "recessionRisk must be 0–100" });
+    }
 
-    await db.update(macroPostureTable)
-      .set({ isActive: false, supersededAt: now })
-      .where(and(eq(macroPostureTable.isActive, true), eq(macroPostureTable.userId, req.userId)));
-
-    const [newRow] = await db.insert(macroPostureTable)
-      .values({ label, notes: notes ?? null, cryptoView: cryptoView ?? null, isActive: true, setAt: now, userId: req.userId })
-      .returning();
-
-    return res.json({
-      id: newRow.id, label: newRow.label, notes: newRow.notes, cryptoView: newRow.cryptoView,
-      isActive: newRow.isActive, setAt: newRow.setAt.toISOString(), createdAt: newRow.createdAt.toISOString(),
-    });
+    const result = await setMacroPosture(req.userId, { label, notes, cryptoView, recessionRisk });
+    return res.json(result);
   } catch (err) {
-    console.error("[macro-posture POST] error:", err);
+    logger.error(err, "[macro-posture POST] error");
     return res.status(500).json({ error: "Failed to set macro posture" });
   }
 });

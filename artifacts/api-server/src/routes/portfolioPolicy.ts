@@ -2,6 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { portfolioPolicyTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { logger } from "../lib/logger";
 
 const router: IRouter = Router();
 
@@ -25,7 +26,7 @@ router.get("/", async (req, res) => {
     if (!row) return res.json({});
     return res.json(toPolicyResponse(row));
   } catch (error) {
-    console.error("[portfolio-policy GET /] Error:", error);
+    logger.error(error, "[portfolio-policy GET /] Error");
     return res.status(500).json({ error: "Failed to fetch portfolio policy" });
   }
 });
@@ -56,7 +57,7 @@ router.put("/", async (req, res) => {
     const [created] = await db.insert(portfolioPolicyTable).values(values as any).returning();
     return res.json(toPolicyResponse(created));
   } catch (error) {
-    console.error("[portfolio-policy PUT /] Error:", error);
+    logger.error(error, "[portfolio-policy PUT /] Error");
     return res.status(500).json({ error: "Failed to update portfolio policy" });
   }
 });

@@ -1,40 +1,25 @@
 import { Router, type IRouter } from "express";
-import { db } from "@workspace/db";
-import { accountsTable, positionsTable, activitiesTable } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
-import { fetchLivePrices } from "./positions";
+import { logger } from "../lib/logger";
 import { validate } from "../middlewares/validate";
 import { CreateAccountBody, UpdateAccountBody } from "@workspace/api-zod/schemas";
+import {
+  listAccounts,
+  getAccount,
+  createAccount,
+  updateAccount,
+  deleteAccount,
+  listAccountPositions,
+  toAccountResponse,
+} from "../services/accountService";
 
 const router: IRouter = Router();
 
-function toAccountResponse(a: typeof accountsTable.$inferSelect) {
-  return {
-    id: a.id,
-    name: a.name,
-    broker: a.broker,
-    accountType: a.accountType,
-    currency: a.currency,
-    initialBalance: parseFloat(a.initialBalance),
-    currentBalance: parseFloat(a.currentBalance),
-    sleeveKey: a.sleeveKey ?? null,
-    maxLeverageRatio: a.maxLeverageRatio != null ? parseFloat(a.maxLeverageRatio) : null,
-    ipsVersion: a.ipsVersion ?? null,
-    concentrationLimit: a.concentrationLimit != null ? parseFloat(a.concentrationLimit) : null,
-    leverageCeiling: a.leverageCeiling != null ? parseFloat(a.leverageCeiling) : null,
-    createdAt: a.createdAt.toISOString(),
-    updatedAt: a.updatedAt.toISOString(),
-  };
-}
-
 router.get("/", async (req, res) => {
   try {
-    const accounts = await db.select().from(accountsTable)
-      .where(eq(accountsTable.userId, req.userId))
-      .orderBy(accountsTable.createdAt);
-    res.json(accounts.map(toAccountResponse));
+    const accounts = await listAccounts(req.userId);
+    res.json(accounts);
   } catch (error) {
-    console.error("[accounts GET /] Error:", error);
+    logger.error(error, "[accounts GET /] Error");
     res.status(500).json({ error: "Failed to fetch accounts" });
   }
 });
@@ -42,16 +27,8 @@ router.get("/", async (req, res) => {
 router.post("/", validate(CreateAccountBody), async (req, res) => {
   try {
     const { name, broker, accountType, currency, initialBalance } = req.body;
-    const [account] = await db.insert(accountsTable).values({
-      name,
-      broker,
-      accountType,
-      currency: currency || "USD",
-      initialBalance: initialBalance.toString(),
-      currentBalance: initialBalance.toString(),
-      userId: req.userId,
-    }).returning();
-    res.status(201).json(toAccountResponse(account));
+    const account = await createAccount({ name, broker, accountType, currency, initialBalance, userId: req.userId });
+    res.status(201).json(account);
   } catch (error) {
     res.status(500).json({ error: "Failed to create account" });
   }
@@ -60,8 +37,7 @@ router.post("/", validate(CreateAccountBody), async (req, res) => {
 router.get("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    const [account] = await db.select().from(accountsTable)
-      .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, req.userId)));
+    const account = await getAccount(id, req.userId);
     if (!account) return res.status(404).json({ error: "Account not found" });
     return res.json(toAccountResponse(account));
   } catch (error) {
@@ -73,21 +49,11 @@ router.put("/:id", validate(UpdateAccountBody), async (req, res) => {
   try {
     const id = parseInt(Array.isArray(req.params.id) ? req.params.id[0] : req.params.id, 10);
     const { name, broker, accountType, currentBalance, sleeveKey, maxLeverageRatio, ipsVersion, concentrationLimit, leverageCeiling } = req.body;
-    const updates: Record<string, unknown> = { updatedAt: new Date() };
-    if (name !== undefined) updates.name = name;
-    if (broker !== undefined) updates.broker = broker;
-    if (accountType !== undefined) updates.accountType = accountType;
-    if (currentBalance !== undefined) updates.currentBalance = currentBalance.toString();
-    if (sleeveKey !== undefined) updates.sleeveKey = sleeveKey || null;
-    if (maxLeverageRatio !== undefined) updates.maxLeverageRatio = maxLeverageRatio != null ? maxLeverageRatio.toString() : null;
-    if (ipsVersion !== undefined) updates.ipsVersion = ipsVersion || null;
-    if (concentrationLimit !== undefined) updates.concentrationLimit = concentrationLimit != null ? concentrationLimit.toString() : null;
-    if (leverageCeiling !== undefined) updates.leverageCeiling = leverageCeiling != null ? leverageCeiling.toString() : null;
-    const [account] = await db.update(accountsTable).set(updates)
-      .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, req.userId)))
-      .returning();
+    const account = await updateAccount(id, req.userId, {
+      name, broker, accountType, currentBalance, sleeveKey, maxLeverageRatio, ipsVersion, concentrationLimit, leverageCeiling,
+    });
     if (!account) return res.status(404).json({ error: "Account not found" });
-    return res.json(toAccountResponse(account));
+    return res.json(account);
   } catch (error) {
     return res.status(500).json({ error: "Failed to update account" });
   }
@@ -96,13 +62,8 @@ router.put("/:id", validate(UpdateAccountBody), async (req, res) => {
 router.delete("/:id", async (req, res) => {
   try {
     const id = parseInt(req.params.id);
-    // Verify ownership before cascading deletes
-    const [account] = await db.select({ id: accountsTable.id }).from(accountsTable)
-      .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, req.userId)));
-    if (!account) return res.status(404).json({ error: "Account not found" });
-    await db.delete(positionsTable).where(eq(positionsTable.accountId, id));
-    await db.delete(activitiesTable).where(eq(activitiesTable.accountId, id));
-    await db.delete(accountsTable).where(eq(accountsTable.id, id));
+    const found = await deleteAccount(id, req.userId);
+    if (!found) return res.status(404).json({ error: "Account not found" });
     return res.status(204).send();
   } catch (error) {
     return res.status(500).json({ error: "Failed to delete account" });
@@ -112,80 +73,11 @@ router.delete("/:id", async (req, res) => {
 router.get("/:id/positions", async (req, res) => {
   try {
     const accountId = parseInt(req.params.id);
-    // Verify account ownership
-    const [account] = await db.select({ id: accountsTable.id }).from(accountsTable)
-      .where(and(eq(accountsTable.id, accountId), eq(accountsTable.userId, req.userId)));
-    if (!account) return res.status(404).json({ error: "Account not found" });
-
-    const positions = await db.select().from(positionsTable)
-      .where(eq(positionsTable.accountId, accountId))
-      .orderBy(positionsTable.symbol);
-
-    if (positions.length === 0) return res.json([]);
-
-    const activePositions = positions.filter(p => parseFloat(p.quantity) > 0);
-    const closedPositions = positions.filter(p => parseFloat(p.quantity) <= 0);
-
-    const priceMap = activePositions.length > 0
-      ? await fetchLivePrices(activePositions.map(p => p.symbol))
-      : {};
-
-    await Promise.allSettled(
-      activePositions
-        .filter(p => priceMap[p.symbol] !== undefined)
-        .map(p =>
-          db.update(positionsTable)
-            .set({ currentPrice: priceMap[p.symbol].price.toString(), updatedAt: new Date() })
-            .where(eq(positionsTable.id, p.id))
-        )
-    );
-
-    const mapPosition = (p: typeof positions[number], live: boolean) => {
-      const qty = parseFloat(p.quantity);
-      const avg = parseFloat(p.avgCost);
-      const cur = live ? (priceMap[p.symbol]?.price ?? parseFloat(p.currentPrice)) : parseFloat(p.currentPrice);
-      const marketValue = qty * cur;
-      const unrealizedPnl = marketValue - qty * avg;
-      const unrealizedPnlPct = qty * avg > 0 ? (unrealizedPnl / (qty * avg)) * 100 : 0;
-      const prevPrice = live ? (priceMap[p.symbol]?.previousClose ?? cur) : cur;
-      const dayChange = qty * (cur - prevPrice);
-      const dayChangePct = live ? (priceMap[p.symbol]?.changePercent ?? 0) : 0;
-      return {
-        id: p.id,
-        accountId: p.accountId,
-        symbol: p.symbol,
-        name: p.name,
-        quantity: qty,
-        avgCost: avg,
-        currentPrice: cur,
-        marketValue,
-        unrealizedPnl,
-        unrealizedPnlPct,
-        dayChange,
-        dayChangePct,
-        closed: !live,
-        assetType: p.assetType ?? undefined,
-        sector: p.sector ?? undefined,
-        notes: p.notes ?? undefined,
-        positionBucket: p.positionBucket ?? null,
-        ipsAction: p.ipsAction ?? null,
-        stopPrice: p.stopPrice != null ? parseFloat(p.stopPrice) : null,
-        addZoneLow: p.addZoneLow != null ? parseFloat(p.addZoneLow) : null,
-        addZoneHigh: p.addZoneHigh != null ? parseFloat(p.addZoneHigh) : null,
-        cutListAddedAt: p.cutListAddedAt ? p.cutListAddedAt.toISOString() : null,
-        policyNote: p.policyNote ?? null,
-        ipsVersion: p.ipsVersion ?? null,
-        createdAt: p.createdAt.toISOString(),
-        updatedAt: p.updatedAt.toISOString(),
-      };
-    };
-
-    return res.json([
-      ...activePositions.map(p => mapPosition(p, true)),
-      ...closedPositions.map(p => mapPosition(p, false)),
-    ]);
+    const positions = await listAccountPositions(accountId, req.userId);
+    if (positions === null) return res.status(404).json({ error: "Account not found" });
+    return res.json(positions);
   } catch (error) {
-    console.error(`[accounts GET /:id/positions] Error:`, error);
+    logger.error(error, "[accounts GET /:id/positions] Error");
     return res.status(500).json({ error: "Failed to fetch positions" });
   }
 });

@@ -2,38 +2,13 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { positionsTable } from "@workspace/db";
 import { eq } from "drizzle-orm";
+import { logger } from "../lib/logger";
+import { YAHOO_BASE, toYahooSymbol, CRYPTO_SYMBOLS } from "../lib/priceService";
 
 const router: IRouter = Router();
 
-const YAHOO_BASE = "https://query1.finance.yahoo.com";
-
-// Keep in sync with routes/positions.ts
-const CRYPTO_SYMBOLS = new Set([
-  "BTC", "ETH", "SOL", "ADA", "XRP", "DOGE", "AVAX", "DOT", "MATIC",
-  "LINK", "UNI", "ATOM", "LTC", "BCH", "XLM", "ALGO", "VET", "FIL",
-  "TRX", "SHIB", "BNB", "NEAR", "FTM", "SAND", "MANA", "THETA", "HBAR",
-  "ICP", "ETC", "FLOW", "CHZ", "APE", "CRO", "GRT", "ENJ", "BAT",
-  "ZEC", "DASH", "NEO", "EOS", "PEPE", "WIF", "BONK", "ARB", "OP",
-  "SUI", "APT", "INJ", "TIA", "SEI", "RUNE", "CRV", "AAVE", "COMP",
-  "MKR", "SNX", "YFI", "SUSHI", "ZRX",
-]);
-const SYMBOL_OVERRIDES: Record<string, string> = {
-  "GOLD": "GC=F",
-  "XAU": "GC=F",
-  "SILVER": "SI=F",
-  "XAG": "SI=F",
-};
-
-function toYahooSymbol(symbol: string): string {
-  const upper = symbol.toUpperCase();
-  if (SYMBOL_OVERRIDES[upper]) return SYMBOL_OVERRIDES[upper];
-  if (!upper.includes("-") && !upper.includes(".") && CRYPTO_SYMBOLS.has(upper)) {
-    return `${upper}-USD`;
-  }
-  return upper;
-}
-
-async function fetchYahoo(url: string) {
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function fetchYahoo(url: string): Promise<any> {
   const res = await fetch(url, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
@@ -46,7 +21,7 @@ async function fetchYahoo(url: string) {
 router.get("/search", async (req, res) => {
   try {
     const q = (req.query.q as string) || "";
-    if (!q.trim()) return res.json([]);
+    if (!q.trim()) { res.json([]); return; }
     const url = `${YAHOO_BASE}/v1/finance/search?q=${encodeURIComponent(q)}&lang=en-US&region=US&quotesCount=6&newsCount=0&listsCount=0`;
     const data = await fetchYahoo(url);
     const quotes = (data?.quotes || []).filter(
@@ -70,7 +45,7 @@ router.get("/quote/:symbol", async (req, res) => {
     const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSymbol}?interval=1d&range=5d`;
     const data = await fetchYahoo(url);
     const result = data?.chart?.result?.[0];
-    if (!result) return res.status(404).json({ error: "Symbol not found" });
+    if (!result) { res.status(404).json({ error: "Symbol not found" }); return; }
     const meta = result.meta;
     const regularMarketPrice = meta.regularMarketPrice || 0;
     const marketState: string = meta?.marketState ?? "CLOSED";
@@ -119,7 +94,7 @@ router.get("/chart/:symbol", async (req, res) => {
     const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSymbol}?interval=${interval}&range=${range}`;
     const data = await fetchYahoo(url);
     const result = data?.chart?.result?.[0];
-    if (!result) return res.status(404).json({ error: "Symbol not found" });
+    if (!result) { res.status(404).json({ error: "Symbol not found" }); return; }
     const timestamps = result.timestamp || [];
     const quote = result.indicators?.quote?.[0] || {};
     res.json({
@@ -323,7 +298,7 @@ router.get("/screener", async (req, res) => {
 
     res.json(stocks);
   } catch (error) {
-    console.error("[market/screener]", error);
+    logger.error(error, "[market/screener]");
     res.status(500).json({ error: "Failed to screen stocks" });
   }
 });

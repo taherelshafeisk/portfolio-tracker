@@ -1,6 +1,6 @@
 import app from "./app";
 import { logger } from "./lib/logger";
-import { reconcileAll } from "./routes/activities";
+import { reconcileAll } from "./services/activityService";
 import { captureSnapshot } from "./lib/snapshotService";
 import { db, activitiesTable, positionsTable, accountsTable } from "@workspace/db";
 import cron from "node-cron";

@@ -142,6 +142,7 @@ export const ListAccountPositionsResponseItem = zod.object({
     .optional(),
   sector: zod.string().optional(),
   notes: zod.string().optional(),
+  notesUpdatedAt: zod.date().nullish(),
   positionBucket: zod
     .enum(["core", "swing", "spec", "def", "anchor", "inc", "cut"])
     .nullish(),
@@ -348,6 +349,7 @@ export const UpdatePositionResponse = zod.object({
     .optional(),
   sector: zod.string().optional(),
   notes: zod.string().optional(),
+  notesUpdatedAt: zod.date().nullish(),
   positionBucket: zod
     .enum(["core", "swing", "spec", "def", "anchor", "inc", "cut"])
     .nullish(),

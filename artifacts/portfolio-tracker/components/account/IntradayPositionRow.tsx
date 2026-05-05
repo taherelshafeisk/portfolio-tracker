@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { Feather } from '@expo/vector-icons';
 import { colors } from '@/constants/colors';
+import { fonts } from '@/constants/fonts';
 import { BUCKET_LABELS, BUCKET_COLORS, type Bucket } from '@/lib/buckets';
 import type { Position } from '@/context/PortfolioContext';
 
@@ -48,17 +48,21 @@ export function IntradayPositionRow({
       {/* Left: symbol + badges */}
       <View style={styles.left}>
         <Text style={styles.symbol}>{pos.symbol}</Text>
-        <View style={[styles.bucketBadge, { backgroundColor: bucketColor + '20', borderColor: bucketColor + '50' }]}>
+        <View style={[styles.bucketBadge, { borderColor: bucketColor + '60' }]}>
           <Text style={[styles.bucketLabel, { color: bucketColor }]}>{BUCKET_LABELS[bucket]}</Text>
         </View>
         {hasConcBadge && (
           <View style={[styles.policyBadge, concentrationSeverity === 'critical' ? styles.badgeCritical : styles.badgeWarning]}>
-            <Text style={styles.policyBadgeText}>Over limit</Text>
+            <Text style={[styles.policyBadgeText, { color: concentrationSeverity === 'critical' ? colors.negative : colors.amber }]}>
+              Over limit
+            </Text>
           </View>
         )}
         {hasDdBadge && (
           <View style={[styles.policyBadge, drawdownSeverity === 'critical' ? styles.badgeCritical : styles.badgeWarning]}>
-            <Text style={styles.policyBadgeText}>Drawdown</Text>
+            <Text style={[styles.policyBadgeText, { color: drawdownSeverity === 'critical' ? colors.negative : colors.amber }]}>
+              Drawdown
+            </Text>
           </View>
         )}
       </View>
@@ -80,7 +84,7 @@ export function IntradayPositionRow({
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           style={styles.menuBtn}
         >
-          <Feather name="more-vertical" size={14} color={colors.textMuted} />
+          <Text style={styles.menuDots}>···</Text>
         </Pressable>
       </View>
     </Pressable>
@@ -94,47 +98,49 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     paddingVertical: 9,
     paddingHorizontal: 12,
-    borderRadius: 10,
-    backgroundColor: colors.surface,
-    marginBottom: 4,
+    borderRadius: 2,
+    backgroundColor: colors.card,
+    marginBottom: 2,
     borderWidth: 1,
-    borderColor: colors.separator,
+    borderColor: colors.hair2,
   },
-  pressed: { opacity: 0.75 },
+  pressed: { backgroundColor: colors.bgInset },
   left: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 5,
     flex: 1,
     flexWrap: 'wrap',
   },
   symbol: {
-    fontFamily: 'Inter_700Bold',
-    fontSize: 14,
-    color: colors.textPrimary,
-    minWidth: 52,
+    fontFamily: fonts.monoBold,
+    fontSize: 12,
+    color: colors.ink,
+    minWidth: 44,
   },
   bucketBadge: {
-    paddingHorizontal: 6,
+    paddingHorizontal: 5,
     paddingVertical: 2,
-    borderRadius: 6,
+    borderRadius: 2,
     borderWidth: 1,
+    backgroundColor: colors.bgInset,
   },
   bucketLabel: {
-    fontFamily: 'Inter_500Medium',
+    fontFamily: fonts.mono,
     fontSize: 9,
+    letterSpacing: 0.5,
   },
   policyBadge: {
     paddingHorizontal: 5,
     paddingVertical: 2,
-    borderRadius: 4,
+    borderRadius: 2,
   },
-  badgeCritical: { backgroundColor: 'rgba(255,59,48,0.18)' },
-  badgeWarning:  { backgroundColor: 'rgba(255,149,0,0.18)' },
+  badgeCritical: { backgroundColor: colors.negativeLight },
+  badgeWarning:  { backgroundColor: colors.amberSoft },
   policyBadgeText: {
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: fonts.mono,
     fontSize: 9,
-    color: colors.textSecondary,
+    letterSpacing: 0.3,
   },
   right: {
     flexDirection: 'row',
@@ -142,30 +148,40 @@ const styles = StyleSheet.create({
     gap: 8,
   },
   dayPct: {
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: fonts.mono,
     fontSize: 12,
+    fontVariant: ['tabular-nums'],
     width: 44,
     textAlign: 'right',
   },
   pnlPct: {
-    fontFamily: 'Inter_500Medium',
+    fontFamily: fonts.mono,
     fontSize: 11,
-    color: colors.textSecondary,
+    fontVariant: ['tabular-nums'],
+    color: colors.ink3,
     width: 50,
     textAlign: 'right',
   },
   todayPnl: {
-    fontFamily: 'Inter_500Medium',
+    fontFamily: fonts.mono,
     fontSize: 12,
+    fontVariant: ['tabular-nums'],
     width: 50,
     textAlign: 'right',
   },
   mktVal: {
-    fontFamily: 'Inter_600SemiBold',
+    fontFamily: fonts.monoMedium,
     fontSize: 12,
-    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'],
+    color: colors.ink,
     width: 56,
     textAlign: 'right',
   },
   menuBtn: { padding: 4 },
+  menuDots: {
+    fontFamily: fonts.sans,
+    fontSize: 14,
+    color: colors.ink3,
+    letterSpacing: 1,
+  },
 });

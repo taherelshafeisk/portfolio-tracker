@@ -3,13 +3,13 @@
  *
  * Displays violations-only actions for a single sleeve.
  * Items come from computeActions() filtered to this account — violations only
- * (concentration / drawdown / leverage). No movers, no risers, no neutral items.
+ * (concentration / leverage). No movers, no risers, no neutral items.
  */
 
 import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
-import { Feather } from '@expo/vector-icons';
 import { colors } from '@/constants/colors';
+import { fonts } from '@/constants/fonts';
 import type { Action } from '@/lib/actions';
 
 interface Props {
@@ -24,35 +24,27 @@ export function ActionableNowSection({ actions, onPressItem }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Feather name="zap" size={13} color={colors.primary} />
-        <Text style={styles.headerText}>Actionable Now</Text>
+        <Text style={styles.eyebrow}>NEEDS ATTENTION</Text>
       </View>
 
-      {filtered.map(action => {
-        const barColor = action.severity === 'red' ? colors.negative : '#F59E0B';
+      {filtered.map((action, i) => {
+        const isBreach = action.category === 'hard_rule';
+        const barColor = isBreach ? colors.negative : colors.amber;
         const typeLabel =
-          action.type === 'concentration'
-            ? 'Concentration'
-            : action.type === 'drawdown'
-            ? 'Drawdown'
-            : 'Leverage';
+          action.type === 'concentration' ? 'CONCENTRATION' : 'LEVERAGE';
 
         return (
           <Pressable
             key={action.id}
-            style={({ pressed }) => [styles.item, pressed && styles.pressed]}
+            style={[styles.item, i > 0 && styles.itemBorder]}
             onPress={() => onPressItem(action)}
           >
             <View style={[styles.severityBar, { backgroundColor: barColor }]} />
             <View style={styles.itemContent}>
-              <Text style={styles.itemTitle} numberOfLines={2}>
-                {action.label}
-              </Text>
-              <View style={styles.typeChip}>
-                <Text style={[styles.typeLabel, { color: barColor }]}>{typeLabel}</Text>
-              </View>
+              <Text style={[styles.typeLabel, { color: barColor }]}>{typeLabel}</Text>
+              <Text style={styles.itemTitle} numberOfLines={2}>{action.label}</Text>
             </View>
-            <Feather name="chevron-right" size={14} color={colors.textMuted} />
+            <Text style={styles.chevron}>›</Text>
           </Pressable>
         );
       })}
@@ -60,64 +52,65 @@ export function ActionableNowSection({ actions, onPressItem }: Props) {
   );
 }
 
-// ─── Styles ───────────────────────────────────────────────────────────────────
-
 const styles = StyleSheet.create({
   container: {
-    backgroundColor: colors.surface,
-    borderRadius: 16,
+    backgroundColor: colors.card,
     borderWidth: 1,
-    borderColor: colors.separator,
+    borderColor: colors.hair2,
+    borderRadius: 2,
     marginBottom: 16,
     overflow: 'hidden',
   },
   header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
     paddingHorizontal: 14,
-    paddingVertical: 10,
+    paddingTop: 10,
+    paddingBottom: 6,
     borderBottomWidth: 1,
-    borderBottomColor: colors.separator,
+    borderBottomColor: colors.hair,
   },
-  headerText: {
-    fontFamily: 'Inter_600SemiBold',
-    fontSize: 13,
-    color: colors.primary,
+  eyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: colors.ink3,
   },
   item: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 12,
+    paddingVertical: 10,
     paddingRight: 14,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.separator + '80',
   },
-  pressed: { backgroundColor: colors.surfaceElevated },
+  itemBorder: {
+    borderTopWidth: 1,
+    borderTopColor: colors.hair,
+  },
   severityBar: {
     width: 3,
-    alignSelf: 'stretch',
     borderRadius: 2,
+    alignSelf: 'stretch',
+    minHeight: 28,
     marginHorizontal: 12,
-    minHeight: 36,
   },
   itemContent: {
     flex: 1,
-    gap: 4,
-  },
-  itemTitle: {
-    fontFamily: 'Inter_400Regular',
-    fontSize: 13,
-    color: colors.textPrimary,
-    lineHeight: 18,
-  },
-  typeChip: {
-    alignSelf: 'flex-start',
+    gap: 2,
   },
   typeLabel: {
-    fontFamily: 'Inter_500Medium',
-    fontSize: 11,
+    fontFamily: fonts.mono,
+    fontSize: 8,
+    letterSpacing: 1.4,
     textTransform: 'uppercase',
-    letterSpacing: 0.3,
+  },
+  itemTitle: {
+    fontFamily: fonts.sansMedium,
+    fontSize: 12,
+    color: colors.ink,
+    lineHeight: 16,
+  },
+  chevron: {
+    fontSize: 18,
+    color: colors.ink3,
+    paddingLeft: 8,
   },
 });

@@ -677,7 +677,7 @@ function ContributionBars({
   const sleeves = useMemo(() => {
     const map = new Map<string, { name: string; change: number }>();
     for (const c of pulse.contributions) {
-      const key = c.positionBucket ?? c.accountName;
+      const key = c.positionBucket || '';
       const existing = map.get(key);
       if (existing) {
         existing.change += c.dayChangeDollars;
@@ -1101,14 +1101,16 @@ export default function HomeScreen() {
     if (!pulseData || pct <= 0.1) return null;
     const sleeveMap = new Map<string, number>();
     for (const c of pulseData.contributions) {
-      const key = c.positionBucket ?? c.accountName;
+      const key = c.positionBucket || '';
       sleeveMap.set(key, (sleeveMap.get(key) ?? 0) + c.dayChangeDollars);
     }
-    const tops = Array.from(sleeveMap.entries())
+    const sorted = Array.from(sleeveMap.entries())
       .filter(([, v]) => v > 0)
-      .sort(([, a], [, b]) => b - a)
-      .slice(0, 2)
-      .map(([key]) => sleeveDisplayName(key));
+      .sort(([, a], [, b]) => b - a);
+    // Prefer named sleeves; only use Unassigned if there are no named contributors.
+    const named = sorted.filter(([key]) => key !== '');
+    const candidates = named.length > 0 ? named : sorted;
+    const tops = candidates.slice(0, 2).map(([key]) => sleeveDisplayName(key));
     if (tops.length === 0) return null;
     return tops.length === 1 ? tops[0] : `${tops[0]} and ${tops[1]}`;
   }, [pulseData, summary]);

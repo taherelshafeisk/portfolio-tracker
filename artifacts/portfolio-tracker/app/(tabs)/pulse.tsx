@@ -53,7 +53,7 @@ function SleeveBidirBars({ contributions }: { contributions: PositionContributio
   const sleeves = useMemo(() => {
     const map = new Map<string, { dayChange: number; nav: number }>();
     for (const c of contributions) {
-      const key = c.positionBucket ?? c.accountName;
+      const key = c.positionBucket || '';
       const existing = map.get(key);
       if (existing) {
         existing.dayChange += c.dayChangeDollars;
@@ -184,7 +184,7 @@ function PulseListItem({
         <Text style={listStyles.contextLabel}>
           {isDuplicate
             ? item.accountName
-            : sleeveDisplayName(item.positionBucket ?? item.accountName)}
+            : sleeveDisplayName(item.positionBucket)}
           {'  '}
         </Text>
         {isPositive

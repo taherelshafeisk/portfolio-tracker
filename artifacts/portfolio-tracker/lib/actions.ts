@@ -253,6 +253,135 @@ export function computeActions(
   });
 }
 
+// ─── Opportunities ────────────────────────────────────────────────────────────
+
+export const APPROACHING_CONCENTRATION_RATIO = 0.85;
+export const CASH_DEPLOY_THRESHOLD = 0.05;
+
+export type OpportunityType =
+  | 'approaching_concentration'
+  | 'cash_available'
+  | 'policy_missing';
+
+export interface Opportunity {
+  id: string;
+  type: OpportunityType;
+  accountId: number;
+  symbol?: string;
+  positionId?: number;
+  label: string;
+  explanation: string;
+  suggestedAction: string;
+  /** Normalised 0–1: how far into the approaching zone (1 = right at the limit). Used for sorting. */
+  proximityToLimit?: number;
+}
+
+/**
+ * Derives deterministic opportunity signals from the current portfolio state.
+ *
+ * Rules:
+ *   A. approaching_concentration — position is between 85% and 100% of the limit (not a breach).
+ *   B. cash_available            — account has a positive balance ≥ 5% of account NAV.
+ *   C. policy_missing            — account has positions but no explicit concentrationLimit set.
+ *
+ * Does not overlap with computeActions(): approaching_concentration only fires when
+ * fraction ≤ limit; hard breaches remain exclusively in computeActions().
+ */
+export function computeOpportunities(
+  accounts: Account[],
+  positions: Position[],
+  sleeveNavMap: Map<number, number>,
+): Opportunity[] {
+  const results: Opportunity[] = [];
+  const seenIds = new Set<string>();
+
+  function push(opp: Opportunity): void {
+    if (!seenIds.has(opp.id)) {
+      seenIds.add(opp.id);
+      results.push(opp);
+    }
+  }
+
+  // ── Rule A: Approaching concentration limit ──────────────────────────────────
+  const approaching: (Opportunity & { proximityToLimit: number })[] = [];
+
+  for (const account of accounts) {
+    const nav = sleeveNavMap.get(account.id) ?? 0;
+    if (nav <= 0) continue;
+    const limit = account.concentrationLimit ?? DEFAULT_CONCENTRATION_LIMIT;
+    const acctPositions = positions.filter(p => p.accountId === account.id);
+
+    for (const p of acctPositions) {
+      if (!p.marketValue || p.marketValue <= 0) continue;
+      const fraction = p.marketValue / nav;
+      // Hard breach — handled exclusively by computeActions; skip here.
+      if (fraction > limit) continue;
+      // Below the approaching zone.
+      if (fraction < limit * APPROACHING_CONCENTRATION_RATIO) continue;
+
+      const pct = (fraction * 100).toFixed(1);
+      const limitPct = (limit * 100).toFixed(0);
+      const headroomPp = ((limit - fraction) * 100).toFixed(1);
+      // Proximity: 0 = just entered the zone, 1 = at the limit boundary.
+      const proximity =
+        (fraction - limit * APPROACHING_CONCENTRATION_RATIO) /
+        (limit * (1 - APPROACHING_CONCENTRATION_RATIO));
+
+      approaching.push({
+        id: `opp-approaching-${account.id}-${p.id}`,
+        type: 'approaching_concentration',
+        accountId: account.id,
+        symbol: p.symbol,
+        positionId: p.id,
+        label: `${p.symbol} approaching ${limitPct}% limit`,
+        explanation: `At ${pct}% of ${account.name} — ${headroomPp}pp of headroom.`,
+        suggestedAction: 'Monitor on up days',
+        proximityToLimit: proximity,
+      });
+    }
+  }
+
+  // Closest to limit first.
+  approaching.sort((a, b) => b.proximityToLimit - a.proximityToLimit);
+  approaching.forEach(push);
+
+  // ── Rule B: Positive account balance above threshold ─────────────────────────
+  for (const account of accounts) {
+    const nav = sleeveNavMap.get(account.id) ?? 0;
+    if (nav <= 0) continue;
+    if (account.currentBalance <= 0) continue;
+    if (account.currentBalance / nav < CASH_DEPLOY_THRESHOLD) continue;
+
+    const balancePct = ((account.currentBalance / nav) * 100).toFixed(1);
+    push({
+      id: `opp-balance-${account.id}`,
+      type: 'cash_available',
+      accountId: account.id,
+      label: `${account.name} — positive balance`,
+      explanation: `${fmtCurrency(account.currentBalance)} (${balancePct}% of NAV) not allocated to positions.`,
+      suggestedAction: 'Review before adding risk',
+    });
+  }
+
+  // ── Rule C: Missing explicit concentration policy ─────────────────────────────
+  for (const account of accounts) {
+    if (account.concentrationLimit != null) continue;
+    const hasPositions = positions.some(p => p.accountId === account.id && p.marketValue > 0);
+    if (!hasPositions) continue;
+
+    push({
+      id: `opp-policy-${account.id}`,
+      type: 'policy_missing',
+      accountId: account.id,
+      label: `${account.name} — no policy set`,
+      explanation: 'Concentration limit not configured. App is using the 20% default.',
+      suggestedAction: 'Consider setting an explicit limit',
+    });
+  }
+
+  return results;
+}
+
 /**
  * Cross-reference computed actions with DB alerts: attach dbIds, filter out fully acknowledged.
  */

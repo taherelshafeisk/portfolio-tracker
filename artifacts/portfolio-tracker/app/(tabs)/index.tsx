@@ -13,9 +13,9 @@ import { useAuth } from '@/context/AuthContext';
 import { useAIContext } from '@/hooks/useAIContext';
 import { formatCurrency } from '@/components/ui/PnlBadge';
 import {
-  computeActions, reconcileActions,
+  computeActions, reconcileActions, computeOpportunities,
   DEFAULT_CONCENTRATION_LIMIT, DEFAULT_LEVERAGE_CEILING,
-  type Action, type ActionCategory,
+  type Action, type ActionCategory, type Opportunity, type OpportunityType,
 } from '@/lib/actions';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
@@ -349,14 +349,118 @@ const ipsStyles = StyleSheet.create({
   },
 });
 
+const OPPORTUNITY_BADGE: Record<OpportunityType, string> = {
+  approaching_concentration: 'APPROACHING LIMIT',
+  cash_available: 'POSITIVE BALANCE',
+  policy_missing: 'POLICY NOT SET',
+};
+
+function OpportunitiesStrip({ opportunities }: { opportunities: Opportunity[] }) {
+  const visible = opportunities.slice(0, 3);
+  if (visible.length === 0) return null;
+
+  return (
+    <View style={oppStyles.strip}>
+      <View style={oppStyles.headerRow}>
+        <View style={[oppStyles.dot, { backgroundColor: colors.accent }]} />
+        <Text style={oppStyles.headerLabel}>WATCH</Text>
+      </View>
+      {visible.map((opp, i) => (
+        <View key={opp.id} style={[oppStyles.row, i > 0 && oppStyles.rowBorder]}>
+          <View style={[oppStyles.bar, { backgroundColor: colors.accent }]} />
+          <View style={oppStyles.body}>
+            <Text style={[oppStyles.badge, { color: colors.accent }]}>
+              {OPPORTUNITY_BADGE[opp.type]}
+            </Text>
+            <Text style={oppStyles.label} numberOfLines={1}>{opp.label}</Text>
+            <Text style={oppStyles.suggestion} numberOfLines={1}>{opp.suggestedAction}</Text>
+          </View>
+        </View>
+      ))}
+    </View>
+  );
+}
+
+const oppStyles = StyleSheet.create({
+  strip: {
+    marginHorizontal: 22,
+    marginTop: 8,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  dot: { width: 6, height: 6, borderRadius: 3 },
+  headerLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  rowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
+  bar: { width: 3, borderRadius: 2, alignSelf: 'stretch', minHeight: 28, marginRight: 10 },
+  body: { flex: 1 },
+  badge: {
+    fontFamily: fonts.mono,
+    fontSize: 8,
+    letterSpacing: 1.4,
+    textTransform: 'uppercase',
+    marginBottom: 2,
+  },
+  label: {
+    fontFamily: fonts.sansMedium,
+    fontSize: 12,
+    color: colors.ink,
+    lineHeight: 16,
+  },
+  suggestion: {
+    fontFamily: fonts.sans,
+    fontSize: 11,
+    color: colors.ink3,
+    marginTop: 1,
+  },
+});
+
+/** Expand raw positionBucket/sleeveKey values to human-readable names. */
+function sleeveDisplayName(key: string): string {
+  const ABBREVS: Record<string, string> = {
+    def: 'Defensive',
+    inc: 'Income',
+    spec: 'Speculative',
+    mkt: 'Market',
+    idx: 'Index',
+    div: 'Dividend',
+    grw: 'Growth',
+    alt: 'Alternative',
+  };
+  const lower = key.toLowerCase().trim();
+  if (ABBREVS[lower]) return ABBREVS[lower];
+  // Title-case multi-word keys; leave single-word capitalised keys as-is
+  return key.replace(/\b\w/g, c => c.toUpperCase());
+}
+
 function ContributionBars({
   pulse,
-  totalNav,
 }: {
   pulse: PulseData;
-  totalNav: number;
+  totalNav?: number;
 }) {
-  // Group contributions by positionBucket (sleeve)
   const sleeves = useMemo(() => {
     const map = new Map<string, { name: string; change: number }>();
     for (const c of pulse.contributions) {
@@ -365,34 +469,46 @@ function ContributionBars({
       if (existing) {
         existing.change += c.dayChangeDollars;
       } else {
-        map.set(key, { name: key, change: c.dayChangeDollars });
+        map.set(key, { name: sleeveDisplayName(key), change: c.dayChangeDollars });
       }
     }
-    return Array.from(map.entries()).map(([, v]) => v);
+    return Array.from(map.values()).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
   }, [pulse.contributions]);
 
   const maxAbs = Math.max(...sleeves.map(s => Math.abs(s.change)), 1);
 
   return (
     <View style={barsStyles.card}>
-      <Text style={barsStyles.eyebrow}>TODAY'S CONTRIBUTION</Text>
+      <View style={barsStyles.header}>
+        <Text style={barsStyles.eyebrow}>CONTRIBUTION BY SLEEVE</Text>
+        <Text style={barsStyles.headerRight}>$ TODAY</Text>
+      </View>
       {sleeves.map((sleeve, i) => {
+        const isZero = sleeve.change === 0;
+        const isPos = sleeve.change > 0;
         const frac = Math.abs(sleeve.change) / maxAbs;
-        const isPos = sleeve.change >= 0;
         const barColor = isPos ? colors.positive : colors.negative;
+        const barBg = isPos ? colors.positiveLight : colors.negativeLight;
         return (
           <View key={sleeve.name} style={[barsStyles.row, i > 0 && barsStyles.rowBorder]}>
             <Text style={barsStyles.sleeveLabel} numberOfLines={1}>{sleeve.name}</Text>
             <View style={barsStyles.barTrack}>
-              <View
-                style={[
-                  barsStyles.bar,
-                  { width: `${Math.round(frac * 100)}%`, backgroundColor: barColor + '60', borderRightWidth: 2, borderRightColor: barColor },
-                ]}
-              />
+              {/* Left half — negative bars fill rightward from right edge */}
+              <View style={barsStyles.halfLeft}>
+                {!isPos && !isZero && (
+                  <View style={[barsStyles.barNeg, { width: `${Math.round(frac * 100)}%` as any }]} />
+                )}
+              </View>
+              <View style={barsStyles.centerTick} />
+              {/* Right half — positive bars fill leftward from left edge */}
+              <View style={barsStyles.halfRight}>
+                {isPos && (
+                  <View style={[barsStyles.barPos, { width: `${Math.round(frac * 100)}%` as any }]} />
+                )}
+              </View>
             </View>
-            <Text style={[barsStyles.changeVal, { color: barColor }]}>
-              {fmtSigned(sleeve.change)}
+            <Text style={[barsStyles.changeVal, isZero ? barsStyles.changeZero : { color: barColor }]}>
+              {isZero ? '—' : fmtSigned(sleeve.change)}
             </Text>
           </View>
         );
@@ -413,13 +529,20 @@ const barsStyles = StyleSheet.create({
     paddingTop: 12,
     paddingBottom: 4,
   },
+  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   eyebrow: {
     fontFamily: fonts.mono,
     fontSize: 9,
     letterSpacing: 2,
     textTransform: 'uppercase',
     color: colors.ink3,
-    marginBottom: 10,
+  },
+  headerRight: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: colors.ink3,
   },
   row: {
     flexDirection: 'row',
@@ -432,23 +555,39 @@ const barsStyles = StyleSheet.create({
     fontFamily: fonts.sans,
     fontSize: 12,
     color: colors.ink2,
-    width: 80,
+    width: 90,
   },
   barTrack: {
     flex: 1,
-    height: 14,
-    backgroundColor: colors.bgInset,
-    borderRadius: 1,
-    overflow: 'hidden',
+    height: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
   },
-  bar: { height: '100%', borderRadius: 1 },
+  halfLeft: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
+  halfRight: { flex: 1, flexDirection: 'row', justifyContent: 'flex-start' },
+  centerTick: { width: 1, height: 12, backgroundColor: colors.hair2 },
+  barNeg: {
+    height: 12,
+    backgroundColor: colors.negativeLight,
+    borderLeftWidth: 2,
+    borderLeftColor: colors.negative,
+    borderRadius: 1,
+  },
+  barPos: {
+    height: 12,
+    backgroundColor: colors.positiveLight,
+    borderRightWidth: 2,
+    borderRightColor: colors.positive,
+    borderRadius: 1,
+  },
   changeVal: {
     fontFamily: fonts.mono,
     fontSize: 11,
     fontVariant: ['tabular-nums'],
-    width: 68,
+    width: 60,
     textAlign: 'right',
   },
+  changeZero: { color: colors.ink3 },
 });
 
 function MoversGrid({ leaders, laggards }: { leaders: PulseContribution[]; laggards: PulseContribution[] }) {
@@ -729,6 +868,11 @@ export default function HomeScreen() {
     [accounts, positions, sleeveNavMap],
   );
 
+  const computedOpportunities = useMemo(
+    () => computeOpportunities(accounts, positions, sleeveNavMap),
+    [accounts, positions, sleeveNavMap],
+  );
+
   const { data: dbAlerts, refetch: refetchAlerts } = useQuery({
     queryKey: ['alerts', 'all-active'],
     queryFn: () => apiGet<ApiAlert[]>('/alerts?status=active,acknowledged'),
@@ -963,6 +1107,9 @@ export default function HomeScreen() {
           onActionPress={navigateToAction}
           onDismiss={handleDismiss}
         />
+
+        {/* ── Opportunities strip ── */}
+        <OpportunitiesStrip opportunities={computedOpportunities} />
 
         {/* ── Contribution bars (from pulse) ── */}
         {pulseData && pulseData.contributions.length > 0 && (

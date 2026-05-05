@@ -9,6 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
 import { apiGet } from '@/context/PortfolioContext';
+import { sleeveDisplayName } from '@/lib/formatters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -63,7 +64,7 @@ function SleeveBidirBars({ contributions }: { contributions: PositionContributio
     }
     return Array.from(map.entries())
       .map(([name, { dayChange, nav }]) => ({
-        name,
+        name: sleeveDisplayName(name),
         dayChange,
         dayPct: nav > 0 ? (dayChange / nav) * 100 : 0,
       }))
@@ -153,10 +154,12 @@ function PulseListItem({
   item,
   maxAbs,
   isPositive,
+  isDuplicate = false,
 }: {
   item: PositionContribution;
   maxAbs: number;
   isPositive: boolean;
+  isDuplicate?: boolean;
 }) {
   const barColor = isPositive ? colors.positive : colors.negative;
   const barWidth = maxAbs > 0 ? (Math.abs(item.dayChangeDollars) / maxAbs) * 100 : 0;
@@ -178,7 +181,12 @@ function PulseListItem({
         <View style={[listStyles.barFill, { width: `${barWidth}%` as any, backgroundColor: barColor }]} />
       </View>
       <Text style={listStyles.context}>
-        <Text style={listStyles.contextLabel}>{item.positionBucket ?? item.accountName}  </Text>
+        <Text style={listStyles.contextLabel}>
+          {isDuplicate
+            ? item.accountName
+            : sleeveDisplayName(item.positionBucket ?? item.accountName)}
+          {'  '}
+        </Text>
         {isPositive
           ? `Up ${fmtPct(Math.abs(item.dayChangePct))} · since entry ${item.unrealizedPnlPct >= 0 ? '+' : ''}${item.unrealizedPnlPct.toFixed(1)}%`
           : `Down ${fmtPct(Math.abs(item.dayChangePct))} · since entry ${item.unrealizedPnlPct >= 0 ? '+' : ''}${item.unrealizedPnlPct.toFixed(1)}%`}
@@ -265,6 +273,18 @@ export default function PulseScreen() {
   const maxLeaderAbs = Math.max(...displayLeaders.map(l => Math.abs(l.dayChangeDollars)), 1);
   const maxLaggardAbs = Math.max(...displayLaggards.map(l => Math.abs(l.dayChangeDollars)), 1);
 
+  // Tickers that appear more than once in the combined list get their account name shown.
+  const duplicateTickers = useMemo(() => {
+    const all = [...displayLeaders, ...displayLaggards];
+    const seen = new Set<string>();
+    const dupes = new Set<string>();
+    for (const item of all) {
+      if (seen.has(item.ticker)) dupes.add(item.ticker);
+      else seen.add(item.ticker);
+    }
+    return dupes;
+  }, [displayLeaders, displayLaggards]);
+
   const hasData = !!data;
 
   return (
@@ -349,7 +369,7 @@ export default function PulseScreen() {
                 <View style={styles.listTable}>
                   {displayLeaders.map((item, i) => (
                     <View key={item.id} style={i > 0 ? styles.listItemBorder : undefined}>
-                      <PulseListItem item={item} maxAbs={maxLeaderAbs} isPositive />
+                      <PulseListItem item={item} maxAbs={maxLeaderAbs} isPositive isDuplicate={duplicateTickers.has(item.ticker)} />
                     </View>
                   ))}
                 </View>
@@ -371,7 +391,7 @@ export default function PulseScreen() {
                 <View style={styles.listTable}>
                   {displayLaggards.map((item, i) => (
                     <View key={item.id} style={i > 0 ? styles.listItemBorder : undefined}>
-                      <PulseListItem item={item} maxAbs={maxLaggardAbs} isPositive={false} />
+                      <PulseListItem item={item} maxAbs={maxLaggardAbs} isPositive={false} isDuplicate={duplicateTickers.has(item.ticker)} />
                     </View>
                   ))}
                 </View>

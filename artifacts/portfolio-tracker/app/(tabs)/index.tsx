@@ -17,6 +17,7 @@ import {
   DEFAULT_CONCENTRATION_LIMIT, DEFAULT_LEVERAGE_CEILING,
   type Action, type ActionCategory, type Opportunity, type OpportunityType,
 } from '@/lib/actions';
+import { sleeveDisplayName } from '@/lib/formatters';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -666,24 +667,6 @@ const setupStyles = StyleSheet.create({
   },
   chevron: { fontSize: 18, color: colors.ink3, paddingLeft: 8 },
 });
-
-/** Expand raw positionBucket/sleeveKey values to human-readable names. */
-function sleeveDisplayName(key: string): string {
-  const ABBREVS: Record<string, string> = {
-    def: 'Defensive',
-    inc: 'Income',
-    spec: 'Speculative',
-    mkt: 'Market',
-    idx: 'Index',
-    div: 'Dividend',
-    grw: 'Growth',
-    alt: 'Alternative',
-  };
-  const lower = key.toLowerCase().trim();
-  if (ABBREVS[lower]) return ABBREVS[lower];
-  // Title-case multi-word keys; leave single-word capitalised keys as-is
-  return key.replace(/\b\w/g, c => c.toUpperCase());
-}
 
 function ContributionBars({
   pulse,

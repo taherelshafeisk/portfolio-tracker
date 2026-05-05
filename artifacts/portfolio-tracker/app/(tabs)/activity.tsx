@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   View, Text, StyleSheet, FlatList, RefreshControl,
   Pressable, Modal, TextInput, Alert, Platform, Image,
@@ -72,6 +72,10 @@ export default function ActivityScreen() {
   const insets = useSafeAreaInsets();
   const { accounts, activities, positions, isLoading, refreshAll } = usePortfolio();
   const topPad = Platform.OS === 'web' ? 67 : insets.top;
+
+  // Filter state
+  const [filterAccountId, setFilterAccountId] = useState<number | null>(null);
+  const [filterSymbol, setFilterSymbol] = useState('');
 
   // Annotation state
   const [annotatedIds, setAnnotatedIds] = useState<Set<number>>(new Set());
@@ -348,6 +352,20 @@ export default function ActivityScreen() {
 
   const getAccountName = (id: number) => accounts.find(a => a.id === id)?.name || 'Unknown';
 
+  const filteredActivities = useMemo(() => {
+    const symbolUpper = filterSymbol.trim().toUpperCase();
+    return [...activities]
+      .sort((a, b) => {
+        const d = new Date(b.tradeDate).getTime() - new Date(a.tradeDate).getTime();
+        return d !== 0 ? d : b.id - a.id;
+      })
+      .filter(a => {
+        if (filterAccountId !== null && a.accountId !== filterAccountId) return false;
+        if (symbolUpper && !(a.symbol || '').toUpperCase().includes(symbolUpper)) return false;
+        return true;
+      });
+  }, [activities, filterAccountId, filterSymbol]);
+
   const renderItem = ({ item }: { item: TradeActivity }) => {
     const cfg = ACTIVITY_ICONS[item.activityType] || ACTIVITY_ICONS.note;
     const hasAnnotation = annotatedIds.has(item.id);
@@ -541,16 +559,53 @@ export default function ActivityScreen() {
         </Pressable>
       </View>
 
+      {/* ── Filter bar ── */}
+      <View style={styles.filterBar}>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.filterChips}>
+          <Pressable
+            style={[styles.filterChip, filterAccountId === null && styles.filterChipActive]}
+            onPress={() => setFilterAccountId(null)}
+          >
+            <Text style={[styles.filterChipText, filterAccountId === null && styles.filterChipTextActive]}>All</Text>
+          </Pressable>
+          {accounts.map(a => (
+            <Pressable
+              key={a.id}
+              style={[styles.filterChip, filterAccountId === a.id && styles.filterChipActive]}
+              onPress={() => setFilterAccountId(prev => prev === a.id ? null : a.id)}
+            >
+              <Text style={[styles.filterChipText, filterAccountId === a.id && styles.filterChipTextActive]}>
+                {a.name}
+              </Text>
+            </Pressable>
+          ))}
+        </ScrollView>
+        <View style={styles.symbolSearch}>
+          <Feather name="search" size={13} color={colors.textMuted} style={{ marginRight: 6 }} />
+          <TextInput
+            style={styles.symbolSearchInput}
+            placeholder="Symbol…"
+            placeholderTextColor={colors.textMuted}
+            autoCapitalize="characters"
+            returnKeyType="search"
+            value={filterSymbol}
+            onChangeText={setFilterSymbol}
+          />
+          {filterSymbol.length > 0 && (
+            <Pressable onPress={() => setFilterSymbol('')} hitSlop={8}>
+              <Feather name="x" size={13} color={colors.textMuted} />
+            </Pressable>
+          )}
+        </View>
+      </View>
+
       {isLoading && activities.length === 0 ? (
         <View style={{ paddingHorizontal: 16 }}>
           {[1, 2, 3].map(i => <View key={i} style={{ marginBottom: 10 }}><Skeleton height={72} /></View>)}
         </View>
       ) : (
         <FlatList
-          data={[...activities].sort((a, b) => {
-            const d = new Date(b.tradeDate).getTime() - new Date(a.tradeDate).getTime();
-            return d !== 0 ? d : b.id - a.id;
-          })}
+          data={filteredActivities}
           keyExtractor={item => item.id.toString()}
           renderItem={renderItem}
           refreshControl={<RefreshControl refreshing={isLoading} onRefresh={refreshAll} tintColor={colors.primary} />}
@@ -558,8 +613,8 @@ export default function ActivityScreen() {
           ListEmptyComponent={
             <View style={styles.emptyState}>
               <Feather name="activity" size={48} color={colors.textMuted} />
-              <Text style={styles.emptyTitle}>No activity logged</Text>
-              <Text style={styles.emptyText}>Log your trades, deposits and dividends</Text>
+              <Text style={styles.emptyTitle}>{filterAccountId !== null || filterSymbol ? 'No matching activity' : 'No activity logged'}</Text>
+              <Text style={styles.emptyText}>{filterAccountId !== null || filterSymbol ? 'Try adjusting your filters' : 'Log your trades, deposits and dividends'}</Text>
             </View>
           }
         />
@@ -845,4 +900,13 @@ const styles = StyleSheet.create({
   cancelText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textSecondary },
   saveBtn: { flex: 2, padding: 16, borderRadius: 12, backgroundColor: colors.primary, alignItems: 'center' },
   saveText: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.background },
+  // Filter bar
+  filterBar: { paddingBottom: 10, borderBottomWidth: StyleSheet.hairlineWidth, borderBottomColor: colors.separator, gap: 8 },
+  filterChips: { paddingHorizontal: 16, gap: 6 },
+  filterChip: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20, borderWidth: 1, borderColor: colors.separator, backgroundColor: colors.surface },
+  filterChipActive: { borderColor: colors.primary, backgroundColor: colors.accentSoft },
+  filterChipText: { fontFamily: 'Inter_500Medium', fontSize: 12, color: colors.textSecondary },
+  filterChipTextActive: { color: colors.primary },
+  symbolSearch: { flexDirection: 'row', alignItems: 'center', marginHorizontal: 16, paddingHorizontal: 10, paddingVertical: 6, borderRadius: 10, borderWidth: 1, borderColor: colors.separator, backgroundColor: colors.surface },
+  symbolSearchInput: { flex: 1, fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textPrimary, padding: 0 },
 });

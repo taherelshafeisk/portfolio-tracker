@@ -143,6 +143,43 @@ const POSTURE_LABEL_DISPLAY: Record<string, string> = {
   neutral: 'Neutral',
 };
 
+function buildTodaysRead(params: {
+  dayChangePct: number;
+  hardRuleCount: number;
+  hasLeverage: boolean;
+  hasConcentration: boolean;
+  topContributor: string | null;
+}): string {
+  const { dayChangePct, hardRuleCount, hasLeverage, hasConcentration, topContributor } = params;
+
+  let dayPart: string;
+  if (dayChangePct > 0.1) {
+    const pct = `+${dayChangePct.toFixed(2)}%`;
+    dayPart = topContributor
+      ? `Positive day: ${pct}, led by ${topContributor}`
+      : `Positive day: ${pct}`;
+  } else if (dayChangePct < -0.1) {
+    dayPart = `Down day: −${Math.abs(dayChangePct).toFixed(2)}%`;
+  } else {
+    dayPart = 'Flat day';
+  }
+
+  let violationPart: string;
+  if (hardRuleCount === 0) {
+    violationPart = ' No hard breaches.';
+  } else if (hasConcentration && hasLeverage) {
+    violationPart = ' Concentration and leverage still need attention.';
+  } else if (hardRuleCount === 1) {
+    violationPart = hasLeverage
+      ? ' Leverage still needs attention.'
+      : ' 1 breach still needs attention.';
+  } else {
+    violationPart = ` ${hardRuleCount} breaches still need attention.`;
+  }
+
+  return `${dayPart}.${violationPart}`;
+}
+
 // ─── Sub-components ───────────────────────────────────────────────────────────
 
 function PostureStrip({
@@ -349,6 +386,82 @@ const ipsStyles = StyleSheet.create({
   },
 });
 
+function WorkingWellStrip({
+  leaders,
+  positions,
+}: {
+  leaders: PulseContribution[];
+  positions: Position[];
+}) {
+  const items = useMemo(() => {
+    const seen = new Set<string>();
+    const result: Array<{ ticker: string; value: string }> = [];
+
+    const topLeader = leaders.find(l => l.dayChangePct > 0);
+    if (topLeader) {
+      seen.add(topLeader.ticker);
+      result.push({ ticker: topLeader.ticker, value: `+${topLeader.dayChangePct.toFixed(1)}% today` });
+    }
+
+    const bestGainer = [...positions]
+      .filter(p => !seen.has(p.symbol) && p.unrealizedPnlPct > 15)
+      .sort((a, b) => b.unrealizedPnlPct - a.unrealizedPnlPct)[0];
+    if (bestGainer) {
+      result.push({ ticker: bestGainer.symbol, value: `+${bestGainer.unrealizedPnlPct.toFixed(1)}% from cost` });
+    }
+
+    return result;
+  }, [leaders, positions]);
+
+  if (items.length === 0) return null;
+
+  const summary = items.map(item => `${item.ticker} ${item.value}`).join('  ·  ');
+
+  return (
+    <View style={wwStyles.strip}>
+      <View style={wwStyles.row}>
+        <View style={[wwStyles.dot, { backgroundColor: colors.positive }]} />
+        <Text style={wwStyles.eyebrow}>WORKING WELL</Text>
+        <Text style={wwStyles.items} numberOfLines={1}>{summary}</Text>
+      </View>
+    </View>
+  );
+}
+
+const wwStyles = StyleSheet.create({
+  strip: {
+    marginHorizontal: 22,
+    marginTop: 14,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    borderRadius: 2,
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  dot: { width: 5, height: 5, borderRadius: 3 },
+  eyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+    flexShrink: 0,
+  },
+  items: {
+    fontFamily: fonts.mono,
+    fontSize: 11,
+    color: colors.positive,
+    flex: 1,
+    fontVariant: ['tabular-nums'],
+  },
+});
+
 const OPPORTUNITY_BADGE: Record<OpportunityType, string> = {
   approaching_concentration: 'APPROACHING LIMIT',
   cash_available: 'BALANCE',
@@ -367,31 +480,15 @@ function getOpportunityRoute(opp: Opportunity): OppRoute | null {
   return null;
 }
 
-function OpportunitiesStrip({ opportunities }: { opportunities: Opportunity[] }) {
-  // Aggregate multiple policy_missing rows into one non-navigable summary row.
-  const policyCount = opportunities.filter(o => o.type === 'policy_missing').length;
-  const deduped: Opportunity[] = policyCount >= 2
-    ? [
-        ...opportunities.filter(o => o.type !== 'policy_missing'),
-        {
-          id: 'opp-policy-aggregate',
-          type: 'policy_missing' as OpportunityType,
-          accountId: -1,
-          label: `${policyCount} accounts using default 20% limit`,
-          explanation: '',
-          suggestedAction: 'Set explicit limits where account risk should differ',
-        },
-      ]
-    : opportunities;
-
-  const visible = deduped.slice(0, 3);
+function ReviewCandidatesStrip({ opportunities }: { opportunities: Opportunity[] }) {
+  const visible = opportunities.slice(0, 3);
   if (visible.length === 0) return null;
 
   return (
     <View style={oppStyles.strip}>
       <View style={oppStyles.headerRow}>
         <View style={[oppStyles.dot, { backgroundColor: colors.accent }]} />
-        <Text style={oppStyles.headerLabel}>WATCHLIST</Text>
+        <Text style={oppStyles.headerLabel}>REVIEW CANDIDATES</Text>
       </View>
       {visible.map((opp, i) => {
         const route = getOpportunityRoute(opp);
@@ -479,6 +576,95 @@ const oppStyles = StyleSheet.create({
     color: colors.ink3,
     paddingLeft: 8,
   },
+});
+
+function SetupStrip({ items }: { items: Opportunity[] }) {
+  if (items.length === 0) return null;
+
+  const displayItems: Opportunity[] = items.length >= 2
+    ? [{
+        id: 'opp-policy-aggregate',
+        type: 'policy_missing' as OpportunityType,
+        accountId: -1,
+        label: `${items.length} accounts using default 20% limit`,
+        explanation: '',
+        suggestedAction: 'Set explicit limits where account risk should differ',
+      }]
+    : items;
+
+  return (
+    <View style={setupStyles.strip}>
+      <View style={setupStyles.headerRow}>
+        <Text style={setupStyles.headerLabel}>SETUP TO IMPROVE SIGNALS</Text>
+      </View>
+      {displayItems.map((item, i) => {
+        const navigable = item.accountId > 0;
+        const rowStyle = [setupStyles.row, i > 0 && setupStyles.rowBorder];
+        const inner = (
+          <>
+            <View style={setupStyles.body}>
+              <Text style={setupStyles.label} numberOfLines={1}>{item.label}</Text>
+              <Text style={setupStyles.sub} numberOfLines={1}>{item.suggestedAction}</Text>
+            </View>
+            {navigable && <Text style={setupStyles.chevron}>›</Text>}
+          </>
+        );
+        return navigable ? (
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          <Pressable key={item.id} style={rowStyle} onPress={() => router.push({ pathname: '/account/[id]', params: { id: String(item.accountId) } } as any)}>
+            {inner}
+          </Pressable>
+        ) : (
+          <View key={item.id} style={rowStyle}>{inner}</View>
+        );
+      })}
+    </View>
+  );
+}
+
+const setupStyles = StyleSheet.create({
+  strip: {
+    marginHorizontal: 22,
+    marginTop: 8,
+    backgroundColor: colors.card,
+    borderWidth: 1,
+    borderColor: colors.hair2,
+    borderRadius: 2,
+    overflow: 'hidden',
+  },
+  headerRow: {
+    paddingHorizontal: 14,
+    paddingTop: 10,
+    paddingBottom: 6,
+  },
+  headerLabel: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 1.5,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+  },
+  row: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+  },
+  rowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
+  body: { flex: 1 },
+  label: {
+    fontFamily: fonts.sans,
+    fontSize: 12,
+    color: colors.ink2,
+    lineHeight: 16,
+  },
+  sub: {
+    fontFamily: fonts.sans,
+    fontSize: 11,
+    color: colors.ink3,
+    marginTop: 1,
+  },
+  chevron: { fontSize: 18, color: colors.ink3, paddingLeft: 8 },
 });
 
 /** Expand raw positionBucket/sleeveKey values to human-readable names. */
@@ -917,6 +1103,33 @@ export default function HomeScreen() {
     [accounts, positions, sleeveNavMap],
   );
 
+  const reviewCandidates = useMemo(
+    () => computedOpportunities.filter(o => o.type !== 'policy_missing'),
+    [computedOpportunities],
+  );
+
+  const setupItems = useMemo(
+    () => computedOpportunities.filter(o => o.type === 'policy_missing'),
+    [computedOpportunities],
+  );
+
+  const topContributor = useMemo((): string | null => {
+    const pct = summary?.dayChangePct ?? 0;
+    if (!pulseData || pct <= 0.1) return null;
+    const sleeveMap = new Map<string, number>();
+    for (const c of pulseData.contributions) {
+      const key = c.positionBucket ?? c.accountName;
+      sleeveMap.set(key, (sleeveMap.get(key) ?? 0) + c.dayChangeDollars);
+    }
+    const tops = Array.from(sleeveMap.entries())
+      .filter(([, v]) => v > 0)
+      .sort(([, a], [, b]) => b - a)
+      .slice(0, 2)
+      .map(([key]) => sleeveDisplayName(key));
+    if (tops.length === 0) return null;
+    return tops.length === 1 ? tops[0] : `${tops[0]} and ${tops[1]}`;
+  }, [pulseData, summary]);
+
   const { data: dbAlerts, refetch: refetchAlerts } = useQuery({
     queryKey: ['alerts', 'all-active'],
     queryFn: () => apiGet<ApiAlert[]>('/alerts?status=active,acknowledged'),
@@ -1005,6 +1218,19 @@ export default function HomeScreen() {
     () => reconcileActions(computedActions, dbAlerts ?? []),
     [computedActions, dbAlerts],
   );
+
+  const todaysRead = useMemo((): string => {
+    if (!summary) return '';
+    const pct = summary.dayChangePct ?? 0;
+    const hardRuleActions = allActions.filter(a => a.category === 'hard_rule');
+    return buildTodaysRead({
+      dayChangePct: pct,
+      hardRuleCount: hardRuleActions.length,
+      hasLeverage: hardRuleActions.some(a => a.type === 'leverage'),
+      hasConcentration: hardRuleActions.some(a => a.type === 'concentration'),
+      topContributor,
+    });
+  }, [summary, allActions, topContributor]);
 
   // ── Refresh ───────────────────────────────────────────────────────────────────
 
@@ -1143,7 +1369,20 @@ export default function HomeScreen() {
             <Text style={styles.pnlSep}>·</Text>
             <Text style={styles.pnlMeta}>today</Text>
           </View>
+          {todaysRead.length > 0 && (
+            <Text style={styles.todaysRead}>{todaysRead}</Text>
+          )}
         </View>
+
+        {/* ── Working well ── */}
+        {pulseData && (
+          <WorkingWellStrip leaders={pulseData.leaders} positions={positions} />
+        )}
+
+        {/* ── Needs attention heading ── */}
+        {allActions.length > 0 && (
+          <Text style={styles.sectionEyebrow}>NEEDS ATTENTION</Text>
+        )}
 
         {/* ── IPS health strip ── */}
         <IpsHealthStrip
@@ -1152,8 +1391,11 @@ export default function HomeScreen() {
           onDismiss={handleDismiss}
         />
 
-        {/* ── Opportunities strip ── */}
-        <OpportunitiesStrip opportunities={computedOpportunities} />
+        {/* ── Review candidates ── */}
+        <ReviewCandidatesStrip opportunities={reviewCandidates} />
+
+        {/* ── Setup strip ── */}
+        <SetupStrip items={setupItems} />
 
         {/* ── Contribution bars (from pulse) ── */}
         {pulseData && pulseData.contributions.length > 0 && (
@@ -1236,8 +1478,8 @@ export default function HomeScreen() {
             <Text style={styles.reviewLabel}>DAILY REVIEW</Text>
             <Text style={styles.reviewSub}>
               {allActions.length > 0
-                ? `${allActions.length} violation${allActions.length === 1 ? '' : 's'}`
-                : 'No violations'}
+                ? `${allActions.length} open item${allActions.length === 1 ? '' : 's'}`
+                : 'No open items'}
               {overdueAndToday.length > 0
                 ? `  ·  ${overdueAndToday.length} overdue`
                 : ''}
@@ -1354,6 +1596,25 @@ const styles = StyleSheet.create({
   },
   pnlSep: { color: colors.hair2, fontSize: 13 },
   pnlMeta: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink3 },
+  todaysRead: {
+    fontFamily: fonts.sans,
+    fontSize: 12,
+    color: colors.ink3,
+    marginTop: 8,
+    lineHeight: 18,
+  },
+
+  // Section eyebrow label used above cards (e.g. "NEEDS ATTENTION")
+  sectionEyebrow: {
+    fontFamily: fonts.mono,
+    fontSize: 9,
+    letterSpacing: 2,
+    textTransform: 'uppercase',
+    color: colors.ink3,
+    marginHorizontal: 22,
+    marginTop: 18,
+    marginBottom: 4,
+  },
 
   // Sections
   section: { paddingHorizontal: 22, marginTop: 22 },

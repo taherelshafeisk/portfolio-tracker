@@ -76,10 +76,11 @@ function buildContextPrefix(ctx: AIContextPayload): string | null {
 }
 
 const SUGGESTED_PROMPTS = [
-  "What's violating my IPS right now?",
-  "Which position has the worst risk/reward?",
-  "Summarize my portfolio in one paragraph",
-  "What should I do before market open tomorrow?",
+  "What is working well in my portfolio today?",
+  "What needs attention before I add more risk?",
+  "Summarize today's portfolio in one paragraph.",
+  "What should I review before market open?",
+  "Which risks are worth acting on, and which can wait?",
 ];
 
 // ─── Message bubble ───────────────────────────────────────────────────────────
@@ -340,7 +341,7 @@ export default function CoachScreen() {
       </View>
 
       {/* IPS progress bar */}
-      {ipsProgress && !ipsProgress.ipsComplete && !activeConv && (
+      {ipsProgress && ipsProgress.total > 0 && !ipsProgress.ipsComplete && !activeConv && (
         <Pressable style={styles.ipsBar} onPress={startIpsBuilder}>
           <Text style={styles.ipsBarText}>
             IPS · {ipsProgress.covered} of {ipsProgress.total} positions defined — tap to continue

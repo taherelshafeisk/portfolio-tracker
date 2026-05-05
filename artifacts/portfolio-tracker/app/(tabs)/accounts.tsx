@@ -254,7 +254,7 @@ export default function AccountsScreen() {
       <View style={styles.header}>
         <View>
           <Text style={styles.eyebrow}>PORTFOLIO</Text>
-          <Text style={styles.title}>Sleeves</Text>
+          <Text style={styles.title}>Accounts</Text>
         </View>
         <View style={styles.headerActions}>
           {positions.length > 0 && (
@@ -300,7 +300,7 @@ export default function AccountsScreen() {
 
         {accounts.length === 0 ? (
           <View style={styles.emptyState}>
-            <Text style={styles.emptyTitle}>No sleeves yet</Text>
+            <Text style={styles.emptyTitle}>No accounts yet</Text>
             <Text style={styles.emptyText}>Add your trading or savings accounts to start tracking</Text>
           </View>
         ) : (
@@ -341,7 +341,7 @@ export default function AccountsScreen() {
         <View style={styles.modalOverlay}>
           <View style={[styles.modalSheet, { paddingBottom: insets.bottom + 16 }]}>
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>New Sleeve</Text>
+            <Text style={styles.modalTitle}>New Account</Text>
 
             <TextInput
               style={styles.input}
@@ -410,7 +410,7 @@ export default function AccountsScreen() {
                 onPress={handleAdd}
                 disabled={!canSubmit || isSubmitting}
               >
-                <Text style={styles.saveBtnText}>{isSubmitting ? 'Adding…' : 'Add Sleeve'}</Text>
+                <Text style={styles.saveBtnText}>{isSubmitting ? 'Adding…' : 'Add Account'}</Text>
               </Pressable>
             </View>
           </View>
@@ -422,7 +422,7 @@ export default function AccountsScreen() {
         <View style={styles.menuOverlay}>
           <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
             <View style={styles.modalHandle} />
-            <Text style={styles.modalTitle}>Delete Sleeve</Text>
+            <Text style={styles.modalTitle}>Delete Account</Text>
             <Text style={styles.deleteText}>
               Delete "{confirmDelete?.name}" and all its positions and activities? This cannot be undone.
             </Text>
@@ -455,7 +455,7 @@ export default function AccountsScreen() {
               style={[styles.menuItem, styles.menuItemBorder]}
               onPress={() => { const a = menuAccount!; setMenuAccount(null); setConfirmDelete({ id: a.id, name: a.name }); }}
             >
-              <Text style={[styles.menuItemText, { color: colors.negative }]}>Delete Sleeve</Text>
+              <Text style={[styles.menuItemText, { color: colors.negative }]}>Delete Account</Text>
               <Text style={[styles.menuItemChevron, { color: colors.negative }]}>›</Text>
             </Pressable>
           </View>

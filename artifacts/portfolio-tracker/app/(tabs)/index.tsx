@@ -265,7 +265,7 @@ function IpsHealthStrip({
       <View style={ipsStyles.strip}>
         <View style={ipsStyles.cleanRow}>
           <View style={[ipsStyles.dot, { backgroundColor: colors.positive }]} />
-          <Text style={ipsStyles.cleanText}>IPS clean — no violations</Text>
+          <Text style={ipsStyles.cleanText}>IPS clean — no breaches</Text>
         </View>
       </View>
     );
@@ -313,7 +313,7 @@ function IpsHealthStrip({
       })}
       {actions.length > 3 && (
         <Pressable onPress={() => router.push('/daily-review')}>
-          <Text style={ipsStyles.seeAll}>See all {actions.length} violations →</Text>
+          <Text style={ipsStyles.seeAll}>See all {actions.length} open items →</Text>
         </Pressable>
       )}
     </View>

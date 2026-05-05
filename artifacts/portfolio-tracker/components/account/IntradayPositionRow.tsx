@@ -53,12 +53,12 @@ export function IntradayPositionRow({
         </View>
         {hasConcBadge && (
           <View style={[styles.policyBadge, concentrationSeverity === 'critical' ? styles.badgeCritical : styles.badgeWarning]}>
-            <Text style={styles.policyBadgeText}>Conc</Text>
+            <Text style={styles.policyBadgeText}>Over limit</Text>
           </View>
         )}
         {hasDdBadge && (
           <View style={[styles.policyBadge, drawdownSeverity === 'critical' ? styles.badgeCritical : styles.badgeWarning]}>
-            <Text style={styles.policyBadgeText}>DD</Text>
+            <Text style={styles.policyBadgeText}>Drawdown</Text>
           </View>
         )}
       </View>

@@ -351,32 +351,72 @@ const ipsStyles = StyleSheet.create({
 
 const OPPORTUNITY_BADGE: Record<OpportunityType, string> = {
   approaching_concentration: 'APPROACHING LIMIT',
-  cash_available: 'POSITIVE BALANCE',
-  policy_missing: 'POLICY NOT SET',
+  cash_available: 'BALANCE',
+  policy_missing: 'POLICY',
 };
 
+type OppRoute = { pathname: string; params: Record<string, string> };
+
+function getOpportunityRoute(opp: Opportunity): OppRoute | null {
+  if (opp.type === 'approaching_concentration' && opp.symbol) {
+    return { pathname: '/position/[ticker]', params: { ticker: opp.symbol, accountId: String(opp.accountId) } };
+  }
+  if (opp.accountId > 0) {
+    return { pathname: '/account/[id]', params: { id: String(opp.accountId) } };
+  }
+  return null;
+}
+
 function OpportunitiesStrip({ opportunities }: { opportunities: Opportunity[] }) {
-  const visible = opportunities.slice(0, 3);
+  // Aggregate multiple policy_missing rows into one non-navigable summary row.
+  const policyCount = opportunities.filter(o => o.type === 'policy_missing').length;
+  const deduped: Opportunity[] = policyCount >= 2
+    ? [
+        ...opportunities.filter(o => o.type !== 'policy_missing'),
+        {
+          id: 'opp-policy-aggregate',
+          type: 'policy_missing' as OpportunityType,
+          accountId: -1,
+          label: `${policyCount} accounts using default 20% limit`,
+          explanation: '',
+          suggestedAction: 'Set explicit limits where account risk should differ',
+        },
+      ]
+    : opportunities;
+
+  const visible = deduped.slice(0, 3);
   if (visible.length === 0) return null;
 
   return (
     <View style={oppStyles.strip}>
       <View style={oppStyles.headerRow}>
         <View style={[oppStyles.dot, { backgroundColor: colors.accent }]} />
-        <Text style={oppStyles.headerLabel}>WATCH</Text>
+        <Text style={oppStyles.headerLabel}>WATCHLIST</Text>
       </View>
-      {visible.map((opp, i) => (
-        <View key={opp.id} style={[oppStyles.row, i > 0 && oppStyles.rowBorder]}>
-          <View style={[oppStyles.bar, { backgroundColor: colors.accent }]} />
-          <View style={oppStyles.body}>
-            <Text style={[oppStyles.badge, { color: colors.accent }]}>
-              {OPPORTUNITY_BADGE[opp.type]}
-            </Text>
-            <Text style={oppStyles.label} numberOfLines={1}>{opp.label}</Text>
-            <Text style={oppStyles.suggestion} numberOfLines={1}>{opp.suggestedAction}</Text>
-          </View>
-        </View>
-      ))}
+      {visible.map((opp, i) => {
+        const route = getOpportunityRoute(opp);
+        const rowStyle = [oppStyles.row, i > 0 && oppStyles.rowBorder];
+        const inner = (
+          <>
+            <View style={oppStyles.body}>
+              <Text style={[oppStyles.badge, { color: colors.accent }]}>
+                {OPPORTUNITY_BADGE[opp.type]}
+              </Text>
+              <Text style={oppStyles.label} numberOfLines={1}>{opp.label}</Text>
+              <Text style={oppStyles.suggestion} numberOfLines={1}>{opp.suggestedAction}</Text>
+            </View>
+            {route != null && <Text style={oppStyles.chevron}>›</Text>}
+          </>
+        );
+        return route != null ? (
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          <Pressable key={opp.id} style={rowStyle} onPress={() => router.push(route as any)}>
+            {inner}
+          </Pressable>
+        ) : (
+          <View key={opp.id} style={rowStyle}>{inner}</View>
+        );
+      })}
     </View>
   );
 }
@@ -414,7 +454,6 @@ const oppStyles = StyleSheet.create({
     paddingVertical: 10,
   },
   rowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
-  bar: { width: 3, borderRadius: 2, alignSelf: 'stretch', minHeight: 28, marginRight: 10 },
   body: { flex: 1 },
   badge: {
     fontFamily: fonts.mono,
@@ -434,6 +473,11 @@ const oppStyles = StyleSheet.create({
     fontSize: 11,
     color: colors.ink3,
     marginTop: 1,
+  },
+  chevron: {
+    fontSize: 18,
+    color: colors.ink3,
+    paddingLeft: 8,
   },
 });
 

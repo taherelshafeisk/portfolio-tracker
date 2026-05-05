@@ -359,7 +359,7 @@ export function computeOpportunities(
       accountId: account.id,
       label: `${account.name} — positive balance`,
       explanation: `${fmtCurrency(account.currentBalance)} (${balancePct}% of NAV) not allocated to positions.`,
-      suggestedAction: 'Review before adding risk',
+      suggestedAction: `${fmtCurrency(account.currentBalance)} / ${balancePct}% of NAV · review allocation before adding risk`,
     });
   }
 
@@ -373,9 +373,9 @@ export function computeOpportunities(
       id: `opp-policy-${account.id}`,
       type: 'policy_missing',
       accountId: account.id,
-      label: `${account.name} — no policy set`,
+      label: `${account.name} — using default 20% limit`,
       explanation: 'Concentration limit not configured. App is using the 20% default.',
-      suggestedAction: 'Consider setting an explicit limit',
+      suggestedAction: 'Set an explicit limit if this account should differ',
     });
   }
 

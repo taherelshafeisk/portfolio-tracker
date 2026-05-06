@@ -356,6 +356,8 @@ IMPORTANT - avgCost extraction rules (apply in order, stop at first match):
    For row: MSFT ... 379.32 ... 42 ... 295.26 ... 465.24 ... -3609 ...
      → avgCost = 465.24   (read directly from the "Avg Price" column; ignore P&L 295.26, Unrlzd P&L -3609, %NetLiq, Chg%)
 
+   IBKR TICKER NORMALISATION: The Instrument column shows the ticker followed by the exchange suffix (e.g. "MSFT NASDAQ.NMS", "XLE ARCA", "TSM NYSE", "RKLB NASDAQ.SCM", "COST NASDAQ.NMS"). Always strip the exchange suffix — extract only the uppercase ticker before the space as the symbol (e.g. "MSFT", "XLE", "TSM"). The "Intraday" column contains a small sparkline chart image — ignore it entirely.
+
 2. DERIVATION (only when the "Avg Price" / cost column is absent): Compute from total position value and unrealised P&L.
 
    Formula (use whichever values are visible):
@@ -458,7 +460,7 @@ If in doubt, omit the row — the user can add it manually.
 Only return the JSON object, no additional text. If no trades are visible, return an empty trades array.`;
 
     const response = await anthropic.messages.create({
-      model: "claude-haiku-4-5-20251001",
+      model: "claude-sonnet-4-6",
       max_tokens: 4096,
       messages: [
         {

@@ -12,7 +12,10 @@
       "distribution": "internal"
     },
     "production": {
-      "autoIncrement": true
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_DOMAIN": "workspaceapi-server-production-4bee.up.railway.app"
+      }
     }
   },
   "submit": {

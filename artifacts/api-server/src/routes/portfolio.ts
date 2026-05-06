@@ -2,7 +2,7 @@ import { Router, type IRouter } from "express";
 import { db } from "@workspace/db";
 import { accountsTable, positionsTable, alertsTable, positionFlagsTable } from "@workspace/db";
 import { and, eq, gte, isNull, isNotNull, or } from "drizzle-orm";
-import { getCachedPrices } from "../lib/priceService";
+import { getCachedPrices, fetchLivePrices } from "../lib/priceService";
 import { logger } from "../lib/logger";
 import { getPortfolioSummary } from "../services/portfolioService";
 
@@ -24,7 +24,7 @@ router.get("/pulse", async (req, res) => {
     const accounts = await db.select().from(accountsTable).where(eq(accountsTable.userId, req.userId));
     const allPositions = await db.select().from(positionsTable).where(eq(positionsTable.userId, req.userId));
     const allSymbols = [...new Set(allPositions.map(p => p.symbol))];
-    const priceMap = getCachedPrices(allSymbols);
+    const priceMap = await fetchLivePrices(allSymbols);
 
     const contributions = allPositions.map(p => {
       const qty = parseFloat(p.quantity);

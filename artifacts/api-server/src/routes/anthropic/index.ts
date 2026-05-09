@@ -351,10 +351,13 @@ IMPORTANT - avgCost extraction rules (apply in order, stop at first match):
      "Cost Basis/Share", "Cost/Share", "Purchase Price", "Book Value/Share"
      "Break Even", "Open Price", "Entry Price"
 
-   IBKR example — the table has these columns left to right:
-     Instrument | Intraday | Last | Change | Chg% | Position | P&L | Avg Price | Unrlzd P&L | %NetLiq | Unrlzd P&L%
-   For row: MSFT ... 379.32 ... 42 ... 295.26 ... 465.24 ... -3609 ...
-     → avgCost = 465.24   (read directly from the "Avg Price" column; ignore P&L 295.26, Unrlzd P&L -3609, %NetLiq, Chg%)
+   IBKR example — the portfolio tab has columns left to right (layout varies by view):
+     View A (Portfolio tab): Instrument | Last | Change | Chg% | Position | P&L | Avg Price | Unrlzd P&L | %NetLiq | Unrlzd P&L%
+     View B (Account window): Instrument | Last | Change | Chg% | Position | P&L | Avg Price | Unrlzd P&L | %NetLiq
+   For row: MSFT ... 415.10 ... 42 ... -238.14 ... 465.24 ... -2106 ...
+     → avgCost = 465.24   (read directly from the "Avg Price" column; ignore P&L -238.14, Unrlzd P&L -2106, %NetLiq)
+   
+   CRITICAL — clipped screenshot warning: If the screenshot is too narrow and the "Avg Price" column is cut off / only partially visible on the right edge, you MUST use DERIVATION (rule 2 below) to calculate avgCost from the visible data. Do NOT leave avgCost as null just because the column is clipped — derive it from Position (qty), Last (currentPrice), and P&L if available. If P&L is missing, use Change and Chg% for derivation instead.
 
    IBKR TICKER NORMALISATION: The Instrument column shows the ticker followed by the exchange suffix (e.g. "MSFT NASDAQ.NMS", "XLE ARCA", "TSM NYSE", "RKLB NASDAQ.SCM", "COST NASDAQ.NMS"). Always strip the exchange suffix — extract only the uppercase ticker before the space as the symbol (e.g. "MSFT", "XLE", "TSM"). The "Intraday" column contains a small sparkline chart image — ignore it entirely.
 

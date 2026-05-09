@@ -12,6 +12,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
 import { ASSET_TYPES, getAssetType } from '@/constants/assetTypes';
 import { usePortfolio, apiGet, apiPost, apiPut, apiDelete, apiPatch, Position, Account } from '@/context/PortfolioContext';
+import { getAuthToken } from '@/context/AuthContext';
 import { useAIContext } from '@/hooks/useAIContext';
 import { computeActions, type Action } from '@/lib/actions';
 import { Card } from '@/components/ui/Card';
@@ -480,9 +481,13 @@ export default function AccountDetailScreen() {
       setParseProgress({ current: i + 1, total: assets.length });
       if (!asset.base64) continue;
       try {
+        const token = getAuthToken();
         const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({
             imageBase64: asset.base64,
             mediaType: asset.mimeType || 'image/jpeg',

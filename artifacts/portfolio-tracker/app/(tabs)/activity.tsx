@@ -11,6 +11,7 @@ import * as ImagePicker from 'expo-image-picker';
 import { router } from 'expo-router';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiGet, apiPost, apiDelete, TradeActivity } from '@/context/PortfolioContext';
+import { getAuthToken } from '@/context/AuthContext';
 import { Card } from '@/components/ui/Card';
 import { formatCurrency } from '@/components/ui/PnlBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
@@ -176,9 +177,13 @@ export default function ActivityScreen() {
       const abortCtrl = new AbortController();
       const abortTimer = setTimeout(() => abortCtrl.abort(), 60_000);
       try {
+        const token = getAuthToken();
         const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
+          },
           body: JSON.stringify({
             imageBase64: asset.base64,
             mediaType: asset.mimeType || 'image/jpeg',

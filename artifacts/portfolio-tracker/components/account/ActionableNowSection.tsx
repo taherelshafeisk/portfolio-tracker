@@ -7,14 +7,22 @@
  */
 
 import React from 'react';
-import { View, Text, Pressable, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
 import type { Action } from '@/lib/actions';
+import { AlertRow } from '@/components/AlertRow';
+import type { AlertSeverity } from '@/components/AlertRow';
 
 interface Props {
   actions: Action[];
   onPressItem: (action: Action) => void;
+}
+
+function actionSeverity(action: Action): AlertSeverity {
+  if (action.type === 'leverage') return 'alert';
+  if (action.type === 'concentration') return 'warning';
+  return 'info';
 }
 
 export function ActionableNowSection({ actions, onPressItem }: Props) {
@@ -24,30 +32,18 @@ export function ActionableNowSection({ actions, onPressItem }: Props) {
   return (
     <View style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.eyebrow}>NEEDS ATTENTION</Text>
+        <Text style={styles.eyebrow}>INSIGHTS</Text>
       </View>
 
-      {filtered.map((action, i) => {
-        const isBreach = action.category === 'hard_rule';
-        const barColor = isBreach ? colors.negative : colors.amber;
-        const typeLabel =
-          action.type === 'concentration' ? 'CONCENTRATION' : 'LEVERAGE';
-
-        return (
-          <Pressable
-            key={action.id}
-            style={[styles.item, i > 0 && styles.itemBorder]}
+      {filtered.map((action, i) => (
+        <View key={action.id} style={i > 0 ? styles.itemBorder : undefined}>
+          <AlertRow
+            severity={actionSeverity(action)}
+            title={action.label}
             onPress={() => onPressItem(action)}
-          >
-            <View style={[styles.severityBar, { backgroundColor: barColor }]} />
-            <View style={styles.itemContent}>
-              <Text style={[styles.typeLabel, { color: barColor }]}>{typeLabel}</Text>
-              <Text style={styles.itemTitle} numberOfLines={2}>{action.label}</Text>
-            </View>
-            <Text style={styles.chevron}>›</Text>
-          </Pressable>
-        );
-      })}
+          />
+        </View>
+      ))}
     </View>
   );
 }
@@ -75,42 +71,8 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     color: colors.ink3,
   },
-  item: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 10,
-    paddingRight: 14,
-  },
   itemBorder: {
     borderTopWidth: 1,
     borderTopColor: colors.hair,
-  },
-  severityBar: {
-    width: 3,
-    borderRadius: 2,
-    alignSelf: 'stretch',
-    minHeight: 28,
-    marginHorizontal: 12,
-  },
-  itemContent: {
-    flex: 1,
-    gap: 2,
-  },
-  typeLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 8,
-    letterSpacing: 1.4,
-    textTransform: 'uppercase',
-  },
-  itemTitle: {
-    fontFamily: fonts.sansMedium,
-    fontSize: 12,
-    color: colors.ink,
-    lineHeight: 16,
-  },
-  chevron: {
-    fontSize: 18,
-    color: colors.ink3,
-    paddingLeft: 8,
   },
 });

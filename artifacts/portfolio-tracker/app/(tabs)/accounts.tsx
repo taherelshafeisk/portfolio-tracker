@@ -6,9 +6,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import * as Haptics from 'expo-haptics';
+import Svg, { Path, Text as SvgText } from 'react-native-svg';
 import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
 import { usePortfolio, apiPost, apiPut, apiDelete, Account } from '@/context/PortfolioContext';
+import { useAuth } from '@/context/AuthContext';
 import { formatCurrency } from '@/components/ui/PnlBadge';
 
 const DEFAULT_CONCENTRATION_LIMIT = 0.20;
@@ -157,14 +159,119 @@ function SleeveRow({
   );
 }
 
+// ─── Donut chart ─────────────────────────────────────────────────────────────
+
+const DONUT_COLORS = [colors.negative, colors.ink3, colors.ink, colors.positive, colors.amber];
+const CX = 100, CY = 100, R_OUT = 82, R_IN = 56;
+
+function polarXY(cx: number, cy: number, r: number, angleDeg: number) {
+  const rad = ((angleDeg - 90) * Math.PI) / 180;
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) };
+}
+
+function donutArcPath(startDeg: number, endDeg: number): string {
+  const o1 = polarXY(CX, CY, R_OUT, startDeg);
+  const o2 = polarXY(CX, CY, R_OUT, endDeg);
+  const i1 = polarXY(CX, CY, R_IN, endDeg);
+  const i2 = polarXY(CX, CY, R_IN, startDeg);
+  const large = endDeg - startDeg > 180 ? 1 : 0;
+  return [
+    `M ${o1.x.toFixed(2)} ${o1.y.toFixed(2)}`,
+    `A ${R_OUT} ${R_OUT} 0 ${large} 1 ${o2.x.toFixed(2)} ${o2.y.toFixed(2)}`,
+    `L ${i1.x.toFixed(2)} ${i1.y.toFixed(2)}`,
+    `A ${R_IN} ${R_IN} 0 ${large} 0 ${i2.x.toFixed(2)} ${i2.y.toFixed(2)}`,
+    'Z',
+  ].join(' ');
+}
+
+interface DonutProps {
+  accounts: Account[];
+  navByAccount: Map<number, number>;
+  totalNav: number;
+}
+
+function AllocationDonut({ accounts, navByAccount, totalNav }: DonutProps) {
+  if (totalNav <= 0 || accounts.length === 0) return null;
+
+  let cursor = 0;
+  const segments = accounts.map((acct, i) => {
+    const nav = navByAccount.get(acct.id) ?? 0;
+    const pct = nav / totalNav;
+    const sweep = pct * 360;
+    const start = cursor;
+    const end = cursor + sweep;
+    cursor = end;
+    return { acct, nav, pct, start, end, color: DONUT_COLORS[i % DONUT_COLORS.length] };
+  });
+
+  const centerLabel = formatCurrency(totalNav);
+
+  return (
+    <View style={donutStyles.wrap}>
+      <Svg width={200} height={200} viewBox="0 0 200 200">
+        {segments.map(seg => (
+          <Path
+            key={seg.acct.id}
+            d={donutArcPath(seg.start, seg.end - 0.5)}
+            fill={seg.color}
+          />
+        ))}
+        <SvgText
+          x={CX}
+          y={CY - 6}
+          textAnchor="middle"
+          fontSize={13}
+          fontWeight="600"
+          fill={colors.ink}
+        >
+          {centerLabel}
+        </SvgText>
+        <SvgText
+          x={CX}
+          y={CY + 12}
+          textAnchor="middle"
+          fontSize={9}
+          fill={colors.ink3}
+        >
+          total NLV
+        </SvgText>
+      </Svg>
+
+      <View style={donutStyles.legend}>
+        {segments.map(seg => (
+          <View key={seg.acct.id} style={donutStyles.legendRow}>
+            <View style={[donutStyles.legendDot, { backgroundColor: seg.color }]} />
+            <Text style={donutStyles.legendText}>
+              {seg.acct.name}{'  '}
+              <Text style={donutStyles.legendPct}>{(seg.pct * 100).toFixed(1)}%</Text>
+            </Text>
+          </View>
+        ))}
+      </View>
+    </View>
+  );
+}
+
+const donutStyles = StyleSheet.create({
+  wrap: { alignItems: 'center', paddingVertical: 20 },
+  legend: { gap: 6, marginTop: 8, alignSelf: 'stretch', paddingHorizontal: 8 },
+  legendRow: { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  legendDot: { width: 8, height: 8, borderRadius: 4 },
+  legendText: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink2 },
+  legendPct: { fontFamily: fonts.mono, fontSize: 12, color: colors.ink3 },
+});
+
 // ─── Screen ───────────────────────────────────────────────────────────────────
 
 export default function AccountsScreen() {
   const insets = useSafeAreaInsets();
-  const { accounts, positions, summary, isLoading, refreshAll } = usePortfolio();
+  const { accounts, positions, summary, isLoading, refreshAll, resetState } = usePortfolio();
+  const { token, signOut } = useAuth();
+  const isDemo = token === 'demo-token';
   const topPad = Platform.OS === 'web' ? 20 : insets.top;
 
   const [showAdd, setShowAdd] = useState(false);
+  const [showUtilMenu, setShowUtilMenu] = useState(false);
   const [menuAccount, setMenuAccount] = useState<{ id: number; name: string } | null>(null);
   const [confirmDelete, setConfirmDelete] = useState<{ id: number; name: string } | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
@@ -244,6 +351,10 @@ export default function AccountsScreen() {
   const bottomPad = Platform.OS === 'web' ? 100 : insets.bottom + 80;
 
   const totalNav = summary?.totalNav ?? 0;
+
+  const navByAccount = new Map(
+    (summary?.accounts ?? []).map(a => [a.id, a.nav])
+  );
   const dayChange = summary?.dayChange ?? 0;
   const dayChangePct = summary?.dayChangePct ?? 0;
   const dayColor = dayChange >= 0 ? colors.positive : colors.negative;
@@ -257,11 +368,9 @@ export default function AccountsScreen() {
           <Text style={styles.title}>Accounts</Text>
         </View>
         <View style={styles.headerActions}>
-          {positions.length > 0 && (
-            <Pressable style={styles.iconBtn} onPress={exportAllCSV}>
-              <Text style={styles.iconBtnText}>↓</Text>
-            </Pressable>
-          )}
+          <Pressable style={styles.iconBtn} onPress={() => setShowUtilMenu(true)}>
+            <Text style={styles.iconBtnText}>⋮</Text>
+          </Pressable>
           <Pressable
             style={styles.addBtn}
             onPress={() => { Haptics.selectionAsync(); setShowAdd(true); }}
@@ -326,14 +435,14 @@ export default function AccountsScreen() {
           </View>
         )}
 
-        {/* Import activity */}
-        <Pressable
-          style={styles.importRow}
-          onPress={() => router.push('/(tabs)/activity')}
-        >
-          <Text style={styles.importRowText}>Import activity</Text>
-          <Text style={styles.chevron}>›</Text>
-        </Pressable>
+        {/* Allocation donut */}
+        {accounts.length > 0 && totalNav > 0 && (
+          <AllocationDonut
+            accounts={accounts}
+            navByAccount={navByAccount}
+            totalNav={totalNav}
+          />
+        )}
       </ScrollView>
 
       {/* Add Account Modal */}
@@ -436,6 +545,45 @@ export default function AccountsScreen() {
             </View>
           </View>
         </View>
+      </Modal>
+
+      {/* Utility menu (⋮) */}
+      <Modal visible={showUtilMenu} animationType="fade" transparent>
+        <Pressable style={styles.menuOverlay} onPress={() => setShowUtilMenu(false)}>
+          <View style={[styles.menuSheet, { paddingBottom: insets.bottom + 8 }]}>
+            <Text style={styles.menuTitle}>Options</Text>
+            {positions.length > 0 && (
+              <Pressable
+                style={styles.menuItem}
+                onPress={() => { setShowUtilMenu(false); exportAllCSV(); }}
+              >
+                <Text style={styles.menuItemText}>Export CSV</Text>
+                <Text style={styles.menuItemChevron}>↓</Text>
+              </Pressable>
+            )}
+            <Pressable
+              style={[styles.menuItem, positions.length > 0 && styles.menuItemBorder]}
+              onPress={() => { setShowUtilMenu(false); router.push('/(tabs)/activity'); }}
+            >
+              <Text style={styles.menuItemText}>Import activity</Text>
+              <Text style={styles.menuItemChevron}>›</Text>
+            </Pressable>
+            <Pressable
+              style={[styles.menuItem, styles.menuItemBorder]}
+              onPress={async () => {
+                setShowUtilMenu(false);
+                resetState();
+                await signOut();
+                router.replace('/auth/signin');
+              }}
+            >
+              <Text style={[styles.menuItemText, { color: colors.negative }]}>
+                {isDemo ? 'Exit Demo' : 'Sign Out'}
+              </Text>
+              <Text style={[styles.menuItemChevron, { color: colors.negative }]}>›</Text>
+            </Pressable>
+          </View>
+        </Pressable>
       </Modal>
 
       {/* Context menu */}

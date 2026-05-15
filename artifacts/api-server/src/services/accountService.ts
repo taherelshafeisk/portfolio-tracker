@@ -1,5 +1,9 @@
 import { db } from "@workspace/db";
-import { accountsTable, positionsTable, activitiesTable } from "@workspace/db";
+import {
+  accountsTable, positionsTable, activitiesTable,
+  alertsTable, positionFlagsTable, orderSuggestionsTable,
+  portfolioSnapshotsTable, priceAlertsTable,
+} from "@workspace/db";
 import { and, eq } from "drizzle-orm";
 import { fetchLivePrices } from "../lib/priceService";
 import { formatPosition } from "../lib/formatters/positionFormatter";
@@ -97,17 +101,98 @@ export async function updateAccount(id: number, userId: string, input: UpdateAcc
   return account ? toAccountResponse(account) : null;
 }
 
-export async function deleteAccount(id: number, userId: string): Promise<boolean> {
-  const [account] = await db
-    .select({ id: accountsTable.id })
-    .from(accountsTable)
-    .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, userId)));
-  if (!account) return false;
+export interface PurgeResult {
+  positionsDeleted: number;
+  activitiesDeleted: number;
+  alertsDeleted: number;
+  positionFlagsDeleted: number;
+  orderSuggestionsDeleted: number;
+  portfolioSnapshotsDeleted: number;
+  priceAlertsDeleted: number;
+}
 
-  await db.delete(positionsTable).where(eq(positionsTable.accountId, id));
-  await db.delete(activitiesTable).where(eq(activitiesTable.accountId, id));
-  await db.delete(accountsTable).where(eq(accountsTable.id, id));
-  return true;
+async function purgeAccountData(
+  accountId: number,
+  tx: Parameters<Parameters<typeof db.transaction>[0]>[0],
+): Promise<PurgeResult> {
+  const [
+    priceAlertsRes,
+    alertsRes,
+    positionFlagsRes,
+    orderSuggestionsRes,
+    snapshotsRes,
+    activitiesRes,
+    positionsRes,
+  ] = await Promise.all([
+    tx.delete(priceAlertsTable).where(eq(priceAlertsTable.accountId, accountId)).returning({ id: priceAlertsTable.id }),
+    tx.delete(alertsTable).where(eq(alertsTable.accountId, accountId)).returning({ id: alertsTable.id }),
+    tx.delete(positionFlagsTable).where(eq(positionFlagsTable.accountId, accountId)).returning({ id: positionFlagsTable.id }),
+    tx.delete(orderSuggestionsTable).where(eq(orderSuggestionsTable.accountId, accountId)).returning({ id: orderSuggestionsTable.id }),
+    tx.delete(portfolioSnapshotsTable).where(eq(portfolioSnapshotsTable.accountId, accountId)).returning({ id: portfolioSnapshotsTable.id }),
+    tx.delete(activitiesTable).where(eq(activitiesTable.accountId, accountId)).returning({ id: activitiesTable.id }),
+    tx.delete(positionsTable).where(eq(positionsTable.accountId, accountId)).returning({ id: positionsTable.id }),
+  ]);
+
+  return {
+    positionsDeleted: positionsRes.length,
+    activitiesDeleted: activitiesRes.length,
+    alertsDeleted: alertsRes.length,
+    positionFlagsDeleted: positionFlagsRes.length,
+    orderSuggestionsDeleted: orderSuggestionsRes.length,
+    portfolioSnapshotsDeleted: snapshotsRes.length,
+    priceAlertsDeleted: priceAlertsRes.length,
+  };
+}
+
+export async function deleteAccount(id: number, userId: string): Promise<boolean> {
+  return db.transaction(async (tx) => {
+    const [account] = await tx
+      .select({ id: accountsTable.id })
+      .from(accountsTable)
+      .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, userId)));
+    if (!account) return false;
+
+    await purgeAccountData(id, tx);
+    await tx.delete(accountsTable).where(eq(accountsTable.id, id));
+    return true;
+  });
+}
+
+export interface ResetAccountResult extends PurgeResult {
+  mode: "delete-account" | "reset-data";
+  accountDeleted: boolean;
+}
+
+export async function resetAccount(
+  id: number,
+  userId: string,
+  mode: "delete-account" | "reset-data",
+  accountNameConfirmation: string,
+): Promise<ResetAccountResult | null> {
+  return db.transaction(async (tx) => {
+    const [account] = await tx
+      .select()
+      .from(accountsTable)
+      .where(and(eq(accountsTable.id, id), eq(accountsTable.userId, userId)));
+    if (!account) return null;
+
+    if (account.name.trim() !== accountNameConfirmation.trim()) return null;
+
+    const purged = await purgeAccountData(id, tx);
+
+    if (mode === "delete-account") {
+      await tx.delete(accountsTable).where(eq(accountsTable.id, id));
+      return { ...purged, mode, accountDeleted: true };
+    }
+
+    // reset-data: keep the shell, zero out the imported cash balance
+    await tx
+      .update(accountsTable)
+      .set({ currentBalance: "0", updatedAt: new Date() })
+      .where(eq(accountsTable.id, id));
+
+    return { ...purged, mode, accountDeleted: false };
+  });
 }
 
 export async function listAccountPositions(accountId: number, userId: string) {

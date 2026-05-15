@@ -291,6 +291,7 @@ function IpsHealthStrip({
       {actions.slice(0, 3).map((action, i) => {
         const isBreach = action.category === 'hard_rule';
         const barColor = isBreach ? colors.negative : colors.amber;
+        const severityEmoji = isBreach ? '🚨' : '⚠️';
         return (
           <Pressable
             key={action.id}
@@ -299,10 +300,7 @@ function IpsHealthStrip({
           >
             <View style={[ipsStyles.ruleBar, { backgroundColor: barColor }]} />
             <View style={ipsStyles.ruleBody}>
-              <Text style={[ipsStyles.ruleCat, { color: barColor }]}>
-                {isBreach ? 'RULE BROKEN' : action.category === 'commitment' ? 'COMMITMENT' : 'THRESHOLD'}
-              </Text>
-              <Text style={ipsStyles.ruleLabel} numberOfLines={1}>{action.label}</Text>
+              <Text style={ipsStyles.ruleLabel} numberOfLines={1}>{severityEmoji}{'  '}{action.label}</Text>
             </View>
             {(action.dbIds?.length ?? 0) > 0 && (
               <Pressable hitSlop={8} onPress={() => onDismiss(action)} style={ipsStyles.ruleDismiss}>
@@ -1327,17 +1325,6 @@ export default function HomeScreen() {
                 <Text style={styles.greetingItalic}>Taher.</Text>
               </Text>
             </View>
-            <Pressable
-              onPress={async () => {
-                resetState();
-                await signOut();
-                router.replace('/auth/signin');
-              }}
-              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={{ paddingTop: 4 }}
-            >
-              <Text style={styles.signOutLabel}>{isDemo ? 'EXIT DEMO' : 'SIGN OUT'}</Text>
-            </Pressable>
           </View>
 
           <Text style={styles.navEyebrow}>NET LIQUID VALUE</Text>
@@ -1366,7 +1353,7 @@ export default function HomeScreen() {
 
         {/* ── Needs attention heading ── */}
         {allActions.length > 0 && (
-          <Text style={styles.sectionEyebrow}>NEEDS ATTENTION</Text>
+          <Text style={styles.sectionEyebrow}>INSIGHTS</Text>
         )}
 
         {/* ── IPS health strip ── */}

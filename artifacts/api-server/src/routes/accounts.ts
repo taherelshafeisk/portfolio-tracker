@@ -8,6 +8,7 @@ import {
   createAccount,
   updateAccount,
   deleteAccount,
+  resetAccount,
   listAccountPositions,
   toAccountResponse,
 } from "../services/accountService";
@@ -67,6 +68,32 @@ router.delete("/:id", async (req, res) => {
     return res.status(204).send();
   } catch (error) {
     return res.status(500).json({ error: "Failed to delete account" });
+  }
+});
+
+router.post("/:id/reset", async (req, res) => {
+  try {
+    const id = parseInt(req.params.id);
+    const { confirm, mode, accountNameConfirmation } = req.body;
+
+    if (confirm !== true) {
+      return res.status(400).json({ error: "confirm must be true" });
+    }
+    if (mode !== "delete-account" && mode !== "reset-data") {
+      return res.status(400).json({ error: "mode must be 'delete-account' or 'reset-data'" });
+    }
+    if (!accountNameConfirmation || typeof accountNameConfirmation !== "string") {
+      return res.status(400).json({ error: "accountNameConfirmation is required" });
+    }
+
+    const result = await resetAccount(id, req.userId, mode, accountNameConfirmation);
+    if (!result) {
+      return res.status(404).json({ error: "Account not found or name confirmation did not match" });
+    }
+    return res.json(result);
+  } catch (error) {
+    logger.error(error, "[accounts POST /:id/reset] Error");
+    return res.status(500).json({ error: "Failed to reset account" });
   }
 });
 

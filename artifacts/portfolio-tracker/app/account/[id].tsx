@@ -10,6 +10,7 @@ import { Feather } from '@expo/vector-icons';
 import * as Haptics from 'expo-haptics';
 import * as ImagePicker from 'expo-image-picker';
 import { colors } from '@/constants/colors';
+import { fonts } from '@/constants/fonts';
 import { ASSET_TYPES, getAssetType } from '@/constants/assetTypes';
 import { usePortfolio, apiGet, apiPost, apiPut, apiDelete, apiPatch, Position, Account } from '@/context/PortfolioContext';
 import { getAuthToken } from '@/context/AuthContext';
@@ -207,6 +208,9 @@ export default function AccountDetailScreen() {
   const [showDuplicateModal, setShowDuplicateModal] = useState(false);
   const [pendingValid, setPendingValid] = useState<ParsedPosition[]>([]);
   const [pendingDuplicates, setPendingDuplicates] = useState<ParsedPosition[]>([]);
+  const [isResetting, setIsResetting] = useState(false);
+  const [resetModal, setResetModal] = useState<{ mode: 'reset-data' | 'delete-account' } | null>(null);
+  const [resetNameInput, setResetNameInput] = useState('');
 
   useEffect(() => {
     if (account) navigation.setOptions({ title: account.name });
@@ -288,6 +292,20 @@ export default function AccountDetailScreen() {
     const acctAccounts = accounts.filter(a => a.id === accountId);
     return computeActions(acctAccounts, positions, navMap);
   }, [accounts, positions, accountId, totalValue]);
+
+  // Alert severity per symbol — derived from actionableItems (concentration → warning, leverage → alert)
+  const alertSeverityMap = useMemo<Record<string, 'warning' | 'alert'>>(() => {
+    const map: Record<string, 'warning' | 'alert'> = {};
+    for (const a of actionableItems) {
+      if (!a.symbol) continue;
+      const sev: 'warning' | 'alert' = a.type === 'leverage' ? 'alert' : 'warning';
+      // Escalate: alert wins over warning
+      if (map[a.symbol] !== 'alert') {
+        map[a.symbol] = sev;
+      }
+    }
+    return map;
+  }, [actionableItems]);
 
   // Flat sorted positions for Intraday mode (no bucket grouping — global sort order)
   const intradayPositions = useMemo<Position[]>(() => {
@@ -481,21 +499,11 @@ export default function AccountDetailScreen() {
       setParseProgress({ current: i + 1, total: assets.length });
       if (!asset.base64) continue;
       try {
-        const token = getAuthToken();
-        const resp = await fetch(`${API_BASE}/anthropic/parse-screenshot`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            ...(token ? { 'Authorization': `Bearer ${token}` } : {}),
-          },
-          body: JSON.stringify({
-            imageBase64: asset.base64,
-            mediaType: asset.mimeType || 'image/jpeg',
-            parseType: 'positions',
-          }),
+        const data = await apiPost<any>('/anthropic/parse-screenshot', {
+          imageBase64: asset.base64,
+          mediaType: asset.mimeType || 'image/jpeg',
+          parseType: 'positions',
         });
-        const data = await resp.json();
-        if (!resp.ok) continue;
         if (data.positions?.length) {
           newPositions.push(...data.positions.map((p: any, idx: number) => ({
             _key: `p${i}_${idx}_${Date.now()}`,
@@ -698,6 +706,38 @@ export default function AccountDetailScreen() {
     setImportPositions(ps => ps.filter(p => p._key !== key));
   };
 
+  const openResetModal = (mode: 'reset-data' | 'delete-account') => {
+    setResetNameInput('');
+    setResetModal({ mode });
+  };
+
+  const submitReset = async () => {
+    if (!account || !resetModal) return;
+    setIsResetting(true);
+    try {
+      const result = await apiPost<{
+        mode: string; accountDeleted: boolean;
+        positionsDeleted: number; activitiesDeleted: number;
+      }>(`/accounts/${accountId}/reset`, {
+        confirm: true,
+        mode: resetModal.mode,
+        accountNameConfirmation: resetNameInput.trim(),
+      });
+      setResetModal(null);
+      if (result.accountDeleted) {
+        await refreshAll();
+        router.back();
+      } else {
+        await refreshAll();
+        Alert.alert('Done', `Deleted ${result.positionsDeleted} positions and ${result.activitiesDeleted} transactions.`);
+      }
+    } catch (e: any) {
+      Alert.alert('Error', e?.message || 'Operation failed. Check the account name and try again.');
+    } finally {
+      setIsResetting(false);
+    }
+  };
+
   const doImport = async (posToImport: ParsedPosition[]) => {
     setIsImporting(true);
     try {
@@ -854,14 +894,30 @@ export default function AccountDetailScreen() {
           </Card>
         )}
 
-        {positions.length > 0 && (
-          <ActionableNowSection
-            actions={actionableItems}
-            onPressItem={action => {
-              router.push({ pathname: '/action-detail', params: { actionId: action.id } });
-            }}
-          />
-        )}
+        {positions.length > 0 && (() => {
+          const isSwing = account?.accountType === 'swing';
+          const filteredActions = isSwing
+            ? actionableItems.filter(a => a.type !== 'concentration')
+            : actionableItems;
+          const suppressedCount = actionableItems.length - filteredActions.length;
+          return (
+            <>
+              {isSwing && suppressedCount > 0 && (
+                <View style={styles.swingInfoRow}>
+                  <Text style={styles.swingInfoText}>
+                    ℹ️{'  '}Concentration alerts suppressed for swing accounts.
+                  </Text>
+                </View>
+              )}
+              <ActionableNowSection
+                actions={filteredActions}
+                onPressItem={action => {
+                  router.push({ pathname: '/action-detail', params: { actionId: action.id } });
+                }}
+              />
+            </>
+          );
+        })()}
 
         {/* Mode toggle: Overview / Intraday */}
         {positions.length > 0 && (
@@ -944,7 +1000,7 @@ export default function AccountDetailScreen() {
                     onPress={() => setFilter(f)}
                   >
                     <Text style={[styles.filterChipText, filter === f && styles.filterChipTextActive]}>
-                      {f === 'all' ? 'All' : f === 'risers' ? '↑ Risers' : '↓ Losers'}
+                      {f === 'all' ? 'All' : f === 'risers' ? '↑ Leaders' : '↓ Laggards'}
                     </Text>
                   </Pressable>
                 ))
@@ -985,6 +1041,13 @@ export default function AccountDetailScreen() {
                     <View style={{ flex: 1 }}>
                       <View style={styles.posSymbolRow}>
                         <Text style={styles.posSymbol}>{pos.symbol}</Text>
+                        {(() => {
+                          const bkt = positionBuckets[pos.id];
+                          const bktEmoji = bkt === 'long_term' ? '📈' : bkt === 'speculative' ? '🎯' : bkt === 'crypto' ? '₿' : '';
+                          const alrtEmoji = alertSeverityMap[pos.symbol] === 'alert' ? '🚨' : alertSeverityMap[pos.symbol] === 'warning' ? '⚠️' : '';
+                          const emojis = (bktEmoji + alrtEmoji);
+                          return emojis.length > 0 ? <Text style={styles.posEmojis}>{emojis}</Text> : null;
+                        })()}
                         <View style={[styles.assetTypeBadge, { backgroundColor: assetCfg.color + '22', borderColor: assetCfg.color + '44' }]}>
                           <Feather name={assetCfg.icon as any} size={9} color={assetCfg.color} />
                           <Text style={[styles.assetTypeLabel, { color: assetCfg.color }]}>{assetCfg.label}</Text>
@@ -1060,8 +1123,7 @@ export default function AccountDetailScreen() {
               position={pos}
               bucket={positionBuckets[pos.id] ?? 'speculative'}
               todayPnlAmt={pos.dayChange ?? 0}
-              concentrationSeverity={positionSeverities[pos.id]?.conc}
-              drawdownSeverity={positionSeverities[pos.id]?.dd}
+              alertSeverity={alertSeverityMap[pos.symbol] ?? null}
               onPress={() => router.push({ pathname: '/position/[ticker]', params: { ticker: pos.symbol, accountId: String(pos.accountId) } })}
               onMenuPress={() => setMenuPos(pos)}
             />
@@ -1069,7 +1131,77 @@ export default function AccountDetailScreen() {
           </>
         )}
 
+        {/* ── Danger Zone ──────────────────────────────────────────────────── */}
+        <View style={styles.dangerZone}>
+          <Text style={styles.dangerZoneTitle}>Danger Zone</Text>
+          <Text style={styles.dangerZoneDesc}>
+            These actions delete positions and transactions permanently and cannot be undone.
+          </Text>
+          <Pressable
+            style={[styles.dangerBtn, isResetting && styles.dangerBtnDisabled]}
+            onPress={() => openResetModal('reset-data')}
+            disabled={isResetting}
+          >
+            <Text style={styles.dangerBtnText}>Reset Account Data</Text>
+            <Text style={styles.dangerBtnSub}>Delete all positions & transactions, keep account</Text>
+          </Pressable>
+          <Pressable
+            style={[styles.dangerBtn, styles.dangerBtnDelete, isResetting && styles.dangerBtnDisabled]}
+            onPress={() => openResetModal('delete-account')}
+            disabled={isResetting}
+          >
+            <Text style={[styles.dangerBtnText, styles.dangerBtnDeleteText]}>Delete Account</Text>
+            <Text style={[styles.dangerBtnSub, styles.dangerBtnDeleteText, { opacity: 0.7 }]}>Delete account and all its data</Text>
+          </Pressable>
+        </View>
+
       </ScrollView>
+
+      {/* ── Danger Zone Confirmation Modal ───────────────────────────────────── */}
+      <Modal visible={!!resetModal} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modal, { paddingBottom: insets.bottom + 16, borderRadius: 20 }]}>
+            <View style={styles.modalHandle} />
+            <Text style={[styles.modalTitle, { color: colors.negative }]}>
+              {resetModal?.mode === 'delete-account' ? 'Delete Account' : 'Reset Account Data'}
+            </Text>
+            <Text style={{ fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textSecondary, marginBottom: 16 }}>
+              {resetModal?.mode === 'delete-account'
+                ? `This will permanently delete the account and all its positions, transactions, alerts, and flags.`
+                : `This will permanently delete all positions, transactions, alerts, and flags. The account shell will be kept.`}
+              {'\n\n'}Type the account name to confirm:
+            </Text>
+            <Text style={{ fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary, marginBottom: 8 }}>
+              {account?.name}
+            </Text>
+            <TextInput
+              style={[styles.input, { marginBottom: 20 }]}
+              placeholder="Type account name here"
+              placeholderTextColor={colors.textMuted}
+              value={resetNameInput}
+              onChangeText={setResetNameInput}
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
+            <View style={styles.modalButtons}>
+              <Pressable style={styles.cancelBtn} onPress={() => setResetModal(null)} disabled={isResetting}>
+                <Text style={styles.cancelText}>Cancel</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.saveBtn, {
+                  backgroundColor: resetNameInput.trim() === account?.name?.trim() ? colors.negative : colors.separator,
+                }]}
+                onPress={submitReset}
+                disabled={isResetting || resetNameInput.trim() !== account?.name?.trim()}
+              >
+                <Text style={styles.saveText}>
+                  {isResetting ? 'Working…' : resetModal?.mode === 'delete-account' ? 'Delete Forever' : 'Reset Data'}
+                </Text>
+              </Pressable>
+            </View>
+          </View>
+        </View>
+      </Modal>
 
       {/* ── Confirm Delete Position ────────────────────────────────────────── */}
       <Modal visible={!!confirmPos} animationType="fade" transparent>
@@ -1549,6 +1681,8 @@ const styles = StyleSheet.create({
   cashRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.separator },
   cashLabel: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textSecondary },
   cashValue: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.textPrimary },
+  swingInfoRow: { backgroundColor: colors.bgInset, borderRadius: 2, paddingHorizontal: 14, paddingVertical: 10, marginBottom: 8 },
+  swingInfoText: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink3 },
   sectionHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   sectionTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 16, color: colors.textPrimary },
   sectionActions: { flexDirection: 'row', gap: 8 },
@@ -1564,6 +1698,7 @@ const styles = StyleSheet.create({
   posLeft: { flexDirection: 'row', alignItems: 'center', gap: 10, flex: 1 },
   posSymbolRow: { flexDirection: 'row', alignItems: 'center', gap: 6, flexWrap: 'wrap' },
   posSymbol: { fontFamily: 'Inter_700Bold', fontSize: 15, color: colors.textPrimary },
+  posEmojis: { fontSize: 13, lineHeight: 17 },
   assetTypeBadge: { flexDirection: 'row', alignItems: 'center', gap: 3, paddingHorizontal: 5, paddingVertical: 2, borderRadius: 6, borderWidth: 1 },
   assetTypeLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 9 },
   posName: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textSecondary, marginTop: 1, maxWidth: 180 },
@@ -1727,4 +1862,14 @@ const styles = StyleSheet.create({
   menuSheet: { backgroundColor: colors.surface, borderTopLeftRadius: 20, borderTopRightRadius: 20, padding: 20 },
   sortItem: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', paddingVertical: 14, borderBottomWidth: 1, borderBottomColor: colors.separator },
   sortItemText: { fontFamily: 'Inter_500Medium', fontSize: 15, color: colors.textPrimary },
+  // Danger zone
+  dangerZone: { marginTop: 32, paddingTop: 20, borderTopWidth: 1, borderTopColor: colors.separator },
+  dangerZoneTitle: { fontFamily: 'Inter_600SemiBold', fontSize: 13, color: colors.negative, marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.5 },
+  dangerZoneDesc: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted, marginBottom: 14 },
+  dangerBtn: { borderWidth: 1, borderColor: colors.negative, borderRadius: 12, padding: 14, marginBottom: 10 },
+  dangerBtnDelete: { backgroundColor: colors.negative },
+  dangerBtnDisabled: { opacity: 0.4 },
+  dangerBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 14, color: colors.negative, marginBottom: 2 },
+  dangerBtnSub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.negative },
+  dangerBtnDeleteText: { color: colors.background },
 });

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, Pressable, StyleSheet } from 'react-native';
 import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
-import { BUCKET_LABELS, BUCKET_COLORS, type Bucket } from '@/lib/buckets';
+import { BUCKET_COLORS, type Bucket } from '@/lib/buckets';
 import type { Position } from '@/context/PortfolioContext';
 
 interface IntradayPositionRowProps {
@@ -10,9 +10,8 @@ interface IntradayPositionRowProps {
   bucket: Bucket;
   /** Today's unrealized $ change (shares × day change $) */
   todayPnlAmt: number;
-  /** Optional severity badges pre-computed by parent */
-  concentrationSeverity?: 'warning' | 'critical' | null;
-  drawdownSeverity?: 'warning' | 'critical' | null;
+  /** Severity of the highest-priority alert for this position from allActions */
+  alertSeverity?: 'warning' | 'alert' | null;
   onPress: () => void;
   onMenuPress: () => void;
 }
@@ -23,12 +22,18 @@ function formatCompact(val: number): string {
   return `$${val.toFixed(0)}`;
 }
 
+function bucketEmoji(bucket: Bucket): string {
+  if (bucket === 'long_term')   return '📈';
+  if (bucket === 'speculative') return '🎯';
+  if (bucket === 'crypto')      return '₿';
+  return '';
+}
+
 export function IntradayPositionRow({
   position: pos,
   bucket,
   todayPnlAmt,
-  concentrationSeverity,
-  drawdownSeverity,
+  alertSeverity,
   onPress,
   onMenuPress,
 }: IntradayPositionRowProps) {
@@ -38,32 +43,19 @@ export function IntradayPositionRow({
   const dayColor    = isDayPos ? colors.positive : colors.negative;
   const pnlColor    = isPnlPos ? colors.positive : colors.negative;
   const todayColor  = isTodayPos ? colors.positive : colors.negative;
-  const bucketColor = BUCKET_COLORS[bucket];
 
-  const hasConcBadge = concentrationSeverity != null;
-  const hasDdBadge   = drawdownSeverity != null;
+  const emojis = [
+    bucketEmoji(bucket),
+    alertSeverity === 'alert'   ? '🚨' : alertSeverity === 'warning' ? '⚠️' : '',
+  ].filter(Boolean).join('');
 
   return (
     <Pressable onPress={onPress} style={({ pressed }) => [styles.row, pressed && styles.pressed]}>
-      {/* Left: symbol + badges */}
+      {/* Left: symbol + inline emoji indicators */}
       <View style={styles.left}>
         <Text style={styles.symbol}>{pos.symbol}</Text>
-        <View style={[styles.bucketBadge, { borderColor: bucketColor + '60' }]}>
-          <Text style={[styles.bucketLabel, { color: bucketColor }]}>{BUCKET_LABELS[bucket]}</Text>
-        </View>
-        {hasConcBadge && (
-          <View style={[styles.policyBadge, concentrationSeverity === 'critical' ? styles.badgeCritical : styles.badgeWarning]}>
-            <Text style={[styles.policyBadgeText, { color: concentrationSeverity === 'critical' ? colors.negative : colors.amber }]}>
-              Over limit
-            </Text>
-          </View>
-        )}
-        {hasDdBadge && (
-          <View style={[styles.policyBadge, drawdownSeverity === 'critical' ? styles.badgeCritical : styles.badgeWarning]}>
-            <Text style={[styles.policyBadgeText, { color: drawdownSeverity === 'critical' ? colors.negative : colors.amber }]}>
-              Drawdown
-            </Text>
-          </View>
+        {emojis.length > 0 && (
+          <Text style={styles.emojis}>{emojis}</Text>
         )}
       </View>
 
@@ -110,7 +102,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 5,
     flex: 1,
-    flexWrap: 'wrap',
   },
   symbol: {
     fontFamily: fonts.monoBold,
@@ -118,29 +109,9 @@ const styles = StyleSheet.create({
     color: colors.ink,
     minWidth: 44,
   },
-  bucketBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 2,
-    borderWidth: 1,
-    backgroundColor: colors.bgInset,
-  },
-  bucketLabel: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 0.5,
-  },
-  policyBadge: {
-    paddingHorizontal: 5,
-    paddingVertical: 2,
-    borderRadius: 2,
-  },
-  badgeCritical: { backgroundColor: colors.negativeLight },
-  badgeWarning:  { backgroundColor: colors.amberSoft },
-  policyBadgeText: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 0.3,
+  emojis: {
+    fontSize: 12,
+    lineHeight: 16,
   },
   right: {
     flexDirection: 'row',

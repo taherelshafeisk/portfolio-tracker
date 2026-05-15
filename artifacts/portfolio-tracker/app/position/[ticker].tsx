@@ -118,6 +118,40 @@ function fmtQty(qty: number): string {
   return parseFloat(qty.toFixed(4)).toString();
 }
 
+// ─── Thesis types ─────────────────────────────────────────────────────────────
+
+type ThesisStrategy = 'core' | 'swing' | 'earnings' | 'value' | 'other';
+
+interface ThesisData {
+  why: string;
+  strategy: ThesisStrategy;
+  targetAllocation: string;
+  exitTrigger: string;
+  notes: string;
+}
+
+const THESIS_DEFAULT: ThesisData = { why: '', strategy: 'core', targetAllocation: '', exitTrigger: '', notes: '' };
+
+const STRATEGY_OPTIONS: { key: ThesisStrategy; label: string }[] = [
+  { key: 'core',     label: 'Core holding' },
+  { key: 'swing',    label: 'Swing trade' },
+  { key: 'earnings', label: 'Earnings play' },
+  { key: 'value',    label: 'Value dip' },
+  { key: 'other',    label: 'Other' },
+];
+
+function parseThesis(raw: string | null | undefined): ThesisData {
+  if (!raw) return THESIS_DEFAULT;
+  try {
+    const parsed = JSON.parse(raw);
+    if (typeof parsed === 'object' && parsed !== null && ('why' in parsed || 'strategy' in parsed || 'exitTrigger' in parsed)) {
+      return { ...THESIS_DEFAULT, ...parsed };
+    }
+  } catch {}
+  // Old plain-text fallback: put raw text in notes field
+  return { ...THESIS_DEFAULT, notes: raw };
+}
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 
 export default function PositionDetailScreen() {
@@ -131,8 +165,8 @@ export default function PositionDetailScreen() {
   const [activeTab, setActiveTab] = useState<'overview' | 'history'>('overview');
   const [selectedRange, setSelectedRange] = useState<typeof RANGES[number]>(RANGES[2]);
   const [crossAccountExpanded, setCrossAccountExpanded] = useState(false);
-  const [editingNote, setEditingNote] = useState(false);
-  const [noteText, setNoteText] = useState('');
+  const [editingThesis, setEditingThesis] = useState(false);
+  const [thesisData, setThesisData] = useState<ThesisData>(THESIS_DEFAULT);
   const [expandedTxId, setExpandedTxId] = useState<number | null>(null);
   const [editingStop, setEditingStop] = useState(false);
   const [editingTarget, setEditingTarget] = useState(false);
@@ -152,8 +186,8 @@ export default function PositionDetailScreen() {
   );
 
   React.useEffect(() => {
-    if (position?.notes != null && !editingNote) {
-      setNoteText(position.notes);
+    if (position?.notes != null && !editingThesis) {
+      setThesisData(parseThesis(position.notes));
     }
   }, [position?.notes]);
 
@@ -446,11 +480,11 @@ export default function PositionDetailScreen() {
 
   const saveNote = async () => {
     if (!position) return;
-    setEditingNote(false);
+    setEditingThesis(false);
     try {
-      await apiPut(`/positions/${position.id}`, { notes: noteText });
+      await apiPut(`/positions/${position.id}`, { notes: JSON.stringify(thesisData) });
       queryClient.invalidateQueries({ queryKey: ['positions'] });
-    } catch { /* silently fail — text remains visible */ }
+    } catch { /* silently fail */ }
   };
 
   const saveStop = async () => {
@@ -540,31 +574,34 @@ export default function PositionDetailScreen() {
         ))}
       </ScrollView>
 
-      {/* Chart */}
-      <View style={styles.chartWrap}>{renderChart()}</View>
-
-      {/* IPS status strip */}
+      {/* IPS status strip — above the chart */}
       {position && (
         <View style={styles.ipsStrip}>
           <View style={[
             styles.ipsPill,
             isConcentrationViolated
               ? { backgroundColor: colors.negative + '20', borderColor: colors.negative + '55' }
-              : { backgroundColor: colors.surface, borderColor: colors.separator },
+              : { backgroundColor: colors.positiveLight, borderColor: colors.positive + '44' },
           ]}>
-            <View style={[styles.ipsDot, { backgroundColor: isConcentrationViolated ? colors.negative : colors.textMuted }]} />
-            <Text style={[styles.ipsPillText, { color: isConcentrationViolated ? colors.negative : colors.textSecondary }]}>
+            <Text style={[styles.ipsPillText, { color: isConcentrationViolated ? colors.negative : colors.positive }]}>
               Conc {concentrationPct.toFixed(1)}%{isConcentrationViolated ? ' · over limit' : ''}
             </Text>
           </View>
-          <View style={[styles.ipsPill, { backgroundColor: colors.surface, borderColor: colors.separator }]}>
-            <View style={[styles.ipsDot, { backgroundColor: colors.textMuted }]} />
-            <Text style={styles.ipsPillText}>
+          <View style={[
+            styles.ipsPill,
+            drawdownPct >= 0
+              ? { backgroundColor: colors.positiveLight, borderColor: colors.positive + '44' }
+              : { backgroundColor: colors.amberSoft, borderColor: colors.amber + '44' },
+          ]}>
+            <Text style={[styles.ipsPillText, { color: drawdownPct >= 0 ? colors.positive : colors.amber }]}>
               {drawdownPct >= 0 ? '+' : ''}{drawdownPct.toFixed(1)}% vs cost
             </Text>
           </View>
         </View>
       )}
+
+      {/* Chart */}
+      <View style={styles.chartWrap}>{renderChart()}</View>
     </Card>
   );
 
@@ -604,12 +641,18 @@ export default function PositionDetailScreen() {
             <Text style={styles.trimCardTitle}>Concentration Trim</Text>
             <Feather name="chevron-right" size={14} color="#F5A623" />
           </View>
-          <Text style={styles.trimCardMain}>
-            Trim ~{sharesToTrim.toFixed(0)} shares to reach {(concentrationLimit * 100).toFixed(0)}% limit
-          </Text>
-          <Text style={styles.trimCardSub}>
-            New value: {formatCurrency(position.marketValue - sharesToTrim * currentPrice)} · New conc: {(concentrationLimit * 100).toFixed(0)}%
-          </Text>
+          {Math.round(sharesToTrim) === 0 ? (
+            <Text style={styles.trimCardWithinTolerance}>Within tolerance — no action needed</Text>
+          ) : (
+            <>
+              <Text style={styles.trimCardMain}>
+                Trim ~{sharesToTrim.toFixed(0)} shares to reach {(concentrationLimit * 100).toFixed(0)}% limit
+              </Text>
+              <Text style={styles.trimCardSub}>
+                New value: {formatCurrency(position.marketValue - sharesToTrim * currentPrice)} · New conc: {(concentrationLimit * 100).toFixed(0)}%
+              </Text>
+            </>
+          )}
         </Pressable>
       )}
 
@@ -644,31 +687,102 @@ export default function PositionDetailScreen() {
         <View style={styles.thesisSection}>
           <View style={styles.thesisSectionHeader}>
             <Text style={styles.thesisSectionLabel}>THESIS</Text>
-            {editingNote && (
+            {editingThesis ? (
               <Pressable style={styles.thesisSaveBtn} onPress={saveNote}>
                 <Text style={styles.thesisSaveBtnText}>Save</Text>
               </Pressable>
+            ) : (
+              <Pressable onPress={() => setEditingThesis(true)}>
+                <Text style={styles.thesisEditLabel}>Edit</Text>
+              </Pressable>
             )}
           </View>
-          {editingNote ? (
+
+          {/* Strategy picker */}
+          <Text style={styles.thesisFieldLabel}>Strategy</Text>
+          <View style={styles.thesisStrategyRow}>
+            {STRATEGY_OPTIONS.map(opt => (
+              <Pressable
+                key={opt.key}
+                style={[styles.thesisStrategyChip, thesisData.strategy === opt.key && styles.thesisStrategyChipActive]}
+                onPress={() => editingThesis && setThesisData(d => ({ ...d, strategy: opt.key }))}
+              >
+                <Text style={[styles.thesisStrategyText, thesisData.strategy === opt.key && styles.thesisStrategyTextActive]}>
+                  {opt.label}
+                </Text>
+              </Pressable>
+            ))}
+          </View>
+
+          {/* Why I own this */}
+          <Text style={styles.thesisFieldLabel}>Why I own this</Text>
+          {editingThesis ? (
             <TextInput
               style={styles.thesisInput}
-              value={noteText}
-              onChangeText={setNoteText}
-              onBlur={saveNote}
-              autoFocus
+              value={thesisData.why}
+              onChangeText={t => setThesisData(d => ({ ...d, why: t }))}
               multiline
-              placeholder="Entry trigger, expected move, exit conditions…"
+              placeholder="Core thesis, catalyst, or edge…"
               placeholderTextColor={colors.textMuted}
             />
           ) : (
-            <Pressable onPress={() => setEditingNote(true)}>
-              {noteText
-                ? <Text style={styles.thesisText}>{noteText}</Text>
-                : <Text style={styles.thesisPlaceholder}>Tap to add thesis…</Text>}
-            </Pressable>
+            <Text style={thesisData.why ? styles.thesisText : styles.thesisPlaceholder}>
+              {thesisData.why || 'Not set'}
+            </Text>
           )}
-          {position?.notesUpdatedAt != null && !editingNote && (
+
+          {/* Target allocation */}
+          <Text style={styles.thesisFieldLabel}>Target allocation %</Text>
+          {editingThesis ? (
+            <TextInput
+              style={[styles.thesisInput, { maxWidth: 120 }]}
+              value={thesisData.targetAllocation}
+              onChangeText={t => setThesisData(d => ({ ...d, targetAllocation: t }))}
+              keyboardType="decimal-pad"
+              placeholder="e.g. 5"
+              placeholderTextColor={colors.textMuted}
+            />
+          ) : (
+            <Text style={thesisData.targetAllocation ? styles.thesisText : styles.thesisPlaceholder}>
+              {thesisData.targetAllocation ? `${thesisData.targetAllocation}%` : 'Not set'}
+            </Text>
+          )}
+
+          {/* Exit trigger */}
+          <Text style={styles.thesisFieldLabel}>Exit trigger</Text>
+          {editingThesis ? (
+            <TextInput
+              style={styles.thesisInput}
+              value={thesisData.exitTrigger}
+              onChangeText={t => setThesisData(d => ({ ...d, exitTrigger: t }))}
+              multiline
+              placeholder="Sell if thesis breaks, price < $X, or earnings miss…"
+              placeholderTextColor={colors.textMuted}
+            />
+          ) : (
+            <Text style={thesisData.exitTrigger ? styles.thesisText : styles.thesisPlaceholder}>
+              {thesisData.exitTrigger || 'Not set'}
+            </Text>
+          )}
+
+          {/* Notes */}
+          <Text style={styles.thesisFieldLabel}>Notes</Text>
+          {editingThesis ? (
+            <TextInput
+              style={styles.thesisInput}
+              value={thesisData.notes}
+              onChangeText={t => setThesisData(d => ({ ...d, notes: t }))}
+              multiline
+              placeholder="Additional context…"
+              placeholderTextColor={colors.textMuted}
+            />
+          ) : (
+            <Text style={thesisData.notes ? styles.thesisText : styles.thesisPlaceholder}>
+              {thesisData.notes || 'None'}
+            </Text>
+          )}
+
+          {position?.notesUpdatedAt != null && !editingThesis && (
             <Text style={styles.thesisTimestamp}>
               Updated {formatThesisDate(position.notesUpdatedAt)}
             </Text>
@@ -940,19 +1054,38 @@ export default function PositionDetailScreen() {
       </Card>
 
       {/* Catalysts */}
-      <Card>
-        <Text style={styles.cardLabel}>Catalysts</Text>
-        <View style={styles.catalystRow}>
-          <Feather name="calendar" size={13} color={colors.textMuted} />
-          <Text style={styles.catalystLabel}>Earnings</Text>
-          <Text style={styles.catalystValue}>Not found</Text>
-        </View>
-        <View style={styles.catalystRow}>
-          <Feather name="dollar-sign" size={13} color={colors.textMuted} />
-          <Text style={styles.catalystLabel}>Ex-dividend</Text>
-          <Text style={styles.catalystValue}>None</Text>
-        </View>
-      </Card>
+      {/* TODO: backend should return correct ex-div dates from Yahoo Finance calendarEvents */}
+      {(() => {
+        const ETF_SYMBOLS = new Set(['VOO', 'SPY', 'QQQ', 'GLD', 'GDX', 'XLE', 'XLF', 'XLK', 'IWM', 'DIA', 'VTI', 'SCHD', 'JEPI', 'JEPQ', 'ARKK']);
+        const isEtf = position?.assetType === 'etf' || ETF_SYMBOLS.has(ticker?.toUpperCase() ?? '');
+        if (isEtf) {
+          return (
+            <Card>
+              <Text style={styles.cardLabel}>Catalysts</Text>
+              <View style={styles.catalystRow}>
+                <Feather name="dollar-sign" size={13} color={colors.textMuted} />
+                <Text style={styles.catalystLabel}>Ex-dividend</Text>
+                <Text style={styles.catalystValue}>See fund prospectus</Text>
+              </View>
+            </Card>
+          );
+        }
+        return (
+          <Card>
+            <Text style={styles.cardLabel}>Catalysts</Text>
+            <View style={styles.catalystRow}>
+              <Feather name="calendar" size={13} color={colors.textMuted} />
+              <Text style={styles.catalystLabel}>Earnings</Text>
+              <Text style={styles.catalystValue}>Not found</Text>
+            </View>
+            <View style={styles.catalystRow}>
+              <Feather name="dollar-sign" size={13} color={colors.textMuted} />
+              <Text style={styles.catalystLabel}>Ex-dividend</Text>
+              <Text style={styles.catalystValue}>None</Text>
+            </View>
+          </Card>
+        );
+      })()}
 
       {/* Cross-account breakdown */}
       {crossAccountPositions.length > 1 && (
@@ -1323,10 +1456,9 @@ const styles = StyleSheet.create({
   chartWrap: {},
 
   // IPS strip
-  ipsStrip: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingVertical: 10 },
-  ipsPill: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16, borderWidth: 1 },
-  ipsDot: { width: 6, height: 6, borderRadius: 3 },
-  ipsPillText: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textSecondary },
+  ipsStrip: { flexDirection: 'row', gap: 8, paddingHorizontal: 12, paddingBottom: 6, paddingTop: 2 },
+  ipsPill: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 16, borderWidth: 1 },
+  ipsPillText: { fontFamily: 'Inter_400Regular', fontSize: 11 },
 
   // Trim card
   trimCard: {
@@ -1340,20 +1472,28 @@ const styles = StyleSheet.create({
   trimCardTitle: { flex: 1, fontFamily: 'Inter_600SemiBold', fontSize: 13, color: '#F5A623' },
   trimCardMain: { fontFamily: 'Inter_600SemiBold', fontSize: 15, color: colors.textPrimary, marginBottom: 3 },
   trimCardSub: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
+  trimCardWithinTolerance: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textSecondary },
 
   // Position card
   positionCard: {},
   cardLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 11, color: colors.textMuted, letterSpacing: 0.5, textTransform: 'uppercase', marginBottom: 12 },
   posGrid: { flexDirection: 'row', flexWrap: 'wrap' },
   thesisSection: { paddingTop: 12, borderTopWidth: 1, borderTopColor: colors.separator, marginTop: 4 },
-  thesisSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 },
+  thesisSectionHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
   thesisSectionLabel: { fontFamily: 'Inter_600SemiBold', fontSize: 11, color: colors.textMuted, letterSpacing: 0.5, textTransform: 'uppercase' },
   thesisSaveBtn: { backgroundColor: colors.primary + '22', paddingHorizontal: 12, paddingVertical: 4, borderRadius: 6 },
   thesisSaveBtnText: { fontFamily: 'Inter_600SemiBold', fontSize: 12, color: colors.primary },
-  thesisText: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textPrimary, lineHeight: 21 },
-  thesisPlaceholder: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textMuted, fontStyle: 'italic' },
-  thesisInput: { fontFamily: 'Inter_400Regular', fontSize: 14, color: colors.textPrimary, lineHeight: 21, minHeight: 80, textAlignVertical: 'top', padding: 0 },
-  thesisTimestamp: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 6 },
+  thesisEditLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted },
+  thesisFieldLabel: { fontFamily: 'Inter_500Medium', fontSize: 10, color: colors.textMuted, letterSpacing: 0.8, textTransform: 'uppercase', marginTop: 12, marginBottom: 4 },
+  thesisStrategyRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 2 },
+  thesisStrategyChip: { paddingHorizontal: 10, paddingVertical: 5, borderRadius: 2, borderWidth: 1, borderColor: colors.surfaceBorder, backgroundColor: colors.surfaceElevated },
+  thesisStrategyChipActive: { borderColor: colors.primary, backgroundColor: colors.primary + '18' },
+  thesisStrategyText: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textSecondary },
+  thesisStrategyTextActive: { fontFamily: 'Inter_500Medium', color: colors.primary },
+  thesisText: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textPrimary, lineHeight: 20 },
+  thesisPlaceholder: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textMuted, fontStyle: 'italic' },
+  thesisInput: { fontFamily: 'Inter_400Regular', fontSize: 13, color: colors.textPrimary, lineHeight: 20, minHeight: 60, textAlignVertical: 'top', padding: 0 },
+  thesisTimestamp: { fontFamily: 'Inter_400Regular', fontSize: 11, color: colors.textMuted, marginTop: 10 },
   realizedRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingTop: 10, marginTop: 8, borderTopWidth: 1, borderTopColor: colors.separator },
   realizedLabel: { fontFamily: 'Inter_400Regular', fontSize: 12, color: colors.textMuted, flex: 1, marginRight: 8 },
   realizedValue: { fontFamily: 'Inter_600SemiBold', fontSize: 14 },

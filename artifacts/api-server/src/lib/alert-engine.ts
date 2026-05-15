@@ -79,7 +79,8 @@ export function generateAlerts(
         const marketValue = pos.quantity * pos.currentPrice;
         const concentrationFraction = marketValue / nav;
 
-        const concentrationSeverity = evaluateConcentration(
+        const isSwingAccount = account.name.toLowerCase().includes('swing');
+        const concentrationSeverity = isSwingAccount ? null : evaluateConcentration(
           concentrationFraction,
           policy.concentrationRule,
         ) as "warning" | "critical" | null;

@@ -42,14 +42,23 @@ router.get("/quote/:symbol", async (req, res) => {
   try {
     const symbol = req.params.symbol.toUpperCase();
     const yahooSymbol = toYahooSymbol(symbol);
-    const url = `${YAHOO_BASE}/v8/finance/chart/${yahooSymbol}?interval=1d&range=5d`;
-    const data = await fetchYahoo(url);
-    const result = data?.chart?.result?.[0];
+    const [data, calendarData] = await Promise.allSettled([
+      fetchYahoo(`${YAHOO_BASE}/v8/finance/chart/${yahooSymbol}?interval=1d&range=5d`),
+      fetchYahoo(`${YAHOO_BASE}/v11/finance/quoteSummary/${yahooSymbol}?modules=calendarEvents`),
+    ]);
+    const data2 = data.status === 'fulfilled' ? data.value : null;
+    const result = data2?.chart?.result?.[0];
     if (!result) { res.status(404).json({ error: "Symbol not found" }); return; }
     const meta = result.meta;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const calendar = calendarData.status === 'fulfilled' ? (calendarData.value as any)?.quoteSummary?.result?.[0]?.calendarEvents : null;
+    const earningsTimestamp: number | null = calendar?.earnings?.earningsDate?.[0]?.raw ?? null;
+    const exDivTimestamp: number | null = calendar?.exDividendDate?.raw ?? null;
+    const earningsDate = earningsTimestamp ? new Date(earningsTimestamp * 1000).toISOString().split('T')[0] : null;
+    const exDividendDate = exDivTimestamp ? new Date(exDivTimestamp * 1000).toISOString().split('T')[0] : null;
     const regularMarketPrice = meta.regularMarketPrice || 0;
     const marketState: string = meta?.marketState ?? "CLOSED";
-    const rawCloses: (number | null)[] = result.indicators?.quote?.[0]?.close ?? [];
+    const rawCloses: (number | null)[] = result?.indicators?.quote?.[0]?.close ?? [];
     const closes = rawCloses.filter((c): c is number => typeof c === "number" && c > 0);
     let tail = closes.length;
     while (tail > 1 && closes[tail - 1] === closes[tail - 2]) tail--;
@@ -79,6 +88,8 @@ router.get("/quote/:symbol", async (req, res) => {
       low52w: meta.fiftyTwoWeekLow || undefined,
       peRatio: undefined,
       previousClose,
+      earningsDate,
+      exDividendDate,
     });
   } catch (error) {
     res.status(500).json({ error: "Failed to fetch quote" });

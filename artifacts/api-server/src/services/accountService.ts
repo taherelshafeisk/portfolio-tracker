@@ -4,8 +4,8 @@ import {
   alertsTable, positionFlagsTable, orderSuggestionsTable,
   portfolioSnapshotsTable, priceAlertsTable,
 } from "@workspace/db";
-import { and, eq } from "drizzle-orm";
-import { fetchLivePrices } from "../lib/priceService";
+import { and, eq, min } from "drizzle-orm";
+import { fetchLivePrices, type LivePriceData } from "../lib/priceService";
 import { formatPosition } from "../lib/formatters/positionFormatter";
 
 export function toAccountResponse(a: typeof accountsTable.$inferSelect) {
@@ -214,12 +214,24 @@ export async function listAccountPositions(accountId: number, userId: string) {
   const activePositions = positions.filter(p => parseFloat(p.quantity) > 0);
   const closedPositions = positions.filter(p => parseFloat(p.quantity) <= 0);
 
-  const priceMap = activePositions.length > 0
-    ? await fetchLivePrices(activePositions.map(p => p.symbol))
-    : {};
+  const [priceMap, firstBuyRows] = await Promise.all([
+    activePositions.length > 0 ? fetchLivePrices(activePositions.map(p => p.symbol)) : Promise.resolve({} as Record<string, LivePriceData>),
+    db.select({
+      symbol: activitiesTable.symbol,
+      firstBought: min(activitiesTable.tradeDate),
+    })
+      .from(activitiesTable)
+      .where(and(eq(activitiesTable.accountId, accountId), eq(activitiesTable.activityType, 'buy')))
+      .groupBy(activitiesTable.symbol),
+  ]);
+
+  const firstBuyMap: Record<string, Date> = {};
+  for (const row of firstBuyRows) {
+    if (row.symbol && row.firstBought) firstBuyMap[row.symbol] = new Date(row.firstBought);
+  }
 
   return [
-    ...activePositions.map(p => formatPosition(p, priceMap[p.symbol] ?? null, { closed: false, extended: false })),
-    ...closedPositions.map(p => formatPosition(p, null, { closed: true, extended: false })),
+    ...activePositions.map(p => formatPosition(p, priceMap[p.symbol] ?? null, { closed: false, extended: false, firstBoughtAt: firstBuyMap[p.symbol] ?? null })),
+    ...closedPositions.map(p => formatPosition(p, null, { closed: true, extended: false, firstBoughtAt: firstBuyMap[p.symbol] ?? null })),
   ];
 }

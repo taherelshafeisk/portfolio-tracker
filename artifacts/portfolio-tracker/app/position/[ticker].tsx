@@ -52,6 +52,8 @@ interface MarketQuote {
   high52w?: number;
   low52w?: number;
   previousClose: number;
+  earningsDate?: string | null;
+  exDividendDate?: string | null;
 }
 
 interface ChartData {
@@ -1053,35 +1055,34 @@ export default function PositionDetailScreen() {
         </View>
       </Card>
 
-      {/* Catalysts */}
-      {/* TODO: backend should return correct ex-div dates from Yahoo Finance calendarEvents */}
+      {/* Catalysts — data from /market/quote calendarEvents */}
       {(() => {
         const ETF_SYMBOLS = new Set(['VOO', 'SPY', 'QQQ', 'GLD', 'GDX', 'XLE', 'XLF', 'XLK', 'IWM', 'DIA', 'VTI', 'SCHD', 'JEPI', 'JEPQ', 'ARKK']);
         const isEtf = position?.assetType === 'etf' || ETF_SYMBOLS.has(ticker?.toUpperCase() ?? '');
-        if (isEtf) {
-          return (
-            <Card>
-              <Text style={styles.cardLabel}>Catalysts</Text>
-              <View style={styles.catalystRow}>
-                <Feather name="dollar-sign" size={13} color={colors.textMuted} />
-                <Text style={styles.catalystLabel}>Ex-dividend</Text>
-                <Text style={styles.catalystValue}>See fund prospectus</Text>
-              </View>
-            </Card>
-          );
-        }
+        const fmtDate = (iso: string) => {
+          const d = new Date(iso);
+          return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+        };
         return (
           <Card>
             <Text style={styles.cardLabel}>Catalysts</Text>
-            <View style={styles.catalystRow}>
-              <Feather name="calendar" size={13} color={colors.textMuted} />
-              <Text style={styles.catalystLabel}>Earnings</Text>
-              <Text style={styles.catalystValue}>Not found</Text>
-            </View>
+            {!isEtf && (
+              <View style={styles.catalystRow}>
+                <Feather name="calendar" size={13} color={colors.textMuted} />
+                <Text style={styles.catalystLabel}>Earnings</Text>
+                <Text style={styles.catalystValue}>
+                  {quote?.earningsDate ? fmtDate(quote.earningsDate) : 'Not available'}
+                </Text>
+              </View>
+            )}
             <View style={styles.catalystRow}>
               <Feather name="dollar-sign" size={13} color={colors.textMuted} />
               <Text style={styles.catalystLabel}>Ex-dividend</Text>
-              <Text style={styles.catalystValue}>None</Text>
+              <Text style={styles.catalystValue}>
+                {isEtf && !quote?.exDividendDate
+                  ? 'See fund prospectus'
+                  : quote?.exDividendDate ? fmtDate(quote.exDividendDate) : 'None'}
+              </Text>
             </View>
           </Card>
         );

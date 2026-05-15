@@ -16,6 +16,8 @@ export interface FormatPositionOptions {
    * position endpoints include them. Defaults to true.
    */
   extended?: boolean;
+  /** First buy date from activities table. Used to compute holdDays. */
+  firstBoughtAt?: Date | null;
 }
 
 /**
@@ -39,6 +41,10 @@ export function formatPosition(
   const dayChange = qty * (cur - prevPrice);
   const dayChangePct = livePriceData?.changePercent ?? 0;
   const extended = opts?.extended !== false;
+  const firstBoughtAt = opts?.firstBoughtAt ?? null;
+  const holdDays = firstBoughtAt
+    ? Math.floor((Date.now() - firstBoughtAt.getTime()) / 86_400_000)
+    : null;
 
   return {
     id: p.id,
@@ -70,6 +76,8 @@ export function formatPosition(
     policyNote: p.policyNote ?? null,
     ipsVersion: p.ipsVersion ?? null,
     ...(extended ? { exitReason: p.exitReason ?? null } : {}),
+    firstBoughtAt: firstBoughtAt ? firstBoughtAt.toISOString() : null,
+    holdDays,
     createdAt: p.createdAt.toISOString(),
     updatedAt: p.updatedAt.toISOString(),
   };

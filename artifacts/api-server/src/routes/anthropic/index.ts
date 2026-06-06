@@ -408,7 +408,7 @@ CASH ROWS — critical exclusion rules:
 - If multiple cash rows are visible (e.g. "USD Cash" and "Total Cash"), use "Total Cash" as cashBalance.
 
 Only return the JSON object, no additional text. If no positions are visible, return an empty positions array.`
-      : `Analyze this screenshot of a brokerage account transaction/trade history page. Extract all recent trades and return them as a JSON object with this exact structure:
+      : `Analyze this screenshot of a brokerage account transaction or trade. The screenshot may be a transaction history list OR a single transaction detail page (showing one trade's full details). Either format is valid — extract whatever trades are present and return them as a JSON object with this exact structure:
 {
   "accountHint": "extract the account name or broker from the screenshot",
   "currency": "ISO 4217 currency code for amounts in this screenshot (USD, AED, GBP, etc.). For WIO Bank or other UAE/Gulf brokers, return AED even if the ฿ symbol is used.",
@@ -451,6 +451,25 @@ AMOUNT EXTRACTION FALLBACK:
 If totalAmount is not shown as a structured field, look for a monetary number in the visible text of that row (e.g. '1,489.59', '+1489.59', '(482.61)'). Remove commas and parentheses (parentheses mean negative). Use that as totalAmount.
 
 CURRENCY: Keep all prices and amounts in the native currency shown in the screenshot. Do NOT convert currencies during extraction. Return the detected currency code in the top-level "currency" field.
+
+SINGLE TRANSACTION DETAIL PAGE — how to extract when there is only one trade shown:
+Many broker apps show a detail screen for one order (e.g. WIO Bank order detail). These pages use labelled fields instead of table columns. Map the fields as follows:
+- Top header label (e.g. "BUY", "SELL") → activityType
+- Instrument name (e.g. "Bitcoin") → name; resolve to ticker (e.g. "BTC")
+- "Executed quantity" or "Quantity" → quantity
+- "Executed amount" (the cash amount paid/received, typically shown with a sign like -3,799.70) → totalAmount. Use the executed amount, NOT the top-level header amount which may include commission.
+- "Commission (incl. VAT)" or "Fees" → ignore for totalAmount (already excluded if you use "Executed amount")
+- "Limit price" or "Execution price" or "Price" → price (if no price field, derive from |totalAmount| / quantity)
+- "Date" field → tradeDate (convert to YYYY-MM-DD; ignore the time portion)
+- "Transaction status" must be "Executed" or "Filled" — if it says "Cancelled", "Pending", "Rejected", skip entirely
+- The "Portfolio" field (e.g. "Main") is not the account name — use the app/broker name as accountHint instead (e.g. "WIO")
+
+WIO SINGLE-TRADE EXAMPLE:
+  Header: BUY / Bitcoin / -3,819.64 AED
+  Executed amount: -3,799.70 AED | Commission: -19.95 AED | Executed quantity: 0.01724 BTC
+  Date: 5 Jun, 21:53:15 | Transaction status: Executed | Limit price: 220,400.01 AED
+  → activityType=buy, symbol=BTC, name=Bitcoin, quantity=0.01724,
+    totalAmount=-3799.70, price=220400.01, tradeDate=2025-06-05, currency=AED, accountHint=WIO
 
 ORDER STATUS — CRITICAL EXCLUSION RULES:
 Only include trades that were actually executed (filled). EXCLUDE any row where:

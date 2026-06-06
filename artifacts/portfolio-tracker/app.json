@@ -17,7 +17,8 @@
       "supportsTablet": false,
       "bundleIdentifier": "com.taherelshafei.portfoliotracker",
       "infoPlist": {
-        "ITSAppUsesNonExemptEncryption": false
+        "ITSAppUsesNonExemptEncryption": false,
+        "NSFaceIDUsageDescription": "Use Face ID to sign in quickly and securely."
       }
     },
     "android": {

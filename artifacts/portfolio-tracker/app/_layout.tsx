@@ -1,3 +1,4 @@
+import 'react-native-reanimated';
 import {
   InterTight_400Regular,
   InterTight_500Medium,

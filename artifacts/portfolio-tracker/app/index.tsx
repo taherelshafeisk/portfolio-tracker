@@ -1,7 +1,8 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import * as LocalAuthentication from 'expo-local-authentication';
 import { useAuth } from '@/context/AuthContext';
 import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
@@ -9,13 +10,40 @@ import { fonts } from '@/constants/fonts';
 export default function LandingScreen() {
   const { token, isLoading, tryDemo } = useAuth();
   const insets = useSafeAreaInsets();
+  const [biometricAvailable, setBiometricAvailable] = useState(false);
+  const [biometricPrompted, setBiometricPrompted] = useState(false);
 
-  // If already authenticated, go straight to the app
+  // Check if biometrics (Face ID / Touch ID) are enrolled on this device
   useEffect(() => {
-    if (!isLoading && token) {
+    LocalAuthentication.hasHardwareAsync().then(async (hasHw) => {
+      if (!hasHw) return;
+      const enrolled = await LocalAuthentication.isEnrolledAsync();
+      setBiometricAvailable(enrolled);
+    });
+  }, []);
+
+  const promptBiometric = useCallback(async () => {
+    setBiometricPrompted(true);
+    const result = await LocalAuthentication.authenticateAsync({
+      promptMessage: 'Sign in to Trade Navigator',
+      fallbackLabel: 'Use Password',
+      cancelLabel: 'Cancel',
+      disableDeviceFallback: false,
+    });
+    if (result.success) {
       router.replace('/(tabs)');
     }
-  }, [token, isLoading]);
+    // On failure/cancel, stay on landing so user can sign in with password
+  }, []);
+
+  // Auto-prompt Face ID on mount if there's a stored session
+  useEffect(() => {
+    if (!isLoading && token && biometricAvailable && !biometricPrompted) {
+      promptBiometric();
+    } else if (!isLoading && token && !biometricAvailable) {
+      router.replace('/(tabs)');
+    }
+  }, [isLoading, token, biometricAvailable, biometricPrompted, promptBiometric]);
 
   if (isLoading) {
     return (
@@ -25,7 +53,23 @@ export default function LandingScreen() {
     );
   }
 
-  // Don't flash the landing screen if already authed
+  // Stored session + biometrics → show unlock screen while prompt is active
+  if (token && biometricAvailable) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center', paddingTop: insets.top, paddingBottom: insets.bottom }]}>
+        <Text style={styles.logo}>Trade Navigator</Text>
+        <Pressable style={styles.biometricButton} onPress={promptBiometric}>
+          <Text style={styles.biometricIcon}>􀎽</Text>
+          <Text style={styles.biometricLabel}>Sign in with Face ID</Text>
+        </Pressable>
+        <Pressable onPress={() => router.push('/auth/signin')}>
+          <Text style={styles.usePasswordText}>Use Password</Text>
+        </Pressable>
+      </View>
+    );
+  }
+
+  // No session → fall through to full landing page
   if (token) return null;
 
   async function handleDemo() {
@@ -155,5 +199,26 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: colors.ink3,
     textAlign: 'center',
+  },
+  biometricButton: {
+    alignItems: 'center',
+    gap: 10,
+    marginTop: 40,
+    marginBottom: 20,
+  },
+  biometricIcon: {
+    fontSize: 52,
+    color: colors.accent,
+  },
+  biometricLabel: {
+    fontFamily: fonts.sansMedium,
+    fontSize: 16,
+    color: colors.accent,
+  },
+  usePasswordText: {
+    fontFamily: fonts.sans,
+    fontSize: 14,
+    color: colors.ink3,
+    marginTop: 8,
   },
 });

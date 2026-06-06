@@ -47,7 +47,7 @@ export default function SignUpScreen() {
         keyboardShouldPersistTaps="handled"
       >
         {/* Back */}
-        <Pressable style={styles.backButton} onPress={() => router.back()}>
+        <Pressable style={styles.backButton} onPress={() => router.canGoBack() ? router.back() : router.replace('/')}>
           <Text style={styles.backText}>← Back</Text>
         </Pressable>
 

@@ -1,9 +1,10 @@
-import { Tabs } from "expo-router";
-import React from "react";
+import { Tabs, router } from "expo-router";
+import React, { useEffect } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
+import { useAuth } from "@/context/AuthContext";
 
 function TabIcon({ label, focused }: { label: string; focused: boolean }) {
   return (
@@ -18,6 +19,13 @@ function TabIcon({ label, focused }: { label: string; focused: boolean }) {
 
 export default function TabLayout() {
   const insets = useSafeAreaInsets();
+  const { token, isLoading } = useAuth();
+
+  useEffect(() => {
+    if (!isLoading && !token) {
+      router.replace('/');
+    }
+  }, [token, isLoading]);
 
   return (
     <Tabs
@@ -84,8 +92,9 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingTop: 10,
-    paddingHorizontal: 4,
     paddingBottom: 4,
+    width: 72,
+    overflow: 'visible',
   },
   tabLabel: {
     fontFamily: fonts.serif,

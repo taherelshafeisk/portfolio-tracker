@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, Pressable, ActivityIndicator } from 'react-nati
 import { colors } from '@/constants/colors';
 import { Card } from '@/components/ui/Card';
 import { OrderSuggestion } from '@/components/home/OrderSuggestionsPreview';
+import { formatCurrency } from '@/lib/formatters';
 
 export const ORDER_TYPE_LABEL: Record<OrderSuggestion['orderType'], string> = {
   market: 'Market',
@@ -70,10 +71,10 @@ export function SuggestionCard({ suggestion: s, isUpdating, onDismiss, onExecute
             <PriceChip label="Qty" value={s.quantity.toFixed(4)} />
           )}
           {s.limitPrice != null && (
-            <PriceChip label="Limit" value={`$${s.limitPrice.toFixed(2)}`} />
+            <PriceChip label="Limit" value={formatCurrency(s.limitPrice)} />
           )}
           {s.stopPrice != null && (
-            <PriceChip label="Stop" value={`$${s.stopPrice.toFixed(2)}`} />
+            <PriceChip label="Stop" value={formatCurrency(s.stopPrice)} />
           )}
         </View>
       )}

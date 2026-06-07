@@ -13,7 +13,7 @@ import { colors } from '@/constants/colors';
 import { usePortfolio, apiGet, apiPost, apiDelete, TradeActivity } from '@/context/PortfolioContext';
 import { getAuthToken } from '@/context/AuthContext';
 import { Card } from '@/components/ui/Card';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { AnnotationModal } from '@/components/activity/AnnotationModal';
 

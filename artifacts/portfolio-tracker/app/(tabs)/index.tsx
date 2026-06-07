@@ -11,13 +11,15 @@ import { fonts } from '@/constants/fonts';
 import { usePortfolio, apiGet, apiPost, apiPatch, type Position, type Account } from '@/context/PortfolioContext';
 import { useAuth } from '@/context/AuthContext';
 import { useAIContext } from '@/hooks/useAIContext';
-import { formatCurrency } from '@/components/ui/PnlBadge';
 import {
   computeActions, reconcileActions, computeOpportunities,
   DEFAULT_CONCENTRATION_LIMIT, DEFAULT_LEVERAGE_CEILING,
   type Action, type ActionCategory, type Opportunity, type OpportunityType,
 } from '@/lib/actions';
-import { sleeveDisplayName } from '@/lib/formatters';
+import { formatCurrency, sleeveDisplayName, fmtSigned, fmtPct } from '@/lib/formatters';
+import type { PulseContribution, PulseData } from '@/lib/types/pulse';
+import { SleeveContributionBars } from '@/components/home/SleeveContributionBars';
+import { Skeleton } from '@/components/ui/Skeleton';
 
 // ─── Constants ────────────────────────────────────────────────────────────────
 
@@ -88,40 +90,7 @@ interface EnrichedFlag extends PositionFlag {
   daysOverdue: number;
 }
 
-interface PulseContribution {
-  id: number;
-  ticker: string;
-  name: string;
-  accountId: number;
-  accountName: string;
-  positionBucket: string | null;
-  qty: number;
-  avgCost: number;
-  currentPrice: number;
-  marketValue: number;
-  dayChangeDollars: number;
-  dayChangePct: number;
-  unrealizedPnlPct: number;
-}
-
-interface PulseData {
-  totalDayChange: number;
-  contributions: PulseContribution[];
-  leaders: PulseContribution[];
-  laggards: PulseContribution[];
-}
-
 // ─── Helpers ──────────────────────────────────────────────────────────────────
-
-function fmtSigned(n: number): string {
-  const abs = Math.abs(n);
-  const s = abs >= 1000 ? Math.round(abs).toLocaleString() : abs.toFixed(0);
-  return (n >= 0 ? '+$' : '−$') + s;
-}
-
-function fmtPct(n: number): string {
-  return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
-}
 
 function getGreeting(): string {
   const h = new Date().getHours();
@@ -666,144 +635,15 @@ const setupStyles = StyleSheet.create({
   chevron: { fontSize: 18, color: colors.ink3, paddingLeft: 8 },
 });
 
-function ContributionBars({
-  pulse,
-}: {
-  pulse: PulseData;
-  totalNav?: number;
-}) {
-  const sleeves = useMemo(() => {
-    const map = new Map<string, { name: string; change: number }>();
-    for (const c of pulse.contributions) {
-      const key = c.positionBucket || '';
-      const existing = map.get(key);
-      if (existing) {
-        existing.change += c.dayChangeDollars;
-      } else {
-        map.set(key, { name: sleeveDisplayName(key), change: c.dayChangeDollars });
-      }
-    }
-    return Array.from(map.values()).sort((a, b) => Math.abs(b.change) - Math.abs(a.change));
-  }, [pulse.contributions]);
 
-  const maxAbs = Math.max(...sleeves.map(s => Math.abs(s.change)), 1);
-
-  return (
-    <View style={barsStyles.card}>
-      <View style={barsStyles.header}>
-        <Text style={barsStyles.eyebrow}>CONTRIBUTION BY SLEEVE</Text>
-        <Text style={barsStyles.headerRight}>$ TODAY</Text>
-      </View>
-      {sleeves.map((sleeve, i) => {
-        const isZero = sleeve.change === 0;
-        const isPos = sleeve.change > 0;
-        const frac = Math.abs(sleeve.change) / maxAbs;
-        const barColor = isPos ? colors.positive : colors.negative;
-        const barBg = isPos ? colors.positiveLight : colors.negativeLight;
-        return (
-          <View key={sleeve.name} style={[barsStyles.row, i > 0 && barsStyles.rowBorder]}>
-            <Text style={barsStyles.sleeveLabel} numberOfLines={1}>{sleeve.name}</Text>
-            <View style={barsStyles.barTrack}>
-              {/* Left half — negative bars fill rightward from right edge */}
-              <View style={barsStyles.halfLeft}>
-                {!isPos && !isZero && (
-                  <View style={[barsStyles.barNeg, { width: `${Math.round(frac * 100)}%` as any }]} />
-                )}
-              </View>
-              <View style={barsStyles.centerTick} />
-              {/* Right half — positive bars fill leftward from left edge */}
-              <View style={barsStyles.halfRight}>
-                {isPos && (
-                  <View style={[barsStyles.barPos, { width: `${Math.round(frac * 100)}%` as any }]} />
-                )}
-              </View>
-            </View>
-            <Text style={[barsStyles.changeVal, isZero ? barsStyles.changeZero : { color: barColor }]}>
-              {isZero ? '—' : fmtSigned(sleeve.change)}
-            </Text>
-          </View>
-        );
-      })}
-    </View>
-  );
+function dedupeByTicker(items: PulseContribution[]): PulseContribution[] {
+  const seen = new Set<string>();
+  return items.filter(p => { if (seen.has(p.ticker)) return false; seen.add(p.ticker); return true; });
 }
 
-const barsStyles = StyleSheet.create({
-  card: {
-    marginHorizontal: 22,
-    marginTop: 18,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.hair2,
-    borderRadius: 2,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 4,
-  },
-  header: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 },
-  eyebrow: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: colors.ink3,
-  },
-  headerRight: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: colors.ink3,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 8,
-    gap: 8,
-  },
-  rowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
-  sleeveLabel: {
-    fontFamily: fonts.sans,
-    fontSize: 12,
-    color: colors.ink2,
-    width: 90,
-  },
-  barTrack: {
-    flex: 1,
-    height: 12,
-    flexDirection: 'row',
-    alignItems: 'center',
-  },
-  halfLeft: { flex: 1, flexDirection: 'row', justifyContent: 'flex-end' },
-  halfRight: { flex: 1, flexDirection: 'row', justifyContent: 'flex-start' },
-  centerTick: { width: 1, height: 12, backgroundColor: colors.hair2 },
-  barNeg: {
-    height: 12,
-    backgroundColor: colors.negativeLight,
-    borderLeftWidth: 2,
-    borderLeftColor: colors.negative,
-    borderRadius: 1,
-  },
-  barPos: {
-    height: 12,
-    backgroundColor: colors.positiveLight,
-    borderRightWidth: 2,
-    borderRightColor: colors.positive,
-    borderRadius: 1,
-  },
-  changeVal: {
-    fontFamily: fonts.mono,
-    fontSize: 11,
-    fontVariant: ['tabular-nums'],
-    width: 60,
-    textAlign: 'right',
-  },
-  changeZero: { color: colors.ink3 },
-});
-
 function MoversGrid({ leaders, laggards }: { leaders: PulseContribution[]; laggards: PulseContribution[] }) {
-  const top3Lead = leaders.slice(0, 3);
-  const top3Lag = laggards.slice(0, 3);
+  const top3Lead = dedupeByTicker(leaders).slice(0, 3);
+  const top3Lag = dedupeByTicker(laggards).slice(0, 3);
 
   return (
     <Pressable style={moversStyles.card} onPress={() => router.push('/(tabs)/pulse')}>
@@ -1040,7 +880,7 @@ const commitStyles = StyleSheet.create({
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { summary, accounts, positions, isLoading, error, sessionExpired, refreshAll, macroPosture, resetState } = usePortfolio();
-  const { token, signOut } = useAuth();
+  const { token, email, signOut } = useAuth();
   const isDemo = token === 'demo-token';
   const { setAIContext } = useAIContext();
   const topPad = Platform.OS === 'web' ? 20 : insets.top;
@@ -1322,25 +1162,34 @@ export default function HomeScreen() {
               <Text style={styles.dateLabel}>{getTodayLabel()}</Text>
               <Text style={styles.greeting}>
                 Good {getGreeting()},{' '}
-                <Text style={styles.greetingItalic}>Taher.</Text>
+                <Text style={styles.greetingItalic}>{email ? email.split('@')[0] : 'trader'}.</Text>
               </Text>
             </View>
           </View>
 
           <Text style={styles.navEyebrow}>NET LIQUID VALUE</Text>
-          <Text style={styles.navFigure}>
-            ${totalNav.toLocaleString('en-US', { maximumFractionDigits: 0 })}
-          </Text>
-          <View style={styles.pnlRow}>
-            <Text style={[styles.pnlNum, { color: dayChange >= 0 ? colors.positive : colors.negative }]}>
-              {fmtSigned(dayChange)}
-            </Text>
-            <Text style={[styles.pnlNum, { color: dayChange >= 0 ? colors.positive : colors.negative }]}>
-              {fmtPct(dayChangePct)}
-            </Text>
-            <Text style={styles.pnlSep}>·</Text>
-            <Text style={styles.pnlMeta}>today</Text>
-          </View>
+          {isLoading && !summary ? (
+            <>
+              <Skeleton width={180} height={32} borderRadius={4} style={{ marginTop: 4 }} />
+              <Skeleton width={120} height={14} borderRadius={4} style={{ marginTop: 10 }} />
+            </>
+          ) : (
+            <>
+              <Text style={styles.navFigure}>
+                ${totalNav.toLocaleString('en-US', { maximumFractionDigits: 0 })}
+              </Text>
+              <View style={styles.pnlRow}>
+                <Text style={[styles.pnlNum, { color: dayChange >= 0 ? colors.positive : colors.negative }]}>
+                  {fmtSigned(dayChange)}
+                </Text>
+                <Text style={[styles.pnlNum, { color: dayChange >= 0 ? colors.positive : colors.negative }]}>
+                  {fmtPct(dayChangePct)}
+                </Text>
+                <Text style={styles.pnlSep}>·</Text>
+                <Text style={styles.pnlMeta}>today</Text>
+              </View>
+            </>
+          )}
           {todaysRead.length > 0 && (
             <Text style={styles.todaysRead}>{todaysRead}</Text>
           )}
@@ -1371,7 +1220,7 @@ export default function HomeScreen() {
 
         {/* ── Contribution bars (from pulse) ── */}
         {pulseData && pulseData.contributions.length > 0 && (
-          <ContributionBars pulse={pulseData} totalNav={totalNav} />
+          <SleeveContributionBars contributions={pulseData.contributions} variant="centered" />
         )}
 
         {/* ── Movers grid ── */}

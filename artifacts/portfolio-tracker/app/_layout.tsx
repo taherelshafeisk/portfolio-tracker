@@ -106,6 +106,13 @@ function RootLayoutNav() {
           presentation: 'card',
         }}
       />
+      <Stack.Screen
+        name="sleeve-breakdown"
+        options={{
+          headerShown: false,
+          presentation: 'card',
+        }}
+      />
     </Stack>
   );
 }

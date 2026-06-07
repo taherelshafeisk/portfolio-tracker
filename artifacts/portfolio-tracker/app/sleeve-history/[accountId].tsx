@@ -9,7 +9,7 @@ import { useQuery } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiGet } from '@/context/PortfolioContext';
 import { Card } from '@/components/ui/Card';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 
 interface PositionEntry {
   positionId: number;

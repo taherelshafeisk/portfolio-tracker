@@ -13,6 +13,7 @@
     },
     "production": {
       "autoIncrement": true,
+      "channel": "production",
       "env": {
         "EXPO_PUBLIC_DOMAIN": "workspaceapi-server-production-4bee.up.railway.app"
       }

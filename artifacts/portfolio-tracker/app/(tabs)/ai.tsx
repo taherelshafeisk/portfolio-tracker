@@ -11,7 +11,19 @@ import { fonts } from '@/constants/fonts';
 import { type AIContextPayload } from '@/hooks/useAIContext';
 
 import { resolveApiBaseUrl } from '@/utils/apiUrl';
+import { getAuthToken } from '@/context/AuthContext';
+import { formatCurrency } from '@/lib/formatters';
 const BASE_URL = resolveApiBaseUrl();
+
+/** Fetch wrapper that injects the auth token */
+function authFetch(url: string, init?: RequestInit): Promise<Response> {
+  const token = getAuthToken();
+  const headers: Record<string, string> = {
+    ...(init?.headers as Record<string, string> ?? {}),
+  };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+  return fetch(url, { ...init, headers });
+}
 
 interface Message {
   id: number;
@@ -47,12 +59,12 @@ function buildContextPrefix(ctx: AIContextPayload): string | null {
     case 'position_detail': {
       const lines = [
         '[Context]', `Screen: Position — ${ctx.ticker}`, `Name: ${ctx.name}`,
-        `Sleeve: ${ctx.sleeve}`, `Qty: ${ctx.qty} shares @ avg cost $${ctx.avg_cost.toFixed(2)}`,
-        `Current price: $${ctx.current_price.toFixed(2)}`,
+        `Sleeve: ${ctx.sleeve}`, `Qty: ${ctx.qty} shares @ avg cost ${formatCurrency(ctx.avg_cost)}`,
+        `Current price: ${formatCurrency(ctx.current_price)}`,
         `P&L: ${ctx.pnl_pct >= 0 ? '+' : ''}${ctx.pnl_pct.toFixed(2)}%`,
       ];
-      if (ctx.stop != null) lines.push(`Stop: $${ctx.stop.toFixed(2)}`);
-      if (ctx.target != null) lines.push(`Target: $${ctx.target.toFixed(2)}`);
+      if (ctx.stop != null) lines.push(`Stop: ${formatCurrency(ctx.stop)}`);
+      if (ctx.target != null) lines.push(`Target: ${formatCurrency(ctx.target)}`);
       if (ctx.ips_flags.length > 0) {
         lines.push('IPS flags:');
         ctx.ips_flags.forEach(f => lines.push(`  • ${f.rule}: ${f.detail}`));
@@ -63,12 +75,12 @@ function buildContextPrefix(ctx: AIContextPayload): string | null {
     case 'trade_swings': {
       const lines = [
         '[Context]', 'Screen: Trade → Open Swings',
-        `${ctx.positions.length} positions open, $${ctx.total_allocated.toFixed(0)} of $${ctx.target.toFixed(0)} deployed`,
+        `${ctx.positions.length} positions open, ${formatCurrency(ctx.total_allocated)} of ${formatCurrency(ctx.target)} deployed`,
       ];
       return lines.join('\n');
     }
     case 'sleeve_detail': {
-      return `[Context]\nScreen: Sleeve — ${ctx.sleeve_name}\nTotal value: $${ctx.total_value.toFixed(0)}`;
+      return `[Context]\nScreen: Sleeve — ${ctx.sleeve_name}\nTotal value: ${formatCurrency(ctx.total_value)}`;
     }
     default:
       return null;
@@ -98,10 +110,12 @@ function MessageRow({ msg }: { msg: Message & { streaming?: boolean } }) {
     );
   }
 
+  const isError = msg.content.startsWith('Error:');
+
   return (
-    <View style={styles.coachRow}>
-      <Text style={styles.coachText}>
-        {msg.content}
+    <View style={[styles.coachRow, isError && styles.errorRow]}>
+      <Text style={[styles.coachText, isError && styles.errorText]}>
+        {isError ? msg.content.slice(7) : msg.content}
         {msg.streaming && <Text style={{ color: colors.gold }}>|</Text>}
       </Text>
     </View>
@@ -161,14 +175,14 @@ export default function CoachScreen() {
 
   const fetchConversations = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/api/anthropic/conversations`);
+      const res = await authFetch(`${BASE_URL}/api/anthropic/conversations`);
       const data = await res.json();
       setConversations(data);
     } catch {}
   };
 
   const createConversation = async (title: string) => {
-    const res = await fetch(`${BASE_URL}/api/anthropic/conversations`, {
+    const res = await authFetch(`${BASE_URL}/api/anthropic/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ title }),
@@ -184,7 +198,7 @@ export default function CoachScreen() {
   const loadConversation = async (conv: Conversation) => {
     setActiveConv(conv);
     try {
-      const res = await fetch(`${BASE_URL}/api/anthropic/conversations/${conv.id}`);
+      const res = await authFetch(`${BASE_URL}/api/anthropic/conversations/${conv.id}`);
       const data = await res.json();
       setMessages(data.messages || []);
     } catch {}
@@ -192,12 +206,12 @@ export default function CoachScreen() {
 
   const fetchIpsProgress = async () => {
     try {
-      const res = await fetch(`${BASE_URL}/api/ips/builder/session`);
+      const res = await authFetch(`${BASE_URL}/api/ips/builder/session`);
       const data = await res.json();
       setIpsProgress({ goalsComplete: data.goalsComplete, ipsComplete: data.ipsComplete, covered: data.covered, total: data.total });
       if (data.covered > 0 && !data.ipsComplete) {
         try {
-          const pr = await fetch(`${BASE_URL}/api/ips/proposals/pending-items`);
+          const pr = await authFetch(`${BASE_URL}/api/ips/proposals/pending-items`);
           const pitems = await pr.json();
           setPendingProposalCount(Array.isArray(pitems) ? pitems.length : 0);
         } catch {}
@@ -211,7 +225,7 @@ export default function CoachScreen() {
     setMessages([]);
     setStreaming(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/ips/builder/next`, {
+      const res = await authFetch(`${BASE_URL}/api/ips/builder/next`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({}),
@@ -235,7 +249,7 @@ export default function CoachScreen() {
     setMessages(prev => [...prev, userMsg]);
     setStreaming(true);
     try {
-      const res = await fetch(`${BASE_URL}/api/ips/builder/next`, {
+      const res = await authFetch(`${BASE_URL}/api/ips/builder/next`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ userMessage: content }),
@@ -272,37 +286,45 @@ export default function CoachScreen() {
         return;
       }
 
-      const response = await fetch(`${BASE_URL}/api/anthropic/conversations/${conv.id}/messages`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ content: fullContent }),
-      });
+      // Use XHR for SSE — React Native's fetch doesn't support response.body streaming
+      await new Promise<void>((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${BASE_URL}/api/anthropic/conversations/${conv!.id}/messages`);
+        xhr.setRequestHeader('Content-Type', 'application/json');
+        const token = getAuthToken();
+        if (token) xhr.setRequestHeader('Authorization', `Bearer ${token}`);
 
-      if (!response.body) throw new Error('No stream');
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-      let streamBuffer = '';
-      let serverError: string | null = null;
+        let streamBuffer = '';
+        let lastIndex = 0;
+        let serverError: string | null = null;
 
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        const chunk = decoder.decode(value, { stream: true });
-        for (const line of chunk.split('\n')) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.slice(6));
-              if (data.error) { serverError = data.error; }
-              else if (data.content) { streamBuffer += data.content; setStreamingContent(streamBuffer); }
-              else if (data.done) {
-                setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'assistant', content: streamBuffer, createdAt: new Date().toISOString() }]);
-                setStreamingContent('');
+        xhr.onreadystatechange = () => {
+          if (xhr.readyState >= 3 && xhr.responseText) {
+            const newText = xhr.responseText.slice(lastIndex);
+            lastIndex = xhr.responseText.length;
+            for (const line of newText.split('\n')) {
+              if (line.startsWith('data: ')) {
+                try {
+                  const data = JSON.parse(line.slice(6));
+                  if (data.error) { serverError = data.error; }
+                  else if (data.content) { streamBuffer += data.content; setStreamingContent(streamBuffer); }
+                  else if (data.done) {
+                    setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'assistant', content: streamBuffer, createdAt: new Date().toISOString() }]);
+                    setStreamingContent('');
+                  }
+                } catch {}
               }
-            } catch {}
+            }
           }
-        }
-      }
-      if (serverError) throw new Error(serverError);
+          if (xhr.readyState === 4) {
+            if (serverError) reject(new Error(serverError));
+            else if (xhr.status >= 400) reject(new Error(`Server error (${xhr.status})`));
+            else resolve();
+          }
+        };
+        xhr.onerror = () => reject(new Error('Network error'));
+        xhr.send(JSON.stringify({ content: fullContent }));
+      });
     } catch (err: any) {
       setMessages(prev => [...prev, { id: msgIdCounter.current++, role: 'assistant', content: `Error: ${err?.message || 'Unknown error'}`, createdAt: new Date().toISOString() }]);
     } finally {
@@ -409,7 +431,7 @@ export default function CoachScreen() {
         )}
 
         {/* Input */}
-        <View style={[styles.inputArea, { paddingBottom: Platform.OS === 'web' ? bottomPad + 8 : insets.bottom + 60 }]}>
+        <View style={[styles.inputArea, { paddingBottom: Platform.OS === 'web' ? bottomPad + 8 : insets.bottom + 8 }]}>
           {streaming && (
             <View style={styles.thinkingRow}>
               <ActivityIndicator size="small" color={colors.ink3} />
@@ -568,6 +590,18 @@ const styles = StyleSheet.create({
     fontSize: 13.5,
     color: colors.ink,
     lineHeight: 22,
+  },
+  errorRow: {
+    backgroundColor: 'rgba(220, 53, 69, 0.08)',
+    borderRadius: 8,
+    padding: 10,
+    borderLeftWidth: 3,
+    borderLeftColor: colors.negative,
+  },
+  errorText: {
+    color: colors.negative,
+    fontFamily: fonts.sans,
+    fontStyle: 'normal',
   },
 
   userRow: { alignItems: 'flex-end', marginBottom: 4 },

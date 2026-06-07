@@ -9,7 +9,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiGet, apiPatch } from '@/context/PortfolioContext';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 import { Card } from '@/components/ui/Card';
 import { TriggerLevelsCard } from '@/components/position/TriggerLevelsCard';
 import { CrossAccountExposureCard } from '@/components/position/CrossAccountExposureCard';

@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '@/constants/colors';
 import { Card } from '@/components/ui/Card';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 
 export interface ExposureEntry {
   accountId: number;

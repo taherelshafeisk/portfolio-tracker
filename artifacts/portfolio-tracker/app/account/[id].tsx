@@ -17,7 +17,8 @@ import { getAuthToken } from '@/context/AuthContext';
 import { useAIContext } from '@/hooks/useAIContext';
 import { computeActions, type Action } from '@/lib/actions';
 import { Card } from '@/components/ui/Card';
-import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
+import { PnlBadge } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 import { AccountTypeBadge } from '@/components/ui/AccountTypeBadge';
 import { Skeleton } from '@/components/ui/Skeleton';
 import { StockLogo } from '@/components/ui/StockLogo';
@@ -1069,8 +1070,8 @@ export default function AccountDetailScreen() {
                 </View>
                 <View style={styles.posStats}>
                   <View style={styles.posStat}><Text style={styles.posStatLabel}>Qty</Text><Text style={styles.posStatVal}>{pos.quantity}</Text></View>
-                  <View style={styles.posStat}><Text style={styles.posStatLabel}>Avg Cost</Text><Text style={styles.posStatVal}>${pos.avgCost.toFixed(2)}</Text></View>
-                  <View style={styles.posStat}><Text style={styles.posStatLabel}>Last</Text><Text style={styles.posStatVal}>${pos.currentPrice.toFixed(2)}</Text></View>
+                  <View style={styles.posStat}><Text style={styles.posStatLabel}>Avg Cost</Text><Text style={styles.posStatVal}>{formatCurrency(pos.avgCost)}</Text></View>
+                  <View style={styles.posStat}><Text style={styles.posStatLabel}>Last</Text><Text style={styles.posStatVal}>{formatCurrency(pos.currentPrice)}</Text></View>
                   <View style={styles.posStat}>
                     <Text style={styles.posStatLabel}>P&L</Text>
                     <Text style={[styles.posStatVal, { color: isOverallPos ? colors.positive : colors.negative }]}>
@@ -1612,9 +1613,9 @@ export default function AccountDetailScreen() {
             <TextInput
               style={styles.input}
               value={cashInput}
-              onChangeText={setCashInput}
-              keyboardType="decimal-pad"
-              placeholder="0.00"
+              onChangeText={t => setCashInput(t.replace(/[^0-9.\-]/g, ''))}
+              keyboardType="numbers-and-punctuation"
+              placeholder="0.00 (negative for margin)"
               placeholderTextColor={colors.textMuted}
               autoFocus
             />

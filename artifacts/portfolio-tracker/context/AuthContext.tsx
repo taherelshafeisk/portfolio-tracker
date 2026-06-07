@@ -5,6 +5,7 @@ import { queryClient } from '@/lib/queryClient';
 
 const TOKEN_KEY = '@auth_token';
 const REFRESH_TOKEN_KEY = '@refresh_token';
+const EMAIL_KEY = '@auth_email';
 
 // Must stay in sync with DEMO_TOKEN in artifacts/api-server/src/lib/constants.ts.
 const DEMO_TOKEN = 'demo-token';
@@ -65,6 +66,7 @@ export async function tryRefreshToken(): Promise<boolean> {
 
 interface AuthContextValue {
   token: string | null;
+  email: string | null;
   isLoading: boolean;
   signIn: (email: string, password: string) => Promise<void>;
   signUp: (email: string, password: string) => Promise<void>;
@@ -76,13 +78,15 @@ const AuthContext = createContext<AuthContextValue | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [token, setToken] = useState<string | null>(null);
+  const [email, setEmail] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
   useEffect(() => {
     Promise.all([
       AsyncStorage.getItem(TOKEN_KEY),
       AsyncStorage.getItem(REFRESH_TOKEN_KEY),
-    ]).then(([storedAccess, storedRefresh]) => {
+      AsyncStorage.getItem(EMAIL_KEY),
+    ]).then(([storedAccess, storedRefresh, storedEmail]) => {
       if (storedAccess) {
         _token = storedAccess;
         setToken(storedAccess);
@@ -90,6 +94,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (storedRefresh) {
         _refreshToken = storedRefresh;
       }
+      if (storedEmail) setEmail(storedEmail);
       setIsLoading(false);
     });
   }, []);
@@ -106,6 +111,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
     const data = await res.json() as { accessToken: string; refreshToken?: string };
     await persistTokens(data.accessToken, data.refreshToken ?? null);
+    await AsyncStorage.setItem(EMAIL_KEY, email);
+    setEmail(email);
     setToken(data.accessToken);
   }, []);
 
@@ -127,6 +134,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!signInRes.ok) throw new Error('Account created but sign-in failed. Please sign in manually.');
     const data = await signInRes.json() as { accessToken: string; refreshToken?: string };
     await persistTokens(data.accessToken, data.refreshToken ?? null);
+    await AsyncStorage.setItem(EMAIL_KEY, email);
+    setEmail(email);
     setToken(data.accessToken);
   }, []);
 
@@ -145,11 +154,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Clear all cached query data so the next user starts fresh
     queryClient.clear();
     await persistTokens(null, null);
+    await AsyncStorage.removeItem(EMAIL_KEY);
+    setEmail(null);
     setToken(null);
   }, []);
 
   return (
-    <AuthContext.Provider value={{ token, isLoading, signIn, signUp, tryDemo, signOut }}>
+    <AuthContext.Provider value={{ token, email, isLoading, signIn, signUp, tryDemo, signOut }}>
       {children}
     </AuthContext.Provider>
   );

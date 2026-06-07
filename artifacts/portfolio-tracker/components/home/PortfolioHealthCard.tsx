@@ -2,7 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '@/constants/colors';
 import { Card } from '@/components/ui/Card';
-import { PnlBadge, formatCurrency } from '@/components/ui/PnlBadge';
+import { PnlBadge } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 import { Skeleton } from '@/components/ui/Skeleton';
 
 export type HealthSignal = 'green' | 'amber' | 'red';

@@ -1,14 +1,14 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Pressable,
-  Platform, Alert, ActivityIndicator,
+  Platform, ActivityIndicator,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
 import { usePortfolio, apiGet, type Position } from '@/context/PortfolioContext';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 import { useAIContext } from '@/hooks/useAIContext';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -246,7 +246,7 @@ function OpenSwingsSection() {
 
       <Pressable
         style={styles.newTradeBtn}
-        onPress={() => Alert.alert('Coming soon', 'New Swing Trade entry coming soon.')}
+        onPress={() => router.push({ pathname: '/(tabs)/ai', params: { context: 'I want to add a new swing trade. Help me evaluate a potential position.' } })}
       >
         <Text style={styles.newTradeBtnText}>+ New Swing Trade</Text>
       </Pressable>
@@ -437,7 +437,7 @@ function ScreenerRow({ result: r, isFirst, onPress }: { result: MinerviniResult;
         </Text>
       </View>
       <View style={styles.screenerRowRight}>
-        <Text style={styles.screenerPrice}>${r.price.toFixed(2)}</Text>
+        <Text style={styles.screenerPrice}>{formatCurrency(r.price)}</Text>
         <View style={styles.emaChips}>
           {r.criteria.priceAboveEma50 && <View style={[styles.chip, { borderColor: colors.positive }]}><Text style={[styles.chipText, { color: colors.positive }]}>50d↑</Text></View>}
           {r.criteria.priceAbove200 && <View style={[styles.chip, { borderColor: colors.positive }]}><Text style={[styles.chipText, { color: colors.positive }]}>200d↑</Text></View>}

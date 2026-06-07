@@ -2,6 +2,7 @@ import { Tabs, router } from "expo-router";
 import React, { useEffect } from "react";
 import { Platform, StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
+import * as Haptics from "expo-haptics";
 import { colors } from "@/constants/colors";
 import { fonts } from "@/constants/fonts";
 import { useAuth } from "@/context/AuthContext";
@@ -41,6 +42,11 @@ export default function TabLayout() {
           ...(Platform.OS === 'web' ? { height: 64 } : {}),
         },
         tabBarLabelStyle: { display: 'none' },
+      }}
+      screenListeners={{
+        tabPress: () => {
+          Haptics.selectionAsync();
+        },
       }}
     >
       <Tabs.Screen

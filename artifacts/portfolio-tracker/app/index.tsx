@@ -69,8 +69,14 @@ export default function LandingScreen() {
     );
   }
 
-  // No session → fall through to full landing page
-  if (token) return null;
+  // Token exists but biometrics unavailable was handled above; shouldn't reach here
+  if (token) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator color={colors.accent} />
+      </View>
+    );
+  }
 
   async function handleDemo() {
     await tryDemo();

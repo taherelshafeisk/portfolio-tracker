@@ -11,7 +11,7 @@ import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
 import { usePortfolio, apiPost, apiPut, apiDelete, Account } from '@/context/PortfolioContext';
 import { useAuth } from '@/context/AuthContext';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 
 const DEFAULT_CONCENTRATION_LIMIT = 0.20;
 const DEFAULT_LEVERAGE_CEILING = 1.50;

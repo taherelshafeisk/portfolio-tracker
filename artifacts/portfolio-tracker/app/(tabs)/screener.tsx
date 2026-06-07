@@ -10,6 +10,7 @@ import { router } from 'expo-router';
 import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
 import { apiGet } from '@/context/PortfolioContext';
+import { fmtPct, formatCurrency } from '@/lib/formatters';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -42,10 +43,6 @@ function fmtVol(v: number): string {
   if (v >= 1_000_000) return `${(v / 1_000_000).toFixed(1)}M`;
   if (v >= 1_000) return `${(v / 1_000).toFixed(0)}K`;
   return String(v);
-}
-
-function fmtPct(n: number): string {
-  return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
 }
 
 // ─── Score bar ────────────────────────────────────────────────────────────────
@@ -101,7 +98,7 @@ function StockCard({ item }: { item: ScreenerResult }) {
           <Text style={s.name} numberOfLines={1}>{item.name}</Text>
         </View>
         <View style={s.priceBlock}>
-          <Text style={s.price}>${item.price.toFixed(2)}</Text>
+          <Text style={s.price}>{formatCurrency(item.price)}</Text>
           <Text style={[s.change, { color: up ? colors.positive : colors.negative }]}>
             {fmtPct(item.changePercent)}
           </Text>
@@ -134,9 +131,9 @@ function StockCard({ item }: { item: ScreenerResult }) {
       {/* SMA summary (expanded only) */}
       {expanded && (
         <View style={s.smaRow}>
-          {item.sma50 != null && <Text style={s.smaStat}>50 SMA ${item.sma50.toFixed(2)}</Text>}
-          {item.sma150 != null && <Text style={s.smaStat}>150 SMA ${item.sma150.toFixed(2)}</Text>}
-          {item.sma200 != null && <Text style={s.smaStat}>200 SMA ${item.sma200.toFixed(2)}</Text>}
+          {item.sma50 != null && <Text style={s.smaStat}>50 SMA {formatCurrency(item.sma50)}</Text>}
+          {item.sma150 != null && <Text style={s.smaStat}>150 SMA {formatCurrency(item.sma150)}</Text>}
+          {item.sma200 != null && <Text style={s.smaStat}>200 SMA {formatCurrency(item.sma200)}</Text>}
         </View>
       )}
     </Pressable>

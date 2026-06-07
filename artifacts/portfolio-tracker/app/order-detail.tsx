@@ -9,7 +9,7 @@ import { Feather } from '@expo/vector-icons';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiGet, apiPatch } from '@/context/PortfolioContext';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 import { OrderSuggestion } from '@/components/home/OrderSuggestionsPreview';
 import { ORDER_TYPE_LABEL, SIDE_COLOR } from '@/components/home/SuggestionCard';
 

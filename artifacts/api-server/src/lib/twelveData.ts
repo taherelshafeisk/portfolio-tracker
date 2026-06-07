@@ -47,6 +47,7 @@ function chunkArray<T>(arr: T[], size: number): T[][] {
 
 async function tdFetch(path: string): Promise<any> {
   const apiKey = process.env.TWELVE_DATA_API_KEY;
+  if (!apiKey) throw new Error("TWELVE_DATA_API_KEY is not configured");
   const sep = path.includes("?") ? "&" : "?";
   const url = `${BASE_URL}${path}${sep}apikey=${apiKey}`;
   const controller = new AbortController();
@@ -63,6 +64,7 @@ async function tdFetch(path: string): Promise<any> {
 // Primary: POST /complex_data — 1 call for all indicators + 1 GET for prices
 async function fetchComplexData(symbols: string[]): Promise<Map<string, StockIndicators>> {
   const apiKey = process.env.TWELVE_DATA_API_KEY;
+  if (!apiKey) throw new Error("TWELVE_DATA_API_KEY is not configured");
   const url = `${BASE_URL}/complex_data?apikey=${apiKey}`;
 
   const body = {

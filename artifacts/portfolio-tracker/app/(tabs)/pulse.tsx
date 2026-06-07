@@ -9,144 +9,10 @@ import { useQuery } from '@tanstack/react-query';
 import { colors } from '@/constants/colors';
 import { fonts } from '@/constants/fonts';
 import { apiGet } from '@/context/PortfolioContext';
-import { sleeveDisplayName } from '@/lib/formatters';
+import { sleeveDisplayName, fmtSigned, fmtPct } from '@/lib/formatters';
+import type { PulseContribution, PulseData } from '@/lib/types/pulse';
+import { SleeveContributionBars } from '@/components/home/SleeveContributionBars';
 
-// ─── Types ────────────────────────────────────────────────────────────────────
-
-interface PositionContribution {
-  id: number;
-  ticker: string;
-  name: string;
-  accountId: number;
-  accountName: string;
-  positionBucket: string | null;
-  qty: number;
-  currentPrice: number;
-  marketValue: number;
-  dayChangeDollars: number;
-  dayChangePct: number;
-  unrealizedPnlPct: number;
-}
-
-interface PulseData {
-  totalDayChange: number;
-  contributions: PositionContribution[];
-  leaders: PositionContribution[];
-  laggards: PositionContribution[];
-}
-
-// ─── Formatters ───────────────────────────────────────────────────────────────
-
-function fmtSigned(n: number): string {
-  const abs = Math.abs(n);
-  const s = abs >= 1000 ? Math.round(abs).toLocaleString() : abs.toFixed(0);
-  return (n >= 0 ? '+$' : '−$') + s;
-}
-
-function fmtPct(n: number): string {
-  return (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
-}
-
-// ─── Sleeve bidir bars ────────────────────────────────────────────────────────
-
-function SleeveBidirBars({ contributions }: { contributions: PositionContribution[] }) {
-  const sleeves = useMemo(() => {
-    const map = new Map<string, { dayChange: number; nav: number }>();
-    for (const c of contributions) {
-      const key = c.positionBucket || '';
-      const existing = map.get(key);
-      if (existing) {
-        existing.dayChange += c.dayChangeDollars;
-        existing.nav += c.marketValue;
-      } else {
-        map.set(key, { dayChange: c.dayChangeDollars, nav: c.marketValue });
-      }
-    }
-    return Array.from(map.entries())
-      .map(([name, { dayChange, nav }]) => ({
-        name: sleeveDisplayName(name),
-        dayChange,
-        dayPct: nav > 0 ? (dayChange / nav) * 100 : 0,
-      }))
-      .sort((a, b) => b.dayChange - a.dayChange);
-  }, [contributions]);
-
-  if (sleeves.length === 0) return null;
-  const maxAbs = Math.max(...sleeves.map(s => Math.abs(s.dayChange)), 1);
-
-  return (
-    <View style={bidirStyles.card}>
-      <Text style={bidirStyles.eyebrow}>BY SLEEVE</Text>
-      {sleeves.map((s, i) => {
-        const isPos = s.dayChange >= 0;
-        const frac = Math.abs(s.dayChange) / maxAbs;
-        const barColor = isPos ? colors.positive : colors.negative;
-        const barBg = isPos ? colors.positiveLight : colors.negativeLight;
-        return (
-          <View key={s.name} style={[bidirStyles.row, i > 0 && bidirStyles.rowBorder]}>
-            <Text style={bidirStyles.label} numberOfLines={1}>{s.name}</Text>
-            <View style={bidirStyles.track}>
-              <View
-                style={[
-                  bidirStyles.bar,
-                  {
-                    width: `${Math.round(frac * 100)}%`,
-                    backgroundColor: barBg,
-                    borderRightWidth: isPos ? 2 : 0,
-                    borderLeftWidth: isPos ? 0 : 2,
-                    borderColor: barColor,
-                  },
-                ]}
-              />
-            </View>
-            <Text style={[bidirStyles.pct, { color: barColor }]}>{fmtPct(s.dayPct)}</Text>
-            <Text style={[bidirStyles.dollar, { color: barColor }]}>{fmtSigned(s.dayChange)}</Text>
-          </View>
-        );
-      })}
-    </View>
-  );
-}
-
-const bidirStyles = StyleSheet.create({
-  card: {
-    marginHorizontal: 22,
-    marginTop: 18,
-    backgroundColor: colors.card,
-    borderWidth: 1,
-    borderColor: colors.hair2,
-    borderRadius: 2,
-    paddingHorizontal: 14,
-    paddingTop: 12,
-    paddingBottom: 4,
-  },
-  eyebrow: {
-    fontFamily: fonts.mono,
-    fontSize: 9,
-    letterSpacing: 2,
-    textTransform: 'uppercase',
-    color: colors.ink3,
-    marginBottom: 8,
-  },
-  row: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingVertical: 9,
-    gap: 8,
-  },
-  rowBorder: { borderTopWidth: 1, borderTopColor: colors.hair },
-  label: { fontFamily: fonts.sans, fontSize: 12, color: colors.ink2, width: 90 },
-  track: {
-    flex: 1,
-    height: 12,
-    backgroundColor: colors.bgInset,
-    borderRadius: 1,
-    overflow: 'hidden',
-  },
-  bar: { height: '100%', borderRadius: 1 },
-  pct: { fontFamily: fonts.mono, fontSize: 11, fontVariant: ['tabular-nums'], width: 58, textAlign: 'right' },
-  dollar: { fontFamily: fonts.mono, fontSize: 10, fontVariant: ['tabular-nums'], width: 60, textAlign: 'right', color: colors.ink3 },
-});
 
 // ─── Pulse list item ──────────────────────────────────────────────────────────
 
@@ -156,7 +22,7 @@ function PulseListItem({
   isPositive,
   isDuplicate = false,
 }: {
-  item: PositionContribution;
+  item: PulseContribution;
   maxAbs: number;
   isPositive: boolean;
   isDuplicate?: boolean;
@@ -334,24 +200,39 @@ export default function PulseScreen() {
           <>
             {/* Narrative headline */}
             <View style={styles.narrative}>
-              <Text style={styles.narrativeText}>
-                {totalDayChange >= 0 ? 'Up ' : 'Down '}
-                <Text style={{ color: totalDayChange >= 0 ? colors.positive : colors.negative }}>
-                  {fmtSigned(totalDayChange)}
-                </Text>
-                {leaders[0] && laggards[0]
-                  ? ` · ${leaders[0].ticker} carrying, ${laggards[0].ticker} slipping.`
-                  : '.'}
-              </Text>
-              <Text style={styles.narrativeSub}>
-                {greenCount} green · {redCount} red
-                {leaders[0] ? ` · ${leaders[0].ticker} ${fmtSigned(leaders[0].dayChangeDollars)} top contributor` : ''}
-              </Text>
+              {timeframe === 'today' ? (
+                <>
+                  <Text style={styles.narrativeText}>
+                    {totalDayChange >= 0 ? 'Up ' : 'Down '}
+                    <Text style={{ color: totalDayChange >= 0 ? colors.positive : colors.negative }}>
+                      {fmtSigned(totalDayChange)}
+                    </Text>
+                    {leaders[0] && laggards[0]
+                      ? ` · ${leaders[0].ticker} carrying, ${laggards[0].ticker} slipping.`
+                      : '.'}
+                  </Text>
+                  <Text style={styles.narrativeSub}>
+                    {greenCount} green · {redCount} red
+                    {leaders[0] ? ` · ${leaders[0].ticker} ${fmtSigned(leaders[0].dayChangeDollars)} top contributor` : ''}
+                  </Text>
+                </>
+              ) : (
+                <>
+                  <Text style={styles.narrativeText}>
+                    {entryLeaders[0] && entryLaggards[0]
+                      ? `${entryLeaders[0].ticker} leads at +${entryLeaders[0].unrealizedPnlPct.toFixed(1)}%, ${entryLaggards[0].ticker} lags at ${entryLaggards[0].unrealizedPnlPct.toFixed(1)}%.`
+                      : 'Cumulative returns since entry.'}
+                  </Text>
+                  <Text style={styles.narrativeSub}>
+                    {contributions.filter(c => c.unrealizedPnlPct > 0).length} winning · {contributions.filter(c => c.unrealizedPnlPct < 0).length} losing
+                  </Text>
+                </>
+              )}
             </View>
 
             {/* Sleeve bidir bars */}
             {contributions.length > 0 && (
-              <SleeveBidirBars contributions={contributions} />
+              <SleeveContributionBars contributions={contributions} variant="left" />
             )}
 
             {/* Leaders */}

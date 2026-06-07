@@ -7,7 +7,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Feather } from '@expo/vector-icons';
 import { colors } from '@/constants/colors';
 import { usePortfolio, apiGet, TradeActivity, Position } from '@/context/PortfolioContext';
-import { formatPnl } from '@/components/ui/PnlBadge';
+import { formatPnl } from '@/lib/formatters';
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 

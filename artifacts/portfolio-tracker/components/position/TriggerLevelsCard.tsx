@@ -2,7 +2,7 @@ import React from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import { colors } from '@/constants/colors';
 import { Card } from '@/components/ui/Card';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency, fmtPct } from '@/lib/formatters';
 
 interface TriggerRow {
   label: string;
@@ -25,9 +25,6 @@ function rowSeverityColor(row: TriggerRow): string {
   return colors.textSecondary;
 }
 
-function fmtPct(n: number, decimals = 1): string {
-  return `${n >= 0 ? '' : ''}${n.toFixed(decimals)}%`;
-}
 
 interface Props {
   /** position.marketValue / accountNAV × 100 */
@@ -100,16 +97,16 @@ export function TriggerLevelsCard({
             <Text style={styles.rowLabel}>{row.label}</Text>
             <View style={styles.rowRight}>
               <Text style={[styles.currentValue, { color: currentColor }]}>
-                {fmtPct(row.currentPct)}
+                {fmtPct(row.currentPct, 1, false)}
               </Text>
               <View style={styles.thresholds}>
                 <View style={styles.threshold}>
                   <View style={[styles.thresholdDot, { backgroundColor: '#F5A623' }]} />
-                  <Text style={styles.thresholdText}>{fmtPct(row.warnPct, 0)}</Text>
+                  <Text style={styles.thresholdText}>{fmtPct(row.warnPct, 0, false)}</Text>
                 </View>
                 <View style={styles.threshold}>
                   <View style={[styles.thresholdDot, { backgroundColor: colors.negative }]} />
-                  <Text style={styles.thresholdText}>{fmtPct(row.critPct, 0)}</Text>
+                  <Text style={styles.thresholdText}>{fmtPct(row.critPct, 0, false)}</Text>
                 </View>
               </View>
             </View>

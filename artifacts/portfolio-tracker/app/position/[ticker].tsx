@@ -19,7 +19,7 @@ import { fonts } from '@/constants/fonts';
 import { usePortfolio, apiPut, apiGet, apiPost, apiDelete, apiPatch } from '@/context/PortfolioContext';
 import { useAIContext } from '@/hooks/useAIContext';
 import { Card } from '@/components/ui/Card';
-import { formatCurrency } from '@/components/ui/PnlBadge';
+import { formatCurrency } from '@/lib/formatters';
 import { computeActions, DEFAULT_CONCENTRATION_LIMIT } from '@/lib/actions';
 import { suggestLevels } from '@/lib/suggestLevels';
 
@@ -671,7 +671,7 @@ export default function PositionDetailScreen() {
           <StatCell label="Mkt Value" value={formatCurrency(position.marketValue)} />
           <StatCell
             label="Unrealized P&L"
-            value={`${position.unrealizedPnl >= 0 ? '+' : ''}${formatCurrency(position.unrealizedPnl)}`}
+            value={`${position.unrealizedPnl >= 0 ? '+' : ''}${formatCurrency(position.unrealizedPnl)}  (${position.unrealizedPnlPct >= 0 ? '+' : ''}${position.unrealizedPnlPct.toFixed(1)}%)`}
             valueColor={position.unrealizedPnl >= 0 ? colors.positive : colors.negative}
           />
           <StatCell
@@ -1023,7 +1023,7 @@ export default function PositionDetailScreen() {
               style={styles.alertPriceInput}
               value={alertPrice}
               onChangeText={setAlertPrice}
-              placeholder={`$${currentPrice.toFixed(2)}`}
+              placeholder={formatCurrency(currentPrice)}
               placeholderTextColor={colors.textMuted}
               keyboardType="decimal-pad"
             />

@@ -73,6 +73,7 @@ interface ApiAlert {
   fingerprint: string;
   status: string;
   dismissReason: string | null;
+  acknowledgedAt?: string | null;
 }
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
@@ -402,11 +403,19 @@ export function reconcileActions(
     })
     .filter(action => {
       if (action.dbIds && action.dbIds.length > 0) {
-        const allAcknowledged = action.fingerprints.every(fp => {
+        const allDismissed = action.fingerprints.every(fp => {
           const a = byFingerprint.get(fp);
-          return a && (a.status === 'acknowledged' || a.status === 'resolved');
+          if (!a) return false;
+          if (a.status === 'resolved') return true;
+          if (a.status !== 'acknowledged') return false;
+          // "Reviewed and accepted" / "No longer relevant" → hide immediately
+          if (a.dismissReason !== 'Will act within 5 days') return true;
+          // "Will act within 5 days" → only hide after the 5-day grace period
+          if (!a.acknowledgedAt) return true;
+          const FIVE_DAYS = 5 * 24 * 60 * 60 * 1000;
+          return Date.now() - new Date(a.acknowledgedAt).getTime() >= FIVE_DAYS;
         });
-        if (allAcknowledged) return false;
+        if (allDismissed) return false;
       }
       return true;
     });

@@ -1,7 +1,7 @@
 import React, { useState, useCallback, useMemo } from 'react';
 import {
   View, Text, StyleSheet, ScrollView, Platform, Pressable,
-  ActivityIndicator, TextInput, Dimensions,
+  ActivityIndicator, TextInput, Dimensions, KeyboardAvoidingView,
 } from 'react-native';
 import { useLocalSearchParams, router, useFocusEffect } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -1123,13 +1123,20 @@ export default function PositionDetailScreen() {
         </View>
       </View>
 
-      <ScrollView
-        contentContainerStyle={[styles.scroll, { paddingBottom: Platform.OS === 'web' ? 40 : insets.bottom + 24 }]}
-        showsVerticalScrollIndicator={false}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 44 : 0}
+        style={{ flex: 1 }}
       >
-        {priceCard}
-        {activeTab === 'overview' ? overviewContent : historyContent}
-      </ScrollView>
+        <ScrollView
+          contentContainerStyle={[styles.scroll, { paddingBottom: Platform.OS === 'web' ? 40 : insets.bottom + 100 }]}
+          showsVerticalScrollIndicator={false}
+          keyboardShouldPersistTaps="handled"
+        >
+          {priceCard}
+          {activeTab === 'overview' ? overviewContent : historyContent}
+        </ScrollView>
+      </KeyboardAvoidingView>
     </View>
   );
 }
